@@ -140,3 +140,18 @@ CREATE TABLE IF NOT EXISTS skill_gap_analyses (
     punteggio_prontezza INTEGER CHECK(punteggio_prontezza BETWEEN 0 AND 100),
     creato_il TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Aggiunta del riferimento al docente nel corso
+ALTER TABLE courses ADD COLUMN docente_id INTEGER REFERENCES users(id);
+
+-- === MATERIALI DIDATTICI (Fonte di verità per il RAG) ===
+CREATE TABLE IF NOT EXISTS materials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    course_id INTEGER REFERENCES courses(id),
+    docente_id INTEGER REFERENCES users(id),
+    titolo_file TEXT NOT NULL,
+    tipo_file TEXT CHECK(tipo_file IN ('PDF', 'Video', 'Audio', 'Slide')),
+    s3_key TEXT NOT NULL,                -- Percorso del file su Amazon S3
+    testo_estratto TEXT,                 -- Testo parsato via PyPDF2 per il RAG
+    caricato_il TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
