@@ -9,7 +9,7 @@
 
 Questo repository è il **punto di partenza** per sviluppare la piattaforma **LearnAI**: un sistema di e-learning che sfrutta l'AI (Claude su AWS Bedrock) per personalizzare la formazione dei dipendenti.
 
-Ogni gruppo riceve una copia di questo starter kit e sviluppa **uno dei 7 moduli** descritti più in basso. L'SDK incluso (`platform_sdk/`) fornisce funzioni pronte all'uso per interagire con l'AI e il database, così potete concentrarvi sulla logica del vostro modulo senza dovervi preoccupare dell'infrastruttura.
+Ogni gruppo riceve una copia di questo starter kit e sviluppa **i moduli a scelta, possono sviluppare tutti o solo alcuni dei moduli** descritti più in basso. L'SDK incluso (`platform_sdk/`) fornisce funzioni pronte all'uso per interagire con l'AI e il database, così potete concentrarvi sulla logica del vostro modulo senza dovervi preoccupare dell'infrastruttura.
 
 **Non serve esperienza di programmazione**: le funzioni dell'SDK sono pensate per essere semplici e intuitive.
 
@@ -111,7 +111,7 @@ learnai-modulo-XX/
 
 ## 📚 I 7 Moduli della piattaforma
 
-Ogni gruppo sviluppa **un modulo**. Tutti i moduli condividono lo stesso database e lo stesso SDK.
+Tutti i moduli condividono lo stesso database e lo stesso SDK.
 
 ### Modulo 1 — 📝 Profilazione e Assessment Iniziale
 
