@@ -1,0 +1,237 @@
+{
+  "_descrizione": "Dati di esempio per la piattaforma LearnAI. Usateli come riferimento per capire le strutture dati e per testare il vostro modulo.",
+
+  "cv_esempio": [
+    {
+      "nome_file": "cv_marco_bianchi.txt",
+      "testo": "Marco Bianchi\n26 anni — Napoli\nEmail: marco.bianchi@email.it\n\nFORMAZIONE\n- Laurea Magistrale in Economia e Management, Università Federico II di Napoli (2023)\n- Certificazione Google Data Analytics (2024)\n\nESPERIENZA LAVORATIVA\n- Junior Analyst presso Deloitte (gen 2024 - presente): analisi dati con Excel e SQL, reportistica per clienti del settore retail, supporto a progetti di data visualization\n- Stage presso PwC (mar 2023 - dic 2023): supporto audit, analisi documenti, preparazione presentazioni\n\nCOMPETENZE TECNICHE\n- Excel: livello avanzato (pivot, CERCA.VERT, Power Query)\n- SQL: livello base (SELECT, JOIN, GROUP BY)\n- Python: livello principiante (corso online completato)\n- Power BI: livello base\n\nLINGUE\n- Italiano: madrelingua\n- Inglese: B2 (IELTS 6.5)\n\nINTERESSI\n- Data Science, Machine Learning, Business Intelligence\n- Appassionato di data visualization e storytelling con i dati"
+    },
+    {
+      "nome_file": "cv_giulia_verdi.txt",
+      "testo": "Giulia Verdi\n28 anni — Milano\nEmail: giulia.verdi@email.it\n\nFORMAZIONE\n- Laurea in Scienze della Comunicazione, Università Statale di Milano (2021)\n- Master in Digital Marketing, 24ORE Business School (2022)\n\nESPERIENZA\n- Marketing Specialist presso Accenture (feb 2023 - presente): gestione campagne digitali, SEO/SEM, social media marketing, analisi performance con Google Analytics\n- Social Media Manager presso startup EdTech (2022-2023): creazione contenuti, community management, influencer marketing\n\nCOMPETENZE\n- Google Analytics: avanzato\n- Google Ads / Meta Ads: avanzato\n- Excel: intermedio\n- Canva / Adobe Creative Suite: intermedio\n- SEO/SEM: avanzato\n\nLINGUE\n- Italiano: madrelingua\n- Inglese: C1\n- Francese: A2"
+    }
+  ],
+
+  "profilo_estratto_esempio": {
+    "nome": "Marco",
+    "cognome": "Bianchi",
+    "eta": 26,
+    "formazione": [
+      {"titolo": "Laurea Magistrale in Economia e Management", "istituto": "Università Federico II di Napoli", "anno": 2023},
+      {"titolo": "Certificazione Google Data Analytics", "istituto": "Google", "anno": 2024}
+    ],
+    "esperienze": [
+      {"ruolo": "Junior Analyst", "azienda": "Deloitte", "periodo": "gen 2024 - presente", "descrizione": "Analisi dati, reportistica, data visualization"},
+      {"ruolo": "Stagista Audit", "azienda": "PwC", "periodo": "mar 2023 - dic 2023", "descrizione": "Supporto audit, analisi documenti"}
+    ],
+    "competenze_tecniche": ["Excel", "SQL", "Python", "Power BI"],
+    "certificazioni": ["Google Data Analytics"],
+    "lingue": [
+      {"lingua": "Italiano", "livello": "Madrelingua"},
+      {"lingua": "Inglese", "livello": "B2"}
+    ],
+    "interessi": ["Data Science", "Machine Learning", "Data Visualization"]
+  },
+
+  "assessment_esempio": {
+    "user_id": 1,
+    "tipo": "iniziale",
+    "domande": [
+      {"id": 1, "tipo": "scala_1_5", "domanda": "Quanto ti senti sicuro nell'usare Excel per analisi dati?", "risposta": 4},
+      {"id": 2, "tipo": "scala_1_5", "domanda": "Quanto ti senti sicuro nell'usare SQL?", "risposta": 2},
+      {"id": 3, "tipo": "scala_1_5", "domanda": "Quanto ti senti sicuro nell'usare Python?", "risposta": 2},
+      {"id": 4, "tipo": "aperta", "domanda": "Quali sono i tuoi obiettivi a breve termine (1-3 mesi)?", "risposta": "Migliorare le competenze in SQL e iniziare a usare Python per analisi dati"},
+      {"id": 5, "tipo": "aperta", "domanda": "Quali sono i tuoi obiettivi a medio termine (3-6 mesi)?", "risposta": "Essere autonomo in Python e iniziare a esplorare il machine learning"},
+      {"id": 6, "tipo": "scelta", "domanda": "Come preferisci imparare?", "opzioni": ["Video lezioni", "Esercizi pratici", "Lettura", "Progetti", "Mentoring"], "risposta": "Esercizi pratici"},
+      {"id": 7, "tipo": "scala_1_10", "domanda": "Quante ore settimanali puoi dedicare alla formazione?", "risposta": 8}
+    ],
+    "aspirazioni": {
+      "breve_termine": "Migliorare SQL e iniziare Python",
+      "medio_termine": "Autonomia in Python, esplorare ML",
+      "lungo_termine": "Diventare Senior Data Analyst",
+      "disponibilita_ore_settimana": 8,
+      "stile_apprendimento": "Esercizi pratici"
+    }
+  },
+
+  "piano_formativo_esempio": {
+    "user_id": 1,
+    "nome": "Percorso verso Senior Data Analyst",
+    "piano": [
+      {
+        "ordine": 1,
+        "corso_id": 1,
+        "titolo": "Fondamenti di Python",
+        "orizzonte": "breve",
+        "motivazione": "Competenza base necessaria per tutto il percorso data. Attualmente livello 2/5, serve arrivare a 4/5.",
+        "data_inizio": "2025-03-01",
+        "data_fine": "2025-04-12",
+        "durata_ore": 20,
+        "priorita": "critica"
+      },
+      {
+        "ordine": 2,
+        "corso_id": 2,
+        "titolo": "SQL per Business",
+        "orizzonte": "breve",
+        "motivazione": "SQL è fondamentale per un Data Analyst. Il corso base colma il gap attuale.",
+        "data_inizio": "2025-04-14",
+        "data_fine": "2025-05-10",
+        "durata_ore": 15,
+        "priorita": "critica"
+      },
+      {
+        "ordine": 3,
+        "corso_id": 11,
+        "titolo": "Python per Data Science",
+        "orizzonte": "medio",
+        "motivazione": "Dopo le basi di Python, approfondire Pandas e NumPy per analisi dati avanzata.",
+        "data_inizio": "2025-05-12",
+        "data_fine": "2025-06-21",
+        "durata_ore": 20,
+        "priorita": "alta"
+      },
+      {
+        "ordine": 4,
+        "corso_id": 5,
+        "titolo": "Data Visualization con Python",
+        "orizzonte": "medio",
+        "motivazione": "Competenza chiave per un analyst: saper comunicare i dati visivamente.",
+        "data_inizio": "2025-06-23",
+        "data_fine": "2025-07-26",
+        "durata_ore": 15,
+        "priorita": "alta"
+      },
+      {
+        "ordine": 5,
+        "corso_id": 6,
+        "titolo": "Introduzione al Machine Learning",
+        "orizzonte": "lungo",
+        "motivazione": "Obiettivo a lungo termine dell'utente. Prerequisiti (Python + Statistica) saranno soddisfatti.",
+        "data_inizio": "2025-07-28",
+        "data_fine": "2025-09-20",
+        "durata_ore": 25,
+        "priorita": "media"
+      }
+    ]
+  },
+
+  "quiz_esempio": {
+    "titolo_quiz": "Quiz — Fondamenti di SQL",
+    "corso_id": 2,
+    "domande": [
+      {
+        "id": 1,
+        "tipo": "scelta_multipla",
+        "domanda": "Quale keyword SQL viene usata per selezionare dati da una tabella?",
+        "opzioni": ["INSERT", "SELECT", "UPDATE", "DELETE"],
+        "risposta_corretta": "SELECT",
+        "spiegazione": "SELECT è il comando fondamentale per leggere dati. INSERT aggiunge righe, UPDATE le modifica, DELETE le rimuove."
+      },
+      {
+        "id": 2,
+        "tipo": "vero_falso",
+        "domanda": "La clausola WHERE viene usata per filtrare i risultati di una query.",
+        "opzioni": ["Vero", "Falso"],
+        "risposta_corretta": "Vero",
+        "spiegazione": "WHERE specifica condizioni di filtro, es: SELECT * FROM users WHERE ruolo = 'Analyst'"
+      },
+      {
+        "id": 3,
+        "tipo": "scelta_multipla",
+        "domanda": "Quale tipo di JOIN restituisce solo le righe con corrispondenza in entrambe le tabelle?",
+        "opzioni": ["LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "FULL JOIN"],
+        "risposta_corretta": "INNER JOIN",
+        "spiegazione": "INNER JOIN restituisce solo righe con match in entrambe le tabelle. LEFT JOIN include tutte le righe della tabella sinistra."
+      },
+      {
+        "id": 4,
+        "tipo": "aperta",
+        "domanda": "Scrivi una query SQL che conta il numero di utenti per ogni dipartimento.",
+        "risposta_corretta": "SELECT dipartimento, COUNT(*) FROM users GROUP BY dipartimento",
+        "spiegazione": "Si usa COUNT(*) per contare le righe e GROUP BY per raggruppare. ORDER BY è opzionale."
+      }
+    ]
+  },
+
+  "ruoli_target": [
+    {
+      "ruolo": "Senior Data Analyst",
+      "descrizione": "Analista dati esperto che gestisce progetti complessi e comunica insight al management.",
+      "skill_richieste": [
+        {"skill": "Python", "livello_minimo": 4, "importanza": "critica"},
+        {"skill": "SQL", "livello_minimo": 4, "importanza": "critica"},
+        {"skill": "Statistica", "livello_minimo": 4, "importanza": "alta"},
+        {"skill": "Machine Learning", "livello_minimo": 3, "importanza": "alta"},
+        {"skill": "Data Visualization", "livello_minimo": 4, "importanza": "alta"},
+        {"skill": "Power BI", "livello_minimo": 3, "importanza": "media"},
+        {"skill": "Comunicazione", "livello_minimo": 3, "importanza": "media"},
+        {"skill": "Problem Solving", "livello_minimo": 4, "importanza": "alta"}
+      ]
+    },
+    {
+      "ruolo": "Digital Marketing Manager",
+      "descrizione": "Responsabile della strategia di marketing digitale con focus su dati e performance.",
+      "skill_richieste": [
+        {"skill": "Digital Marketing", "livello_minimo": 5, "importanza": "critica"},
+        {"skill": "Data Visualization", "livello_minimo": 3, "importanza": "alta"},
+        {"skill": "Excel Avanzato", "livello_minimo": 4, "importanza": "alta"},
+        {"skill": "AI / GenAI", "livello_minimo": 3, "importanza": "alta"},
+        {"skill": "Comunicazione", "livello_minimo": 5, "importanza": "critica"},
+        {"skill": "Leadership", "livello_minimo": 3, "importanza": "media"},
+        {"skill": "Project Management", "livello_minimo": 3, "importanza": "media"}
+      ]
+    },
+    {
+      "ruolo": "Project Manager Senior",
+      "descrizione": "Program manager con responsabilità su più progetti e team interfunzionali.",
+      "skill_richieste": [
+        {"skill": "Project Management", "livello_minimo": 5, "importanza": "critica"},
+        {"skill": "Leadership", "livello_minimo": 5, "importanza": "critica"},
+        {"skill": "Comunicazione", "livello_minimo": 5, "importanza": "critica"},
+        {"skill": "Problem Solving", "livello_minimo": 5, "importanza": "alta"},
+        {"skill": "Excel Avanzato", "livello_minimo": 3, "importanza": "media"},
+        {"skill": "AI / GenAI", "livello_minimo": 2, "importanza": "media"}
+      ]
+    }
+  ],
+
+  "survey_template_esempio": {
+    "tipo": "gradimento_corso",
+    "domande": [
+      {"id": 1, "testo": "Quanto sei soddisfatto del corso complessivamente?", "tipo": "scala_1_5", "opzioni": []},
+      {"id": 2, "testo": "I contenuti erano chiari e ben organizzati?", "tipo": "scala_1_5", "opzioni": []},
+      {"id": 3, "testo": "Il livello di difficoltà era adeguato?", "tipo": "scelta", "opzioni": ["Troppo facile", "Adeguato", "Troppo difficile"]},
+      {"id": 4, "testo": "Consiglieresti questo corso a un collega?", "tipo": "scala_1_10", "opzioni": []},
+      {"id": 5, "testo": "Cosa ti è piaciuto di più del corso?", "tipo": "aperta", "opzioni": []},
+      {"id": 6, "testo": "Cosa miglioreresti?", "tipo": "aperta", "opzioni": []}
+    ]
+  },
+
+  "regole_alert_monitoraggio": [
+    {
+      "tipo": "ritardo",
+      "condizione": "data_fine_prevista < oggi AND stato = 'in_corso'",
+      "gravita": "alta",
+      "template_messaggio": "Il corso '{titolo}' è in ritardo rispetto alla scadenza prevista ({data_fine_prevista}). Progresso attuale: {progresso}%."
+    },
+    {
+      "tipo": "scadenza_vicina",
+      "condizione": "data_fine_prevista < oggi + 7 giorni AND stato = 'in_corso'",
+      "gravita": "media",
+      "template_messaggio": "Il corso '{titolo}' scade tra pochi giorni ({data_fine_prevista}). Assicurati di completarlo in tempo!"
+    },
+    {
+      "tipo": "inattivita",
+      "condizione": "ultimo_accesso < oggi - 14 giorni AND stato = 'in_corso'",
+      "gravita": "media",
+      "template_messaggio": "Non accedi al corso '{titolo}' da più di 2 settimane. Hai bisogno di aiuto?"
+    },
+    {
+      "tipo": "completamento",
+      "condizione": "stato = 'completato'",
+      "gravita": "info",
+      "template_messaggio": "Complimenti! Hai completato il corso '{titolo}' con un voto di {voto}/100!"
+    }
+  ]
+}
