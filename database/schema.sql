@@ -10,8 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     nome TEXT NOT NULL,
     cognome TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
-    ruolo TEXT,                          -- es: "Junior Analyst", "PM", "Developer"
-    dipartimento TEXT,                   -- es: "IT", "Marketing", "Finance"
+    ruolo TEXT,                          -- es: "Studente", "Docente", "Admin"
+    dipartimento TEXT,                   -- es: "Economia", "Fisica", "Medicina"
     data_assunzione DATE,
     cv_testo TEXT,                       -- Testo estratto dal CV
     profilo_json TEXT,                   -- JSON: competenze, interessi, obiettivi
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS courses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     titolo TEXT NOT NULL,
     descrizione TEXT,
-    categoria TEXT,                      -- "Data Science", "Leadership", "Cloud"
+    categoria TEXT,                      -- "Data Science", "Business", "Cardiologia"
     durata_ore INTEGER,
     livello TEXT CHECK(livello IN ('base', 'intermedio', 'avanzato')),
     prerequisiti_json TEXT,              -- JSON: lista di course_id richiesti
