@@ -7,106 +7,69 @@ Questo file definisce il manifesto tecnologico e operativo del progetto. Il suo 
 
 ## 1. Architettura e Stack Tecnologico
 
-L'applicazione segue un'architettura Three-Tier orientata all'orchestrazione AI.
+L'applicazione segue un'architettura Three-Tier orientata all'orchestrazione AI multiagente.
 
-**Linguaggio di Riferimento:** Python 3.11+
+**Linguaggio di Riferimento:** Python.
 
-**Presentation Layer (Frontend):** `streamlit` — gestisce UI, pagine e chat in tempo reale.
+**Presentation Layer (Frontend):** `streamlit` per la UI, la gestione delle chat in tempo reale e il routing per ruolo (Ospite / Studente / Docente).
 
-**Data Visualization:** `plotly` / `plotly.express` — grafici interattivi (es. `px.pie` per distribuzione skill).
+**Data Visualization:** `plotly` per il rendering interattivo dei grafici nelle dashboard docente (report sui risultati dei test, andamento della classe).
 
-**Data Manipulation:** `pandas` — gestione in memoria di dati strutturati. `openpyxl` — esportazione/importazione Excel.
+**Data Manipulation:** `pandas` per la gestione in memoria dei dati strutturati; `openpyxl` per l'esportazione tabellare.
 
-**Database (Data Layer):** SQLite (file locale `database/learnai.db`). Il percorso è configurabile tramite variabile d'ambiente; la libreria di accesso è il modulo nativo `sqlite3` con `row_factory = sqlite3.Row` per restituire righe come dizionari. Le foreign key sono abilitate esplicitamente tramite `PRAGMA foreign_keys = ON`.
-
-> **Nota di scalabilità:** Il DDL attuale usa la sintassi `AUTOINCREMENT` propria di SQLite. Una migrazione a PostgreSQL richiederà di sostituire `AUTOINCREMENT` con `SERIAL` / `IDENTITY` e di aggiornare il driver.
+**Database (Data Layer):** SQLite. Schema definito in `schema.sql` — fonte di verità per tutte le entità. Le tabelle principali sono: `studenti`, `docenti`, `corsi_di_laurea`, `corsi_universitari`, `materiali_didattici`, `materiali_chunks`, `quiz`, `domande_quiz`, `tentativi_quiz`, `risposte_domande`, `piani_personalizzati`, `piano_capitoli`, `piano_paragrafi`, `piano_contenuti`, `lezioni_corso`.
 
 ---
 
 ## 2. Intelligenza Artificiale & Ecosistema Multiagente
 
-Il cuore del sistema backend è un'architettura multiagente avanzata.
+**Core AI Framework:** `langchain` per la gestione dei prompt e l'interazione con i modelli LLM.
 
-**LLM Provider:** Amazon Bedrock, acceduto tramite `langchain-aws` (`ChatBedrockConverse`).
+**Orchestrazione Multiagente:** `langgraph` governa il ciclo di vita e la comunicazione tra i 6 agenti specializzati:
 
-**Modello principale (Sonnet):**
-```
-anthropic.claude-3-5-sonnet-20241022-v2:0
-```
-Usato per task complessi: generazione quiz, analisi documenti, piani formativi, chat multi-turn.
-
-**Modello veloce (Haiku):**
-```
-anthropic.claude-3-5-haiku-20241022-v1:0
-```
-Usato per task semplici: classificazioni, risposte brevi, tool degli agenti a bassa latenza.
-
-Entrambi i model ID sono sovrascrivibili tramite variabili d'ambiente `BEDROCK_MODEL_ID` e `BEDROCK_MODEL_ID_FAST`.
-
-**Parametri LLM:**
-
-| Parametro | Sonnet | Haiku |
+| File | Agente | Responsabilità principale |
 |---|---|---|
-| `temperature` | 0.3 | 0.3 |
-| `max_tokens` | 4096 | 2048 |
-| Regione AWS | `eu-central-1` (default) | stessa |
+| `agents/onboarding.py` | Onboarding Assistant | Colloquio guidato o analisi CV per Ospiti e nuovi Studenti |
+| `agents/scheduler.py` | Learning Path Scheduler | Generazione piani personalizzati (`piani_personalizzati`) |
+| `agents/optimizer.py` | Conversational Plan Optimizer | Modifica piani tramite linguaggio naturale |
+| `agents/content_gen.py` | Adaptive Content Generation Engine | Generazione lezioni, quiz, flashcard, riassunti da `materiali_chunks` |
+| `agents/gap_analysis.py` | Competency Gap Analysis AI | Analisi lacune su `tentativi_quiz` e `risposte_domande` |
+| `agents/course_analysis.py` | Course Performance Analysis | Report aggregati per il docente da quiz approvati (`approvato=1`) |
 
-**Core AI Framework:** `langchain` + `langchain-aws` (`ChatBedrockConverse`) per la gestione dei prompt e la comunicazione con Bedrock. I messaggi sono tipizzati con `HumanMessage`, `SystemMessage`, `AIMessage` di `langchain_core.messages`.
+**Elaborazione Documentale (RAG):** `PyPDF2` per l'estrazione del testo dai PDF caricati. Il testo estratto viene segmentato in chunks semantici dall'agente Document Processor e salvato in `materiali_chunks`.
 
-**Orchestrazione Multiagente:** `langgraph` — pattern ReAct via `create_react_agent` (modulo `langgraph.prebuilt`). La memoria conversazionale è gestita da `InMemorySaver` (`langgraph.checkpoint.memory`).
-
-**Elaborazione Documentale (RAG):** `PyPDF2` per l'estrazione del testo dai PDF caricati dai docenti (campo `testo_estratto` in tabella `materials`).
-
-**Vincolo Architetturale RAG:** L'agente Adaptive Content Generation Engine deve attingere **esclusivamente** ai materiali (PDF/Video) caricati dai docenti come unica "fonte di verità" per generare quiz, flashcard e riassunti.
-
-**Output strutturato (JSON):** La funzione `genera_json()` in `platform_sdk/llm.py` impone all'LLM di rispondere in JSON puro tramite system prompt dedicato, con fallback di parsing che gestisce blocchi ` ```json ``` ` e ricerca regex `{...}`.
+**Vincolo Architetturale RAG — CRITICO:**
+Il Content Generation Engine deve attingere **esclusivamente** ai `materiali_chunks` associati al corso di riferimento come unica fonte di verità. È vietato generare contenuti didattici da fonti esterne al materiale caricato dal docente. Ogni contenuto generato deve tracciare i `chunk_ids_utilizzati`.
 
 ---
 
 ## 3. Integrazioni Esterne e Cloud
 
-**Storage dei File Multimediali:** `boto3` — integrazione con Amazon S3 per video, PDF e risorse pesanti. I file sono referenziati nel DB tramite il campo `s3_key` (es. `didattica/corsi/101/Slide_Capitolo_1.pdf`).
+**Storage File Multimediali:** `boto3` per l'integrazione con Amazon S3. Ogni file caricato dal docente ottiene un `s3_key` univoco salvato in `materiali_didattici.s3_key`.
 
-**Supporto file upload lato UI:** `estrai_testo_da_upload()` in `llm.py` supporta i formati `.txt`, `.md`, `.csv`, `.pdf`, `.xls`, `.xlsx`,`.docx` tramite rispettivamente `PyPDF2`, `pandas.read_csv`, `pandas.read_excel`.
+**LLM Provider:** `langchain-aws` per interfacciarsi con i modelli linguistici su Amazon Bedrock. Le chiamate avvengono sempre tramite i nodi degli agenti LangGraph — mai direttamente dalla UI.
 
 ---
 
 ## 4. Requisiti di Sicurezza
 
-**Gestione dei Segreti (Strict Policy):** È severamente vietato hardcodare chiavi API (AWS, Bedrock, DB URIs) nel codice sorgente.
+**Gestione dei Segreti:** È severamente vietato hardcodare chiavi API (AWS, Bedrock, DB path) nel codice sorgente. Tutte le configurazioni sensibili risiedono nel file `.env`, caricato tramite `src/core/config.py`.
 
-**Variabili d'ambiente obbligatorie** (file `.env`, lette tramite `python-dotenv` in `src/core/config.py`):
+**Controllo Versione:** Il file `.env` deve essere incluso in `.gitignore`. Verificare prima di ogni commit.
 
-| Variabile | Descrizione | Default |
-|---|---|---|
-| `AWS_ACCESS_KEY_ID` | Chiave di accesso AWS | — (obbligatoria) |
-| `AWS_SECRET_ACCESS_KEY` | Chiave segreta AWS | — (obbligatoria) |
-| `AWS_DEFAULT_REGION` | Regione AWS | `eu-central-1` |
-| `BEDROCK_MODEL_ID` | Model ID principale | `anthropic.claude-3-5-sonnet-20241022-v2:0` |
-| `BEDROCK_MODEL_ID_FAST` | Model ID veloce | `anthropic.claude-3-5-haiku-20241022-v1:0` |
-
-**Controllo Versione:** Il file `.env` deve essere incluso nel `.gitignore`. Mai committato.
+**Accesso ai Dati:**
+- I `materiali_chunks` sono accessibili solo agli studenti iscritti al corso (`studenti_corsi.stato != 'abbandonato'`) e al docente titolare.
+- Gli Ospiti non hanno accesso a nessuna tabella del database.
+- I quiz di Tipo A e B (`approvato=0`, `studente_id=NOT NULL`) sono visibili solo allo studente proprietario — nessun altro utente, incluso il docente, può leggerli.
 
 ---
 
-## 5. Percorsi di Progetto (dalla configurazione reale)
+## 5. Vincoli di Performance
 
-| Costante | Percorso |
-|---|---|
-| `DATABASE_PATH` | `<root>/database/learnai.db` |
-| `SCHEMA_PATH` | `<root>/database/schema.sql` |
-| `SEED_PATH` | `<root>/database/seed.sql` |
-| `KNOWLEDGE_BASE_PATH` | `<root>/data/knowledge_base/` |
-| `SAMPLE_DATA_PATH` | `<root>/data/sample_data.json` |
+**Ottimizzazione Streamlit:** Il `st.session_state` deve essere progettato per prevenire il re-rendering inutile di componenti pesanti o il riavvio non voluto dei workflow LangGraph durante l'interazione con la chat. Le istanze degli agenti vanno messe in cache in `st.session_state` al primo caricamento.
 
-Tutti i percorsi sono costruiti relativamente a `config.py` tramite `os.path.dirname(__file__)`.
+**Latenza AI e UX:** Le interfacce di chat devono implementare token streaming dalle API di Bedrock per restituire feedback visivo immediato durante l'elaborazione.
 
----
+**Idempotenza RAG:** Prima di processare un materiale, verificare sempre `materiali_didattici.is_processed`. Se `is_processed=1`, i chunks esistono già — non riprocessare mai lo stesso documento.
 
-## 6. Vincoli di Performance
-
-**Istanze LLM (lazy initialization):** I modelli `_llm_principale` e `_llm_veloce` sono variabili globali private in `llm.py`, create alla prima chiamata e riusate per tutta la sessione. Non vanno re-istanziate ad ogni richiesta.
-
-**Streaming:** Le interfacce di chat implementano token streaming tramite `llm.stream()` (LangChain) e `agente.stream(..., stream_mode="messages")` (LangGraph), restituendo generatori Python compatibili con `st.write_stream()` di Streamlit.
-
-**Ottimizzazione Streamlit:** Il `st.session_state` deve essere progettato per prevenire il re-rendering di componenti grafici pesanti o il riavvio non voluto dei workflow LangGraph durante l'interazione con la chat.
+**Indici DB:** Gli indici definiti in `schema.sql` sono obbligatori e non vanno rimossi. La query RAG più frequente (`materiali_chunks WHERE corso_universitario_id = X`) è coperta da `idx_chunks_corso`.

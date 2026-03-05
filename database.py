@@ -5,14 +5,24 @@
 # Uso:
 #   from platform_sdk.database import db
 #
-#   db.init()                                      # Crea tabelle e carica dati iniziali
-#   db.inserisci("users", {"nome": "Mario"})       # INSERT
-#   db.trova_uno("users", {"id": 1})               # SELECT ... LIMIT 1
-#   db.trova_tutti("users")                         # SELECT *
-#   db.aggiorna("users", {"id": 1}, {"ruolo": "Senior"})  # UPDATE
-#   db.elimina("users", {"id": 1})                 # DELETE
-#   db.esegui("SELECT * FROM users WHERE ruolo = ?", ["Senior"])  # Query custom
-#   db.conta("users", {"dipartimento": "IT"})       # COUNT
+#   db.init()                                               # Crea tabelle e carica dati iniziali
+#   db.inserisci("studenti", {"nome": "Giulia"})            # INSERT
+#   db.trova_uno("studenti", {"id": 1})                     # SELECT ... LIMIT 1
+#   db.trova_tutti("corsi_universitari")                    # SELECT *
+#   db.aggiorna("studenti", {"id": 1}, {"stato": "active"}) # UPDATE
+#   db.elimina("piano_contenuti", {"id": 1})                # DELETE
+#   db.esegui("SELECT * FROM studenti WHERE stato = ?", ["active"])  # Query custom
+#   db.conta("studenti", {"corso_di_laurea_id": 3})         # COUNT
+#
+# Tabelle disponibili (da schema.sql — usare SOLO questi nomi):
+#   studenti | docenti | admin
+#   corsi_di_laurea | corsi_universitari
+#   corsi_laurea_universitari | studenti_corsi
+#   quiz | domande_quiz | tentativi_quiz | risposte_domande
+#   materiali_didattici | materiali_chunks
+#   piani_personalizzati | piano_materiali_utilizzati
+#   piano_capitoli | piano_paragrafi | piano_contenuti
+#   lezioni_corso
 # ============================================================================
 
 import json
@@ -32,7 +42,6 @@ class Database:
     def __init__(self, db_path: str = None):
         """Inizializza il database con il percorso specificato."""
         self.db_path = db_path or config.DATABASE_PATH
-        # Assicuriamoci che la cartella esista
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
     def _connetti(self) -> sqlite3.Connection:
@@ -52,11 +61,10 @@ class Database:
         i dati iniziali (seed.sql) se disponibili.
 
         Esempio:
-            db.init()  # Eseguire una sola volta, all'inizio
+            db.init()  # Eseguire una sola volta all'avvio dell'applicazione
         """
         conn = self._connetti()
         try:
-            # Esegui lo schema SQL se esiste
             if os.path.exists(config.SCHEMA_PATH):
                 with open(config.SCHEMA_PATH, "r", encoding="utf-8") as f:
                     conn.executescript(f.read())
@@ -64,7 +72,6 @@ class Database:
             else:
                 print(f"⚠️  File schema non trovato: {config.SCHEMA_PATH}")
 
-            # Esegui il seed SQL se esiste
             if os.path.exists(config.SEED_PATH):
                 with open(config.SEED_PATH, "r", encoding="utf-8") as f:
                     conn.executescript(f.read())
@@ -85,24 +92,30 @@ class Database:
         Inserisce una riga in una tabella.
 
         Parametri:
-            tabella: nome della tabella (es: "users")
+            tabella: nome della tabella (es: "studenti")
             dati:    dizionario con i dati da inserire
 
         Ritorna:
             L'ID della riga inserita
 
         Esempio:
-            user_id = db.inserisci("users", {
-                "nome": "Mario",
-                "cognome": "Rossi",
-                "email": "m.rossi@test.it",
-                "ruolo": "Junior Analyst"
+            studente_id = db.inserisci("studenti", {
+                "nome": "Giulia",
+                "cognome": "Bianchi",
+                "email": "g.bianchi@studenti.unina.it",
+                "password_hash": "$2b$12$...",
+                "corso_di_laurea_id": 3,
+                "anno_corso": 2
             })
-            print(f"Utente creato con ID: {user_id}")
-        """
-        # Converti eventuali dict/list in JSON
-        dati_puliti = self._serializza_json(dati)
 
+            piano_id = db.inserisci("piani_personalizzati", {
+                "studente_id": studente_id,
+                "titolo": "Preparazione Basi di Dati",
+                "tipo": "esame",
+                "corso_universitario_id": 101
+            })
+        """
+        dati_puliti = self._serializza_json(dati)
         colonne = ", ".join(dati_puliti.keys())
         placeholders = ", ".join(["?"] * len(dati_puliti))
         valori = list(dati_puliti.values())
@@ -129,16 +142,24 @@ class Database:
             Il numero di righe inserite
 
         Esempio:
-            db.inserisci_molti("user_skills", [
-                {"user_id": 1, "skill_id": 1, "livello_attuale": 3},
-                {"user_id": 1, "skill_id": 2, "livello_attuale": 2},
-                {"user_id": 1, "skill_id": 3, "livello_attuale": 4},
+            # Traccia i chunks usati per generare un piano
+            db.inserisci_molti("piano_materiali_utilizzati", [
+                {"piano_id": 50, "chunk_id": 301},
+                {"piano_id": 50, "chunk_id": 302},
+                {"piano_id": 50, "chunk_id": 303},
+            ])
+
+            # Inserisce le domande di un quiz
+            db.inserisci_molti("domande_quiz", [
+                {"quiz_id": 300, "testo": "Cos'è una chiave primaria?",
+                 "tipo": "scelta_multipla", "ordine": 1, "chunk_id": 301},
+                {"quiz_id": 300, "testo": "Cosa garantisce l'integrità referenziale?",
+                 "tipo": "scelta_multipla", "ordine": 2, "chunk_id": 302},
             ])
         """
         if not lista_dati:
             return 0
 
-        # Usa le chiavi del primo elemento per definire le colonne
         prima_riga = self._serializza_json(lista_dati[0])
         colonne = ", ".join(prima_riga.keys())
         placeholders = ", ".join(["?"] * len(prima_riga))
@@ -174,9 +195,14 @@ class Database:
             Un dizionario con i dati della riga, o None se non trovata
 
         Esempio:
-            utente = db.trova_uno("users", {"email": "m.rossi@test.it"})
-            if utente:
-                print(f"Trovato: {utente['nome']} {utente['cognome']}")
+            studente = db.trova_uno("studenti", {"email": "g.bianchi@studenti.unina.it"})
+            if studente:
+                print(f"Trovato: {studente['nome']} {studente['cognome']}")
+
+            # Verifica idempotenza RAG prima di processare un materiale
+            materiale = db.trova_uno("materiali_didattici", {"id": materiale_id})
+            if materiale["is_processed"] == 1:
+                return  # chunks già presenti — non riprocessare
         """
         where, valori = self._costruisci_where(filtri)
         sql = f"SELECT * FROM {tabella}{where} LIMIT 1"
@@ -197,16 +223,33 @@ class Database:
         Parametri:
             tabella: nome della tabella
             filtri:  condizioni di ricerca (opzionale)
-            ordine:  colonna per l'ordinamento (es: "nome ASC")
+            ordine:  colonna per l'ordinamento (es: "ordine ASC")
             limite:  numero massimo di risultati
 
         Ritorna:
             Lista di dizionari
 
         Esempio:
-            utenti_it = db.trova_tutti("users", {"dipartimento": "IT"}, ordine="cognome ASC")
-            for u in utenti_it:
-                print(f"- {u['nome']} {u['cognome']}")
+            # Tutti i piani di uno studente
+            piani = db.trova_tutti(
+                "piani_personalizzati",
+                {"studente_id": 1, "stato": "attivo"},
+                ordine="created_at DESC"
+            )
+
+            # I capitoli di un piano in ordine
+            capitoli = db.trova_tutti(
+                "piano_capitoli",
+                {"piano_id": 50},
+                ordine="ordine ASC"
+            )
+
+            # I chunks di un corso (query RAG di base)
+            chunks = db.trova_tutti(
+                "materiali_chunks",
+                {"corso_universitario_id": 101},
+                ordine="indice_chunk ASC"
+            )
         """
         where, valori = self._costruisci_where(filtri)
         sql = f"SELECT * FROM {tabella}{where}"
@@ -235,8 +278,14 @@ class Database:
             Il numero di righe
 
         Esempio:
-            n_utenti = db.conta("users")
-            n_completati = db.conta("training_plan_items", {"stato": "completato"})
+            n_studenti = db.conta("studenti")
+            n_iscritti = db.conta("studenti_corsi", {"corso_universitario_id": 101})
+            n_completati = db.conta("piano_paragrafi", {"piano_id": 50, "completato": 1})
+
+            # Verifica idempotenza: i chunks esistono già?
+            n_chunks = db.conta("materiali_chunks", {"materiale_id": materiale_id})
+            if n_chunks > 0:
+                return  # già processato
         """
         where, valori = self._costruisci_where(filtri)
         sql = f"SELECT COUNT(*) as n FROM {tabella}{where}"
@@ -265,11 +314,17 @@ class Database:
             Il numero di righe aggiornate
 
         Esempio:
-            db.aggiorna("users", {"id": 1}, {"ruolo": "Senior Analyst"})
-            db.aggiorna("training_plan_items", {"id": 5}, {
-                "stato": "completato",
-                "data_completamento": "2025-03-15"
-            })
+            # Approva una lezione generata dall'AI
+            db.aggiorna("lezioni_corso", {"id": 700}, {"approvato": 1})
+
+            # Approva un quiz del corso
+            db.aggiorna("quiz", {"id": 300}, {"approvato": 1})
+
+            # Segna un paragrafo del piano come completato
+            db.aggiorna("piano_paragrafi", {"id": 600}, {"completato": 1})
+
+            # Marca un materiale come processato dopo la chunking
+            db.aggiorna("materiali_didattici", {"id": 5001}, {"is_processed": 1})
         """
         dati_puliti = self._serializza_json(dati)
         set_clause = ", ".join([f"{k} = ?" for k in dati_puliti.keys()])
@@ -302,7 +357,11 @@ class Database:
             Il numero di righe eliminate
 
         Esempio:
-            db.elimina("notifications", {"user_id": 1, "letto": 1})
+            # Rimuove un contenuto del piano non più necessario
+            db.elimina("piano_contenuti", {"id": 900})
+
+            # Rimuove l'iscrizione di uno studente a un corso
+            db.elimina("studenti_corsi", {"studente_id": 1, "corso_universitario_id": 101})
         """
         where, valori = self._costruisci_where(filtri)
         if not where:
@@ -325,6 +384,8 @@ class Database:
     def esegui(self, sql: str, parametri: list = None) -> list[dict]:
         """
         Esegue una query SQL personalizzata.
+        Usare questo metodo solo per query complesse con JOIN o aggregazioni
+        che non sono esprimibili con i metodi CRUD standard.
 
         Parametri:
             sql:       la query SQL (usare ? per i parametri)
@@ -334,20 +395,33 @@ class Database:
             Lista di dizionari con i risultati (per SELECT)
 
         Esempio:
+            # Report docente: argomenti con più errori nei quiz approvati
             risultati = db.esegui(
-                "SELECT u.nome, c.titolo, tpi.stato "
-                "FROM training_plan_items tpi "
-                "JOIN training_plans tp ON tpi.plan_id = tp.id "
-                "JOIN users u ON tp.user_id = u.id "
-                "JOIN courses c ON tpi.course_id = c.id "
-                "WHERE tpi.stato = ?",
-                ["in_corso"]
+                "SELECT mc.argomenti_chiave, COUNT(*) as n_errori "
+                "FROM risposte_domande rd "
+                "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+                "JOIN quiz q ON dq.quiz_id = q.id "
+                "JOIN materiali_chunks mc ON dq.chunk_id = mc.id "
+                "WHERE q.corso_universitario_id = ? "
+                "  AND q.approvato = 1 "
+                "  AND rd.corretta = 0 "
+                "GROUP BY mc.argomenti_chiave "
+                "ORDER BY n_errori DESC",
+                [corso_id]
+            )
+
+            # Chunks rilevanti per un argomento (base per il RAG)
+            chunks = db.esegui(
+                "SELECT * FROM materiali_chunks "
+                "WHERE corso_universitario_id = ? "
+                "  AND argomenti_chiave LIKE ? "
+                "ORDER BY indice_chunk ASC",
+                [corso_id, f"%{argomento}%"]
             )
         """
         conn = self._connetti()
         try:
             cursor = conn.execute(sql, parametri or [])
-            # Se è una SELECT, restituisci i risultati
             if sql.strip().upper().startswith("SELECT"):
                 return [dict(riga) for riga in cursor.fetchall()]
             else:
@@ -376,8 +450,8 @@ class Database:
     def _serializza_json(self, dati: dict) -> dict:
         """
         Converte eventuali dict/list nei valori in stringhe JSON.
-        Così potete passare direttamente dizionari Python e verranno
-        salvati come JSON nel database.
+        Permette di passare direttamente dizionari o liste Python per i campi
+        JSON del DB (es: argomenti_chiave, chunk_ids_utilizzati, pagine_riferimento).
         """
         risultato = {}
         for chiave, valore in dati.items():

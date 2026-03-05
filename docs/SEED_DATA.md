@@ -1,13 +1,11 @@
 # Seed Data & Mock Interfaces
 
 ## Scopo del Documento
-Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce esempi concreti (in formato JSON) della struttura dei dati prima che il database o le API siano completamente operativi. Le chiavi di questi JSON rispecchiano **fedelmente** le colonne del database relazionale definite in `schema.sql` e i parametri accettati da `platform_sdk/database.py`.
-
-> **Regola di utilizzo:** Quando si chiama `db.inserisci("tabella", dati)`, i campi `dict` o `list` vengono automaticamente serializzati in JSON da `_serializza_json()`. Non è necessario chiamare `json.dumps()` manualmente.
+Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce esempi concreti (in formato JSON) della struttura dei dati prima che il database sia completamente operativo. Le chiavi di questi JSON rispecchiano fedelmente le colonne definite in `schema.sql`. È un file vitale per il *vibecoding*: impedisce all'IA di inventare nomi di variabili o campi inesistenti durante la generazione di componenti UI o query.
 
 ---
 
-## 1. Utente e Competenze (`users`, `skills`, `user_skills`)
+### 1. Studente (`studenti`)
 
 ```json
 {
@@ -15,306 +13,260 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
   "nome": "Giulia",
   "cognome": "Bianchi",
   "email": "g.bianchi@studenti.unina.it",
-  "ruolo": "Studente",
-  "dipartimento": "Informatica",
-  "cv_testo": "Giulia Bianchi, laureanda in Informatica. Esperienza con Python e analisi dati...",
-  "profilo_json": {
-    "interessi": ["Data Science", "Intelligenza Artificiale"],
-    "obiettivi": "Diventare Data Scientist"
-  },
-  "competenze": [
-    {
-      "skill_id": 10,
-      "nome_skill": "Python",
-      "categoria": "Technical",
-      "livello_attuale": 3,
-      "livello_target": 5
-    },
-    {
-      "skill_id": 11,
-      "nome_skill": "Machine Learning",
-      "categoria": "Technical",
-      "livello_attuale": 1,
-      "livello_target": 4
-    }
-  ]
+  "password_hash": "$2b$12$...",
+  "data_nascita": "2001-04-15",
+  "telefono": "+39 333 1234567",
+  "corso_di_laurea_id": 3,
+  "anno_corso": 2,
+  "stato": "active",
+  "created_at": "2025-09-01T09:00:00"
 }
 ```
 
-**Valori ammessi per `ruolo`:** `"Studente"`, `"Docente"`, `"Futuro Studente"` (rispettare le maiuscole — usati come gatekeeper nel routing UI).
-
-**Valori ammessi per `categoria` (skills):** `"Technical"`, `"Soft"`, `"Domain"`.
-
-**Range `livello_attuale` / `livello_target`:** intero da 1 a 5 (CHECK constraint su DB).
-
 ---
 
-## 2. Catalogo Corsi e Materiali (`courses`, `materials`)
-
-```json
-{
-  "id": 101,
-  "titolo": "Machine Learning di Base",
-  "descrizione": "Introduzione ai modelli predittivi.",
-  "categoria": "Data Science",
-  "durata_ore": 40,
-  "livello": "intermedio",
-  "docente_id": 99,
-  "prerequisiti_json": [50, 51],
-  "contenuto_json": {
-    "moduli": ["Regressione", "Classificazione", "Clustering"],
-    "obiettivi": "Saper costruire e valutare modelli predittivi di base"
-  },
-  "materials": [
-    {
-      "id": 5001,
-      "course_id": 101,
-      "docente_id": 99,
-      "titolo_file": "Slide_Capitolo_1.pdf",
-      "tipo_file": "PDF",
-      "s3_key": "didattica/corsi/101/Slide_Capitolo_1.pdf",
-      "testo_estratto": "Capitolo 1 — Introduzione al Machine Learning. Il learning rate è un iperparametro..."
-    },
-    {
-      "id": 5002,
-      "course_id": 101,
-      "docente_id": 99,
-      "titolo_file": "Lezione_1_Intro.mp4",
-      "tipo_file": "Video",
-      "s3_key": "didattica/corsi/101/Lezione_1_Intro.mp4",
-      "testo_estratto": null
-    }
-  ]
-}
-```
-
-**Valori ammessi per `livello`:** `"base"`, `"intermedio"`, `"avanzato"` (CHECK constraint su DB).
-
-**Valori ammessi per `tipo_file`:** `"PDF"`, `"Video"`, `"Audio"`, `"Slide"`.
-
-**Nota RAG:** Il campo `testo_estratto` dei materiali PDF è la **unica fonte di verità** per il Content Generation Agent. I materiali Video hanno `testo_estratto = null` fino a quando non viene implementata la trascrizione automatica.
-
----
-
-## 3. Piani Formativi (`training_plans`, `training_plan_items`)
-
-```json
-{
-  "id": 50,
-  "user_id": 1,
-  "nome": "Percorso Data Scientist 2026",
-  "orizzonte": "medio",
-  "stato": "attivo",
-  "note_ai": "Percorso generato per colmare il gap in Statistica e Python.",
-  "items": [
-    {
-      "id": 200,
-      "plan_id": 50,
-      "course_id": 101,
-      "ordine": 1,
-      "stato": "in_corso",
-      "data_inizio_prevista": "2026-03-10",
-      "data_fine_prevista": "2026-05-10",
-      "data_inizio_effettiva": "2026-03-12",
-      "data_completamento": null,
-      "progresso": 25,
-      "voto": null
-    }
-  ]
-}
-```
-
-**Valori ammessi per `orizzonte`:** `"breve"`, `"medio"`, `"lungo"`.
-
-**Valori ammessi per `stato` (training_plans):** `"bozza"`, `"attivo"`, `"completato"`, `"sospeso"`.
-
-**Valori ammessi per `stato` (training_plan_items):** `"da_iniziare"`, `"in_corso"`, `"completato"`, `"saltato"`.
-
-**Range `progresso`:** intero da 0 a 100. **Range `voto`:** intero da 1 a 100.
-
----
-
-## 4. Modifiche al Piano (`plan_changes`)
-
-Generato dall'Optimizer Agent ad ogni modifica del piano confermata dall'utente.
+### 2. Docente (`docenti`)
 
 ```json
 {
   "id": 10,
-  "plan_id": 50,
-  "user_id": 1,
-  "data_modifica": "2026-03-04T10:30:00",
-  "tipo_modifica": "rischedulazione",
-  "dettagli_json": {
-    "item_id": 200,
-    "vecchia_data_fine": "2026-05-10",
-    "nuova_data_fine": "2026-06-15",
-    "motivo_ai": "L'utente ha segnalato un periodo di esami sovrapposto"
-  },
-  "motivazione": "Richiesta dell'utente tramite chat: 'Posso spostare il corso di ML a giugno?'"
+  "nome": "Mario",
+  "cognome": "Rossi",
+  "email": "m.rossi@unina.it",
+  "password_hash": "$2b$12$...",
+  "matricola_docente": "DOC-2021-042",
+  "dipartimento": "Ingegneria Informatica",
+  "stato": "active",
+  "created_at": "2021-10-01T08:00:00"
 }
 ```
 
-**Valori ammessi per `tipo_modifica`:** `"aggiunta"`, `"rimozione"`, `"rischedulazione"`, `"sostituzione"`.
+---
+
+### 3. Corso di Laurea (`corsi_di_laurea`)
+
+```json
+{
+  "id": 3,
+  "nome": "Ingegneria Informatica",
+  "facolta": "Ingegneria",
+  "created_at": "2020-01-01T00:00:00"
+}
+```
 
 ---
 
-## 5. Assessment e Quiz (`assessments`)
+### 4. Corso Universitario (`corsi_universitari`)
 
-Generati dinamicamente dall'Adaptive Content Generation Engine esclusivamente dai `materials` del docente.
+```json
+{
+  "id": 101,
+  "nome": "Basi di Dati",
+  "descrizione": "Fondamenti di progettazione e gestione di basi di dati relazionali.",
+  "docente_id": 10,
+  "cfu": 9,
+  "ore_lezione": 72,
+  "anno_di_corso": 2,
+  "semestre": 1,
+  "livello": "intermedio",
+  "attivo": 1,
+  "created_at": "2025-09-01T00:00:00"
+}
+```
+
+---
+
+### 5. Iscrizione Studente a Corso (`studenti_corsi`)
+
+```json
+{
+  "id": 500,
+  "studente_id": 1,
+  "corso_universitario_id": 101,
+  "anno_accademico": "2025-2026",
+  "stato": "iscritto",
+  "voto": null,
+  "data_iscrizione": "2025-09-15T10:00:00",
+  "data_completamento": null
+}
+```
+
+---
+
+### 6. Materiale Didattico (`materiali_didattici`)
+
+```json
+{
+  "id": 5001,
+  "corso_universitario_id": 101,
+  "docente_id": 10,
+  "titolo": "Slide Capitolo 1 — Modello Relazionale",
+  "tipo": "pdf",
+  "s3_key": "didattica/corsi/101/slide_cap1.pdf",
+  "testo_estratto": "Il modello relazionale è basato sul concetto di relazione...",
+  "is_processed": 1,
+  "caricato_il": "2025-09-05T14:30:00"
+}
+```
+
+---
+
+### 7. Chunk Semantico (`materiali_chunks`)
+
+```json
+{
+  "id": 301,
+  "materiale_id": 5001,
+  "corso_universitario_id": 101,
+  "indice_chunk": 2,
+  "titolo_sezione": "Chiavi primarie e vincoli di integrità",
+  "testo": "Una chiave primaria identifica univocamente ogni tupla in una relazione...",
+  "sommario": "Definizione e ruolo delle chiavi primarie nel modello relazionale.",
+  "argomenti_chiave": ["chiave primaria", "integrità referenziale", "vincoli"],
+  "livello_difficolta": 2,
+  "pagine_riferimento": [12, 13],
+  "n_token": 420,
+  "created_at": "2025-09-05T15:00:00"
+}
+```
+
+---
+
+### 8. Quiz (`quiz`) — Tipo C (approvato dal docente)
 
 ```json
 {
   "id": 300,
-  "user_id": 1,
-  "tipo": "quiz",
-  "domande_json": [
-    {
-      "id_domanda": "q_1",
-      "testo": "Cos'è il learning rate?",
-      "opzioni": ["Un parametro del modello", "Un iperparametro", "Una metrica di valutazione"],
-      "risposta_corretta": "Un iperparametro",
-      "material_riferimento_id": 5001
-    },
-    {
-      "id_domanda": "q_2",
-      "testo": "Quale algoritmo è più adatto per la classificazione binaria?",
-      "opzioni": ["K-Means", "Regressione Logistica", "PCA"],
-      "risposta_corretta": "Regressione Logistica",
-      "material_riferimento_id": 5001
-    }
-  ],
-  "risultati_json": {
-    "punteggio_totale": 85,
-    "aree_forti": ["Teoria base del ML"],
-    "aree_deboli": ["Ottimizzazione degli iperparametri"]
-  },
-  "aspirazioni_json": null
+  "titolo": "Test — Modello Relazionale",
+  "corso_universitario_id": 101,
+  "studente_id": null,
+  "docente_id": 10,
+  "creato_da": "ai",
+  "approvato": 1,
+  "ripetibile": 0,
+  "created_at": "2025-10-01T09:00:00"
 }
 ```
-
-**Valori ammessi per `tipo`:** `"iniziale"`, `"quiz"`, `"intermedio"`, `"finale"`.
 
 ---
 
-## 6. Log di Monitoraggio (`progress_log`, `notifications`)
-
-Generati dall'AI-Driven Progress Monitoring Agent per rilevare ritardi o successi.
+### 9. Domanda Quiz (`domande_quiz`)
 
 ```json
 {
-  "log": {
-    "id": 1005,
-    "user_id": 1,
-    "plan_item_id": 200,
-    "evento": "in_ritardo",
-    "dettagli": "L'utente non accede al corso 101 da oltre 14 giorni."
-  },
-  "notifica_generata": {
-    "id": 40,
-    "user_id": 1,
-    "tipo": "ritardo",
-    "titolo": "Sembra che tu sia rimasto indietro!",
-    "messaggio": "Ciao Giulia, ho notato che non accedi al corso di Machine Learning da 2 settimane. Vuoi riprogrammare le scadenze?",
-    "letto": 0
-  }
+  "id": 1001,
+  "quiz_id": 300,
+  "testo": "Quale tra le seguenti è una proprietà della chiave primaria?",
+  "tipo": "scelta_multipla",
+  "opzioni_json": ["Può contenere NULL", "Identifica univocamente ogni tupla", "Può essere duplicata", "È opzionale"],
+  "risposta_corretta": "Identifica univocamente ogni tupla",
+  "spiegazione": "La chiave primaria deve essere unica e non nulla per ogni record della relazione.",
+  "ordine": 1,
+  "chunk_id": 301
 }
 ```
-
-**Valori ammessi per `evento` (progress_log):** `"iniziato"`, `"completato"`, `"in_ritardo"`, `"abbandonato"`.
-
-**Valori ammessi per `tipo` (notifications):** `"promemoria"`, `"ritardo"`, `"completamento"`, `"suggerimento"`.
-
-**Campo `letto`:** `0` = non letto, `1` = letto (INTEGER su SQLite, non BOOLEAN).
 
 ---
 
-## 7. Survey (`surveys`)
-
-Generata e analizzata dallo Smart Survey Lifecycle Manager.
+### 10. Tentativo Quiz (`tentativi_quiz`)
 
 ```json
 {
-  "id": 20,
-  "user_id": 1,
-  "course_id": 101,
-  "tipo": "gradimento_corso",
-  "domande_json": [
-    {
-      "id_domanda": "s_1",
-      "testo": "Come valuteresti la chiarezza delle spiegazioni del docente?",
-      "scala": "1-5"
-    },
-    {
-      "id_domanda": "s_2",
-      "testo": "Quali argomenti ti hanno creato più difficoltà?",
-      "tipo_risposta": "testo_libero"
-    }
-  ],
-  "risposte_json": [
-    {"id_domanda": "s_1", "risposta": 4},
-    {"id_domanda": "s_2", "risposta": "L'ottimizzazione del gradiente è risultata poco chiara"}
-  ],
-  "sentiment_score": 0.65,
-  "aree_miglioramento_json": {
-    "punti_critici": ["Spiegazione dell'ottimizzazione"],
-    "punti_di_forza": ["Esempi pratici", "Materiale ben organizzato"]
-  }
+  "id": 800,
+  "quiz_id": 300,
+  "studente_id": 1,
+  "punteggio": 72.5,
+  "aree_deboli_json": ["integrità referenziale", "forme normali"],
+  "completato": 1,
+  "created_at": "2025-10-10T11:00:00"
 }
 ```
-
-**Valori ammessi per `tipo`:** `"gradimento_corso"`, `"piattaforma"`, `"periodico"`.
-
-**Range `sentiment_score`:** float da -1.0 (molto negativo) a 1.0 (molto positivo).
 
 ---
 
-## 8. Skill Gap Analysis (`skill_gap_analyses`)
-
-Generata dalla Competency Gap Analysis AI.
+### 11. Piano Personalizzato (`piani_personalizzati`)
 
 ```json
 {
-  "id": 5,
-  "user_id": 1,
-  "ruolo_target": "Data Scientist Junior",
-  "gap_json": [
-    {
-      "skill": "Machine Learning",
-      "livello_attuale": 1,
-      "livello_richiesto": 4,
-      "gap": 3,
-      "priorita": "alta"
-    },
-    {
-      "skill": "Statistica",
-      "livello_attuale": 2,
-      "livello_richiesto": 4,
-      "gap": 2,
-      "priorita": "media"
-    },
-    {
-      "skill": "Python",
-      "livello_attuale": 3,
-      "livello_richiesto": 4,
-      "gap": 1,
-      "priorita": "bassa"
-    }
-  ],
-  "raccomandazioni_json": [
-    {
-      "course_id": 101,
-      "titolo": "Machine Learning di Base",
-      "motivo": "Colma il gap principale su ML (da livello 1 a 4)"
-    },
-    {
-      "course_id": 85,
-      "titolo": "Statistica per Data Science",
-      "motivo": "Consolida le basi statistiche necessarie"
-    }
-  ],
-  "punteggio_prontezza": 38
+  "id": 50,
+  "studente_id": 1,
+  "titolo": "Preparazione Esame Basi di Dati",
+  "descrizione": "Piano per la preparazione all'esame di Basi di Dati, con focus su normalizzazione e SQL avanzato.",
+  "tipo": "esame",
+  "corso_universitario_id": 101,
+  "stato": "attivo",
+  "created_at": "2025-10-05T08:00:00",
+  "aggiornato_il": "2025-10-12T16:30:00"
 }
 ```
 
-**Range `punteggio_prontezza`:** intero da 0 (nessuna preparazione) a 100 (pronto per il ruolo target).
+---
+
+### 12. Capitolo del Piano (`piano_capitoli`)
+
+```json
+{
+  "id": 200,
+  "piano_id": 50,
+  "titolo": "Modello Relazionale e Algebra",
+  "descrizione": "Fondamenti del modello relazionale, operatori dell'algebra relazionale.",
+  "ordine": 1,
+  "completato": 0,
+  "created_at": "2025-10-05T08:01:00"
+}
+```
+
+---
+
+### 13. Paragrafo del Piano (`piano_paragrafi`)
+
+```json
+{
+  "id": 600,
+  "capitolo_id": 200,
+  "titolo": "Chiavi e Vincoli di Integrità",
+  "descrizione": "Chiave primaria, chiave esterna, vincoli NOT NULL e UNIQUE.",
+  "ordine": 2,
+  "completato": 0,
+  "created_at": "2025-10-05T08:02:00"
+}
+```
+
+---
+
+### 14. Contenuto del Piano — Flashcard (`piano_contenuti`)
+
+```json
+{
+  "id": 900,
+  "paragrafo_id": 600,
+  "tipo": "flashcard",
+  "contenuto_json": [
+    { "domanda": "Cos'è una chiave primaria?", "risposta": "Un attributo o insieme di attributi che identifica univocamente ogni tupla." },
+    { "domanda": "Cosa garantisce il vincolo di integrità referenziale?", "risposta": "Che ogni valore di chiave esterna corrisponda a un valore esistente nella tabella referenziata." }
+  ],
+  "quiz_id": null,
+  "chunk_ids_utilizzati": [301, 302],
+  "generato_al_momento": 0,
+  "created_at": "2025-10-05T08:05:00"
+}
+```
+
+---
+
+### 15. Lezione del Corso (`lezioni_corso`)
+
+```json
+{
+  "id": 700,
+  "corso_universitario_id": 101,
+  "docente_id": 10,
+  "titolo": "Introduzione al Modello Relazionale",
+  "contenuto_md": "## Il Modello Relazionale\nIl modello relazionale organizza i dati in **relazioni** (tabelle)...",
+  "creato_da": "ai",
+  "approvato": 1,
+  "chunk_ids_utilizzati": [301, 302, 303],
+  "created_at": "2025-09-20T10:00:00",
+  "aggiornato_il": "2025-09-22T14:00:00"
+}
+```
