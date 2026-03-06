@@ -59,3 +59,9 @@ if submitted:
             st.switch_page("pages/studente.py")
     else:
         st.error("Credenziali errate.")
+
+# Accesso ospite
+st.divider()
+st.caption("Non hai un account?")
+if st.button("Accedi come ospite", use_container_width=True):
+    st.switch_page("pages/ospite.py")
