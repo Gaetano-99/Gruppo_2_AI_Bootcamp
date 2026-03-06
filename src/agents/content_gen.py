@@ -14,10 +14,10 @@ Note architetturali:
       un tool interno (`recupera_materiale_corso`) richiamato esplicitamente.
     - Il system prompt del LLM vieta esplicitamente l'uso di conoscenza esterna,
       garantendo la tracciabilità RAG.
-    - Per `lezioni_corso` è obbligatorio `docente_id`; in modalità test-studente
-      viene usato il valore mock=1.
+    - Per `lezioni_corso` è obbligatorio `docente_id`; viene recuperato da
+      `st.session_state.user`.
     - Per `piano_contenuti` è obbligatorio `paragrafo_id`; viene creato un
-      paragrafo/capitolo/piano mock dedicato per ogni sessione di test.
+      paragrafo/capitolo/piano dedicato per ogni sessione.
 """
 
 import json
@@ -25,6 +25,7 @@ import sys
 import os
 from typing import TypedDict, Literal, Annotated
 import operator
+import streamlit as st
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -45,7 +46,6 @@ from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, c
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_DOCENTE_ID_MOCK: int = 10   # Mario Rossi (docente, seed data)
 _MAX_CHUNK_IN_CONTESTO: int = 8   # limita il contesto per non eccedere i token
 
 _SYSTEM_PROMPT_AGENTE = """Sei il Content Generation Engine della piattaforma LearnAI.
@@ -316,7 +316,7 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
             "lezioni_corso",
             {
                 "corso_universitario_id": corso_id,
-                "docente_id": _DOCENTE_ID_MOCK,
+                "docente_id": st.session_state.user["user_id"],
                 "titolo": f"Lezione: {argomento}",
                 "contenuto_md": stato["lezione_generata"],
                 "creato_da": "ai",
@@ -328,12 +328,13 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
     # Salva gli strumenti di studio tramite piano mock
     if stato.get("strumenti_studio_generati"):
         tipo_strumento: str = stato.get("tipo_strumento", "quiz")
+        user_id = st.session_state.user["user_id"]
 
         # Crea piano mock per tracciare il contenuto (richiesto dallo schema)
         piano_id: int = db.inserisci(
             "piani_personalizzati",
             {
-                "studente_id": 1,  # studente mock
+                "studente_id": user_id,
                 "titolo": f"[TEST] Piano per: {argomento}",
                 "tipo": "esame",
                 "corso_universitario_id": corso_id,

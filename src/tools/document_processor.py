@@ -19,7 +19,7 @@ Note architetturali:
 import re
 import sys
 import os
-
+import streamlit as st
 # ---------------------------------------------------------------------------
 # Path setup — permette l'import del progetto dalla root in qualunque contesto
 # ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ def elabora_e_salva_documento(
         "materiali_didattici",
         {
             "corso_universitario_id": corso_universitario_id,
-            "docente_id": _DOCENTE_ID_MOCK,
+            "docente_id": st.session_state.user["user_id"], # <-- SOSTITUITO _DOCENTE_ID_MOCK
             "titolo": titolo,
             "tipo": tipo,
             "s3_key": f"didattica/test/{corso_universitario_id}/{titolo.replace(' ', '_')}",

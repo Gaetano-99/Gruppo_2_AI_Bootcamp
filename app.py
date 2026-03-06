@@ -35,20 +35,27 @@ if st.session_state.get("is_logged_in"):
 st.title("🎓 LearnAI Platform")
 
 with st.form("login"):
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    email_input = st.text_input("Email")
+    password_input = st.text_input("Password", type="password")
     submitted = st.form_submit_button("Accedi", type="primary", use_container_width=True)
 
 if submitted:
-    sessione = verifica_credenziali(email, password)
+    # normalizziamo l'input dell'utente in modo minimale (il backend fa il resto)
+    email_to_check = email_input.strip()
+
+    # Passiamo i dati alla funzione di auth
+    sessione = verifica_credenziali(email_to_check, password_input)
+    
     if sessione:
+        # Salviamo la sessione reale nello stato
         st.session_state.is_logged_in = True
-        st.session_state.current_user = sessione
-        st.session_state.user_id = sessione["user_id"]
+        st.session_state.user = sessione
         st.session_state.user_role = sessione["ruolo"]
-        if sessione["ruolo"] in ("docente", "admin"):
+        
+        # ROUTING: Diciamo a Streamlit in quale pagina mandare l'utente
+        if sessione["ruolo"] == "docente":
             st.switch_page("pages/docente.py")
-        else:
+        elif sessione["ruolo"] == "studente":
             st.switch_page("pages/studente.py")
     else:
         st.error("Credenziali errate.")

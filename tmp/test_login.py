@@ -4,9 +4,14 @@ from werkzeug.security import check_password_hash
 from platform_sdk.database import db
 
 tests = [
+    # original credentials
     ('m.rossi@unina.it', 'docente123'),
     ('g.bianchi@studenti.unina.it', 'studente123'),
     ('a.verdi@unina.it', 'admin123'),
+    # variants with uppercase and extra spaces
+    (' M.Rossi@unina.IT ', 'docente123'),
+    ('G.BIanchi@studenti.unina.it', 'studente123'),
+    ('a.Verdi@unina.it  ', 'admin123'),
 ]
 for email, pwd in tests:
     u = db.trova_uno('users', {'email': email})
