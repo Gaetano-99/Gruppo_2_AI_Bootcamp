@@ -52,3 +52,9 @@ if submitted:
             st.switch_page("pages/studente.py")
     else:
         st.error("Credenziali errate.")
+
+st.divider()
+st.markdown("### Sei un nuovo utente?")
+st.markdown("Esplora la nostra offerta formativa e chiedi consiglio alla nostra IA d'orientamento.")
+if st.button("Entra come Ospite 👤", type="secondary", use_container_width=True):
+    st.switch_page("pages/ospite.py")
