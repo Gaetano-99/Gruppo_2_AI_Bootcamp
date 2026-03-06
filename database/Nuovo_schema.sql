@@ -2,7 +2,7 @@
 -- LearnAI Platform — Schema Database
 -- Università Federico II / Deloitte — Digita Academy 2025
 -- ============================================================================
--- STEP 1: utenti + struttura universitaria reale
+-- STEP 1: users + struttura universitaria reale
 -- STEP 2: quiz e assessment
 -- STEP 3: materiali didattici + piani personalizzati AI
 -- STEP 4: lezioni dei corsi
@@ -13,7 +13,7 @@
 --   ON DELETE SET NULL → la FK è opzionale, NULL è un valore valido
 --
 --   OSPITE → nessuna tabella, stato volatile solo in st.session_state
---   ADMIN  → placeholder, sviluppo futuro, record inseriti manualmente
+--   ADMIN  → ruolo nella tabella users, record inseriti manualmente
 -- ============================================================================
 
 PRAGMA foreign_keys = ON;
@@ -23,16 +23,7 @@ PRAGMA foreign_keys = ON;
 -- STEP 1A: TABELLE SENZA DIPENDENZE (definite per prime)
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS admin (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome            TEXT    NOT NULL,
-    cognome         TEXT    NOT NULL,
-    email           TEXT    UNIQUE NOT NULL,
-    password_hash   TEXT    NOT NULL,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- corsi_di_laurea prima di studenti (studenti.corso_di_laurea_id la referenzia)
+-- corsi_di_laurea prima di users (users.corso_di_laurea_id la referenzia)
 CREATE TABLE IF NOT EXISTS corsi_di_laurea (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nome        TEXT    NOT NULL,               -- es. "Ingegneria Informatica"
@@ -40,46 +31,77 @@ CREATE TABLE IF NOT EXISTS corsi_di_laurea (
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- docenti prima di corsi_universitari (corsi_universitari.docente_id la referenzia)
-CREATE TABLE IF NOT EXISTS docenti (
+-- ============================================================================
+-- USERS — Tabella unificata per studenti, docenti e admin.
+--
+-- Il campo ruolo discrimina il tipo di utente e controlla l'accesso alle pagine.
+-- I campi specifici per ruolo sono nullable: ogni utente popola solo i propri.
+--
+-- Campi per ruolo='studente':
+--   data_nascita, telefono, matricola_studente, corso_di_laurea_id, anno_corso
+--
+-- Campi per ruolo='docente':
+--   matricola_docente, dipartimento
+--
+-- ruolo='admin': nessun campo aggiuntivo, gestione manuale.
+--
+-- Campi di sicurezza (comuni a tutti i ruoli):
+--   tentativi_falliti  → contatore reset a 0 ad ogni login riuscito
+--   bloccato_fino_a    → NULL = non bloccato; timestamp = blocco temporaneo
+--   last_login         → aggiornato ad ogni autenticazione riuscita
+--
+-- Logica di blocco (da implementare in db_handler.py):
+--   Se tentativi_falliti >= 5 → imposta bloccato_fino_a = now + 15 minuti
+--   Ad ogni login: controlla bloccato_fino_a PRIMA di verificare la password
+--
+-- VINCOLO APPLICATIVO su quiz.studente_id e quiz.docente_id:
+--   SQLite non supporta CHECK cross-tabella. Il codice in db_handler.py deve
+--   verificare users.ruolo prima di ogni INSERT su tabelle che usano questi FK.
+--
+-- OSPITE → nessuna riga in questa tabella; stato volatile in st.session_state.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS users (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Campi comuni a tutti i ruoli
     nome                TEXT    NOT NULL,
     cognome             TEXT    NOT NULL,
     email               TEXT    UNIQUE NOT NULL,
     password_hash       TEXT    NOT NULL,
-    matricola_docente   TEXT    UNIQUE,
-    dipartimento        TEXT,
+    ruolo               TEXT    NOT NULL
+                            CHECK(ruolo IN ('studente', 'docente', 'admin')),
     stato               TEXT    NOT NULL DEFAULT 'active'
                             CHECK(stato IN ('active', 'sospeso')),
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
-);
+    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
 
+    -- Sicurezza login (comuni a tutti i ruoli)
+    last_login          DATETIME,                -- aggiornato ad ogni login riuscito
+    tentativi_falliti   INTEGER NOT NULL DEFAULT 0, -- reset a 0 ad ogni login riuscito
+    bloccato_fino_a     DATETIME,                -- NULL = libero; timestamp = bloccato
 
--- ============================================================================
--- STEP 1B: TABELLE CON DIPENDENZE DA 1A
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS studenti (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    nome                TEXT    NOT NULL,
-    cognome             TEXT    NOT NULL,
-    email               TEXT    UNIQUE NOT NULL,
-    password_hash       TEXT    NOT NULL,
-    data_nascita        TEXT,                   -- formato YYYY-MM-DD
-    telefono            TEXT,                   -- opzionale
+    -- Campi specifici per ruolo='studente' (NULL se docente o admin)
+    data_nascita        TEXT,                    -- formato YYYY-MM-DD
+    telefono            TEXT,
+    matricola_studente  TEXT    UNIQUE,          -- es. "N86001234"
     corso_di_laurea_id  INTEGER REFERENCES corsi_di_laurea(id)
-                            ON DELETE SET NULL, -- se CDL eliminato, studente rimane
-    anno_corso          INTEGER,                -- 1-5; fuoricorso = ultimo anno del tipo
-    stato               TEXT    NOT NULL DEFAULT 'active'
-                            CHECK(stato IN ('active', 'sospeso')),
-    created_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+                            ON DELETE SET NULL,  -- se CDL eliminato, utente rimane
+    anno_corso          INTEGER,                 -- 1-5
+
+    -- Campi specifici per ruolo='docente' (NULL se studente o admin)
+    matricola_docente   TEXT    UNIQUE,          -- es. "DOC-2021-042"
+    dipartimento        TEXT
 );
+
+
+-- ============================================================================
+-- STEP 1B: TABELLE CON DIPENDENZE DA users
+-- ============================================================================
 
 CREATE TABLE IF NOT EXISTS corsi_universitari (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     nome            TEXT    NOT NULL,           -- es. "Basi di Dati"
     descrizione     TEXT,
-    docente_id      INTEGER NOT NULL REFERENCES docenti(id)
+    docente_id      INTEGER NOT NULL REFERENCES users(id)
                         ON DELETE RESTRICT,     -- non eliminare docente con corsi attivi
     cfu             INTEGER,
     ore_lezione     INTEGER,
@@ -109,13 +131,13 @@ CREATE TABLE IF NOT EXISTS corsi_laurea_universitari (
     UNIQUE(corso_di_laurea_id, corso_universitario_id)
 );
 
--- N:N studenti ↔ corsi_universitari
+-- N:N users(studente) ↔ corsi_universitari
 -- Traccia iscrizione, stato e voto finale per ogni anno accademico.
 -- UNIQUE su tre campi: permette reiscrizione in anni accademici diversi.
 CREATE TABLE IF NOT EXISTS studenti_corsi (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    studente_id             INTEGER NOT NULL REFERENCES studenti(id)
-                                ON DELETE CASCADE,  -- studente eliminato → rimuovi iscrizioni
+    studente_id             INTEGER NOT NULL REFERENCES users(id)
+                                ON DELETE CASCADE,  -- utente eliminato → rimuovi iscrizioni
     corso_universitario_id  INTEGER NOT NULL REFERENCES corsi_universitari(id)
                                 ON DELETE RESTRICT, -- non eliminare corso con studenti iscritti
     anno_accademico         TEXT    NOT NULL,        -- es. "2025-2026"
@@ -135,14 +157,14 @@ CREATE TABLE IF NOT EXISTS studenti_corsi (
 --
 --   Tipo A — quiz AI nel piano personalizzato (libero)
 --     corso_universitario_id = NULL
---     studente_id            = NOT NULL
+--     studente_id            = NOT NULL   (FK → users, ruolo='studente')
 --     docente_id             = NULL
 --     approvato              = 0
 --     → non visibile al docente, non alimenta analytics
 --
 --   Tipo B — quiz AI generato dallo studente su un corso universitario
 --     corso_universitario_id = NOT NULL
---     studente_id            = NOT NULL
+--     studente_id            = NOT NULL   (FK → users, ruolo='studente')
 --     docente_id             = NULL
 --     approvato              = 0
 --     → non visibile al docente, non alimenta analytics
@@ -150,7 +172,7 @@ CREATE TABLE IF NOT EXISTS studenti_corsi (
 --   Tipo C — quiz del corso creato/approvato dal docente
 --     corso_universitario_id = NOT NULL
 --     studente_id            = NULL
---     docente_id             = NOT NULL
+--     docente_id             = NOT NULL   (FK → users, ruolo='docente')
 --     approvato              = 1
 --     → unico tipo che alimenta le analytics del docente
 --
@@ -161,9 +183,9 @@ CREATE TABLE IF NOT EXISTS quiz (
     titolo                  TEXT    NOT NULL,
     corso_universitario_id  INTEGER REFERENCES corsi_universitari(id)
                                 ON DELETE RESTRICT, -- non eliminare corso con quiz associati
-    studente_id             INTEGER REFERENCES studenti(id)
-                                ON DELETE CASCADE,  -- studente eliminato → elimina suoi quiz privati
-    docente_id              INTEGER REFERENCES docenti(id)
+    studente_id             INTEGER REFERENCES users(id)
+                                ON DELETE CASCADE,  -- utente eliminato → elimina suoi quiz privati
+    docente_id              INTEGER REFERENCES users(id)
                                 ON DELETE RESTRICT, -- non eliminare docente con quiz approvati
     creato_da               TEXT    NOT NULL
                                 CHECK(creato_da IN ('ai', 'docente')),
@@ -173,9 +195,6 @@ CREATE TABLE IF NOT EXISTS quiz (
                                 CHECK(ripetibile IN (0, 1)), -- rilevante solo Tipo C
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-
--- domande_quiz definita dopo materiali_chunks (chunk_id la referenzia).
--- Vedi STEP 3A per materiali_chunks, poi domande_quiz viene definita lì.
 
 
 -- ============================================================================
@@ -194,7 +213,7 @@ CREATE TABLE IF NOT EXISTS materiali_didattici (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     corso_universitario_id  INTEGER NOT NULL REFERENCES corsi_universitari(id)
                                 ON DELETE RESTRICT, -- non eliminare corso con materiali
-    docente_id              INTEGER NOT NULL REFERENCES docenti(id)
+    docente_id              INTEGER NOT NULL REFERENCES users(id)
                                 ON DELETE RESTRICT, -- non eliminare docente con materiali
     titolo                  TEXT    NOT NULL,
     tipo                    TEXT    NOT NULL
@@ -215,6 +234,23 @@ CREATE TABLE IF NOT EXISTS materiali_didattici (
 -- corso_universitario_id è denormalizzazione intenzionale:
 --   ricavabile via JOIN su materiali_didattici, ma qui evita un JOIN
 --   su ogni query RAG (che è la query più frequente dell'intera app).
+--
+-- INTEGRAZIONE VECTOR DATABASE (es. ChromaDB):
+--   Questo schema funge da metadata store. I vettori degli embedding risiedono
+--   nel vector store esterno. Il collegamento avviene tramite materiali_chunks.id
+--   come document_id nel vector store (collection separata per corso).
+--   embedding_sync traccia se il chunk è già stato vettorizzato, garantendo
+--   la stessa idempotenza di is_processed per i materiali grezzi.
+--
+--   Flusso vettorizzazione:
+--     1. Chunk inserito (embedding_sync=0)
+--     2. Agente calcola embedding → inserisce in ChromaDB con id=chunk.id
+--     3. embedding_sync=1  ← non rielaborare mai
+--
+--   Query RAG ibrida tipica:
+--     a. ChromaDB: similarity_search(query, filter={"corso_id": X}) → [chunk_ids]
+--     b. SQLite:   SELECT * FROM materiali_chunks WHERE id IN (chunk_ids)
+--                  → metadati completi per il contesto LLM
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS materiali_chunks (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -230,7 +266,9 @@ CREATE TABLE IF NOT EXISTS materiali_chunks (
     livello_difficolta      INTEGER
                                 CHECK(livello_difficolta BETWEEN 1 AND 5),
     pagine_riferimento      TEXT,                    -- JSON array: [12, 13, 14]
-    n_token                 INTEGER,                 -- stima token per gestione contesto
+    n_token                 INTEGER,                 -- stima token per gestione contesto LLM
+    embedding_sync          INTEGER NOT NULL DEFAULT 0
+                                CHECK(embedding_sync IN (0, 1)), -- 1 = vettorizzato nel vector store
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -259,8 +297,8 @@ CREATE TABLE IF NOT EXISTS tentativi_quiz (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     quiz_id             INTEGER NOT NULL REFERENCES quiz(id)
                             ON DELETE RESTRICT,     -- non eliminare quiz con tentativi
-    studente_id         INTEGER NOT NULL REFERENCES studenti(id)
-                            ON DELETE CASCADE,      -- studente eliminato → elimina tentativi
+    studente_id         INTEGER NOT NULL REFERENCES users(id)
+                            ON DELETE CASCADE,      -- utente eliminato → elimina tentativi
     punteggio           REAL    CHECK(punteggio BETWEEN 0 AND 100),
     aree_deboli_json    TEXT,                        -- JSON array: argomenti dove ha sbagliato
     completato          INTEGER NOT NULL DEFAULT 0
@@ -302,8 +340,8 @@ CREATE TABLE IF NOT EXISTS risposte_domande (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS piani_personalizzati (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    studente_id             INTEGER NOT NULL REFERENCES studenti(id)
-                                ON DELETE CASCADE,  -- studente eliminato → elimina piani
+    studente_id             INTEGER NOT NULL REFERENCES users(id)
+                                ON DELETE CASCADE,  -- utente eliminato → elimina piani
     titolo                  TEXT    NOT NULL,
     descrizione             TEXT,                    -- obiettivo del piano (scritto dall'agente)
     tipo                    TEXT    NOT NULL
@@ -391,7 +429,7 @@ CREATE TABLE IF NOT EXISTS lezioni_corso (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     corso_universitario_id  INTEGER NOT NULL REFERENCES corsi_universitari(id)
                                 ON DELETE RESTRICT,
-    docente_id              INTEGER NOT NULL REFERENCES docenti(id)
+    docente_id              INTEGER NOT NULL REFERENCES users(id)
                                 ON DELETE RESTRICT,
     titolo                  TEXT    NOT NULL,
     contenuto_md            TEXT,                    -- testo markdown della lezione
@@ -409,15 +447,15 @@ CREATE TABLE IF NOT EXISTS lezioni_corso (
 -- INDICI
 -- ============================================================================
 
--- Auth (query più frequente: ogni login)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_studenti_email
-    ON studenti(email);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_docenti_email
-    ON docenti(email);
+-- Auth (query più frequente: ogni login e ogni routing per ruolo)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email
+    ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_ruolo
+    ON users(ruolo);
 
 -- Struttura universitaria
-CREATE INDEX IF NOT EXISTS idx_studenti_cdl
-    ON studenti(corso_di_laurea_id);
+CREATE INDEX IF NOT EXISTS idx_users_cdl
+    ON users(corso_di_laurea_id);
 CREATE INDEX IF NOT EXISTS idx_corsi_docente
     ON corsi_universitari(docente_id);
 CREATE INDEX IF NOT EXISTS idx_studenti_corsi_studente
@@ -443,6 +481,9 @@ CREATE INDEX IF NOT EXISTS idx_chunks_materiale
 -- Query più frequente del RAG: tutti i chunks di un corso
 CREATE INDEX IF NOT EXISTS idx_chunks_corso
     ON materiali_chunks(corso_universitario_id);
+-- Idempotenza vettorizzazione: trova rapidamente i chunks non ancora sincronizzati
+CREATE INDEX IF NOT EXISTS idx_chunks_embedding_sync
+    ON materiali_chunks(embedding_sync);
 
 -- Piani personalizzati
 CREATE INDEX IF NOT EXISTS idx_piani_studente

@@ -1,470 +1,415 @@
 -- ============================================================================
--- LearnAI Platform — Seed Data
+-- LearnAI Platform — Seed Data per Test
 -- Università Federico II / Deloitte — Digita Academy 2025
 -- ============================================================================
--- Dati di test per sviluppo locale. NON usare in produzione.
 --
--- CREDENZIALI DI TEST (password: "password123" per tutti gli utenti):
---   Admin   → admin@learnai.it
---   Docenti → m.rossi@unina.it | a.ferrari@unina.it
---   Studenti→ g.bianchi@studenti.unina.it | m.esposito@studenti.unina.it
---             s.deluca@studenti.unina.it
+-- SCOPO: Popolazione minima per testare login, caricamento documenti,
+--        generazione quiz, piani personalizzati e dashboard docente.
 --
--- COPERTURA DEI FLUSSI:
---   ✅ Struttura universitaria (3 CDL, 2 docenti, 3 corsi, 3 studenti)
---   ✅ Materiali didattici processati + chunks semantici
---   ✅ Quiz Tipo A (piano privato), B (corso privato), C (approvato docente)
---   ✅ Tentativi e risposte (analytics docente attive)
---   ✅ Piano esame con struttura gerarchica completa (capitoli/paragrafi/contenuti)
---   ✅ Piano libero (senza corso universitario)
---   ✅ Lezione corso approvata + bozza non approvata
+-- CREDENZIALI DI TEST:
+--   Admin    → a.verdi@unina.it       / admin123
+--   Docente1 → m.rossi@unina.it       / docente123
+--   Docente2 → l.ferrari@unina.it     / docente123
+--   Studente1→ g.bianchi@studenti.unina.it  / studente123
+--   Studente2→ f.esposito@studenti.unina.it / studente123
+--   Studente3→ c.romano@studenti.unina.it   / studente123
+--
+-- NOTA SUGLI HASH:
+--   Gli hash sono generati con werkzeug.security (pbkdf2:sha256).
+--   Se il progetto usa bcrypt, eseguire questo snippet UNA SOLA VOLTA
+--   per rigenerare gli hash e aggiornare questo file:
+--
+--   from bcrypt import hashpw, gensalt
+--   print(hashpw(b"admin123", gensalt(12)).decode())
+--
 -- ============================================================================
 
-PRAGMA foreign_keys = ON;
+-- Disabilita temporaneamente i vincoli FK durante l'inserimento
+PRAGMA foreign_keys = OFF;
+
 
 -- ============================================================================
--- STEP 1A: ADMIN
--- ============================================================================
-
-INSERT INTO admin (id, nome, cognome, email, password_hash) VALUES
-(1, 'Admin', 'LearnAI', 'admin@learnai.it',
- '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy');
-
--- ============================================================================
--- STEP 1A: CORSI DI LAUREA
+-- STEP 1 — STRUTTURA UNIVERSITARIA
 -- ============================================================================
 
 INSERT INTO corsi_di_laurea (id, nome, facolta) VALUES
-(1, 'Ingegneria Informatica',           'Ingegneria'),
-(2, 'Scienze e Tecnologie Informatiche','Scienze MM.FF.NN.'),
-(3, 'Ingegneria Gestionale',            'Ingegneria');
+    (1, 'Ingegneria Informatica',          'Ingegneria'),
+    (2, 'Informatica',                     'Scienze MMFFNN'),
+    (3, 'Ingegneria Elettronica',          'Ingegneria');
+
 
 -- ============================================================================
--- STEP 1A: DOCENTI
--- ============================================================================
--- password: "password123"
-
-INSERT INTO docenti (id, nome, cognome, email, password_hash, matricola_docente, dipartimento, stato) VALUES
-(1, 'Mario',  'Rossi',   'm.rossi@unina.it',   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy',
-   'DOC-2018-011', 'Ingegneria Elettrica e Tecnologie dell''Informazione', 'active'),
-(2, 'Anna',   'Ferrari', 'a.ferrari@unina.it', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy',
-   'DOC-2020-034', 'Ingegneria Elettrica e Tecnologie dell''Informazione', 'active');
-
--- ============================================================================
--- STEP 1B: STUDENTI
--- ============================================================================
--- password: "password123"
--- profilo_json: campo usato dall'Onboarding Assistant per memorizzare
---   interessi, obiettivo professionale, stile di apprendimento
-
-INSERT INTO studenti (id, nome, cognome, email, password_hash, data_nascita, corso_di_laurea_id, anno_corso, stato) VALUES
-(1, 'Giulia', 'Bianchi',  'g.bianchi@studenti.unina.it',  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy',
-   '2002-04-15', 1, 2, 'active'),
-(2, 'Marco',  'Esposito', 'm.esposito@studenti.unina.it', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy',
-   '2001-09-22', 1, 3, 'active'),
-(3, 'Sara',   'De Luca',  's.deluca@studenti.unina.it',   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMfM9pBj3hQ.zZz3sNXJd6Q2Gy',
-   '2003-01-08', 2, 1, 'active');
-
--- ============================================================================
--- STEP 1B: CORSI UNIVERSITARI
+-- STEP 2 — USERS (admin, docenti, studenti)
 -- ============================================================================
 
-INSERT INTO corsi_universitari (id, nome, descrizione, docente_id, cfu, ore_lezione, anno_di_corso, semestre, livello, attivo) VALUES
-(1, 'Basi di Dati',
-   'Progettazione e gestione di basi di dati relazionali. SQL, normalizzazione, transazioni.',
-   1, 9, 72, 2, 1, 'intermedio', 1),
-(2, 'Algoritmi e Strutture Dati',
-   'Fondamenti di algoritmi, complessità computazionale, strutture dati classiche.',
-   1, 9, 72, 2, 2, 'intermedio', 1),
-(3, 'Machine Learning',
-   'Introduzione al machine learning supervisionato e non supervisionato. Python, scikit-learn.',
-   2, 6, 48, 3, 1, 'avanzato', 1);
+-- Admin
+INSERT INTO users (id, nome, cognome, email, password_hash, ruolo, stato) VALUES
+(
+    99,
+    'Anna', 'Verdi',
+    'a.verdi@unina.it',
+    'pbkdf2:sha256:1000000$3YIEsjWhKCNIsy9p$e79544a6d84b5f1d2839860177ea72d95c5c01f4eda9fa29232e4c7f8bda87fa',
+    'admin', 'active'
+);
+
+-- Docenti
+INSERT INTO users (id, nome, cognome, email, password_hash, ruolo, stato,
+                   matricola_docente, dipartimento) VALUES
+(
+    10,
+    'Mario', 'Rossi',
+    'm.rossi@unina.it',
+    'pbkdf2:sha256:1000000$jMmEsJVCpYVNs9ab$d4050131e78097343190102b0876145e4deaeff8d5264c2fc22eef8ab2083766',
+    'docente', 'active',
+    'DOC-2021-042', 'Ingegneria Informatica'
+),
+(
+    11,
+    'Laura', 'Ferrari',
+    'l.ferrari@unina.it',
+    'pbkdf2:sha256:1000000$5YMiwr8YjP1l49TB$4b34ab4509f8633eafb16ea4aa3b5e869511a3f58e73b3e3ec74eec56ca97552',
+    'docente', 'active',
+    'DOC-2019-017', 'Matematica e Informatica'
+);
+
+-- Studenti
+INSERT INTO users (id, nome, cognome, email, password_hash, ruolo, stato,
+                   data_nascita, telefono, matricola_studente,
+                   corso_di_laurea_id, anno_corso) VALUES
+(
+    1,
+    'Giulia', 'Bianchi',
+    'g.bianchi@studenti.unina.it',
+    'pbkdf2:sha256:1000000$UTcRBBMF9rrflhBN$8772079cf3e1528ee0de3277e3643fc92a48571191de8c10c8aa6460a5300ede',
+    'studente', 'active',
+    '2001-04-15', '+39 333 1234567', 'N86001234',
+    1, 2
+),
+(
+    2,
+    'Francesco', 'Esposito',
+    'f.esposito@studenti.unina.it',
+    'pbkdf2:sha256:1000000$Vj7p7qBigJ6S8beL$b0e121770f6f32da351d356abe78edf07e2c60f2250401737e843947b9ae5316',
+    'studente', 'active',
+    '2000-11-22', '+39 347 9876543', 'N86005678',
+    1, 3
+),
+(
+    3,
+    'Chiara', 'Romano',
+    'c.romano@studenti.unina.it',
+    'pbkdf2:sha256:1000000$iYav4Sd1XDMp9uvT$aac4b9698e60424b7ba39098919fce1f4ca4b3e205913e0a5cd48a2e1bcc0ec4',
+    'studente', 'active',
+    '2002-07-08', NULL, 'N86009012',
+    2, 1
+);
+
 
 -- ============================================================================
--- STEP 1C: MAPPING CDL ↔ CORSI UNIVERSITARI
+-- STEP 3 — CORSI UNIVERSITARI
 -- ============================================================================
 
-INSERT INTO corsi_laurea_universitari (corso_di_laurea_id, corso_universitario_id, obbligatorio) VALUES
--- Ingegneria Informatica
-(1, 1, 1),  -- Basi di Dati: obbligatorio
-(1, 2, 1),  -- Algoritmi: obbligatorio
-(1, 3, 0),  -- Machine Learning: a scelta
--- Scienze Informatiche
-(2, 1, 1),  -- Basi di Dati: obbligatorio
-(2, 3, 1),  -- Machine Learning: obbligatorio
--- Ingegneria Gestionale
-(3, 1, 0);  -- Basi di Dati: a scelta
+INSERT INTO corsi_universitari
+    (id, nome, descrizione, docente_id, cfu, ore_lezione,
+     anno_di_corso, semestre, livello, attivo) VALUES
+(
+    101,
+    'Basi di Dati',
+    'Fondamenti di progettazione e gestione di basi di dati relazionali. SQL, normalizzazione, transazioni.',
+    10, 9, 72, 2, 1, 'intermedio', 1
+),
+(
+    102,
+    'Algoritmi e Strutture Dati',
+    'Analisi della complessità, strutture dati fondamentali, algoritmi di ordinamento e ricerca.',
+    10, 9, 72, 2, 2, 'intermedio', 1
+),
+(
+    103,
+    'Analisi Matematica I',
+    'Limiti, derivate, integrali. Fondamenti di analisi per ingegneria.',
+    11, 12, 96, 1, 1, 'base', 1
+);
+
 
 -- ============================================================================
--- STEP 1C: ISCRIZIONI STUDENTI AI CORSI
--- ============================================================================
--- Giulia (studente_id=1): iscritta a Basi di Dati e Machine Learning
--- Marco  (studente_id=2): ha completato Basi di Dati (voto 28), iscritto ad Algoritmi
--- Sara   (studente_id=3): iscritta a Basi di Dati (primo anno, appena iniziato)
-
-INSERT INTO studenti_corsi (studente_id, corso_universitario_id, anno_accademico, stato, voto, data_completamento) VALUES
-(1, 1, '2025-2026', 'iscritto',    NULL, NULL),
-(1, 3, '2025-2026', 'iscritto',    NULL, NULL),
-(2, 1, '2024-2025', 'completato',  28,   '2025-02-10'),
-(2, 2, '2025-2026', 'iscritto',    NULL, NULL),
-(3, 1, '2025-2026', 'iscritto',    NULL, NULL);
-
--- ============================================================================
--- STEP 3A: MATERIALI DIDATTICI
--- ============================================================================
--- Basi di Dati (corso 1): 2 materiali processati (is_processed=1)
--- Machine Learning (corso 3): 1 materiale processato, 1 non ancora (is_processed=0)
-
-INSERT INTO materiali_didattici (id, corso_universitario_id, docente_id, titolo, tipo, s3_key, testo_estratto, is_processed, caricato_il) VALUES
--- Basi di Dati
-(1, 1, 1,
-   'Slide Capitolo 1 — Modello Relazionale',
-   'pdf',
-   'didattica/corsi/1/slide_cap1_modello_relazionale.pdf',
-   'Il modello relazionale è basato sul concetto di relazione matematica. Una relazione è un sottoinsieme del prodotto cartesiano di domini. Ogni relazione ha uno schema che ne descrive la struttura e un''istanza che contiene i dati effettivi. La chiave primaria identifica univocamente ogni tupla...',
-   1, '2025-09-05 09:00:00'),
-(2, 1, 1,
-   'Slide Capitolo 2 — SQL e Algebra Relazionale',
-   'pdf',
-   'didattica/corsi/1/slide_cap2_sql.pdf',
-   'SQL (Structured Query Language) è il linguaggio standard per interrogare basi di dati relazionali. I comandi principali sono SELECT, INSERT, UPDATE e DELETE. L''algebra relazionale fornisce le basi formali per le operazioni sulle relazioni: selezione, proiezione, join, unione...',
-   1, '2025-09-05 10:00:00'),
--- Machine Learning
-(3, 3, 2,
-   'Slide Capitolo 1 — Introduzione al Machine Learning',
-   'pdf',
-   'didattica/corsi/3/slide_cap1_intro_ml.pdf',
-   'Il machine learning è una branca dell''intelligenza artificiale che consente ai sistemi di apprendere automaticamente dai dati. Si divide in: apprendimento supervisionato (classificazione, regressione), non supervisionato (clustering, riduzione dimensionalità) e per rinforzo...',
-   1, '2025-09-10 09:00:00'),
-(4, 3, 2,
-   'Dispensa — Algoritmi di Ottimizzazione',
-   'dispensa',
-   'didattica/corsi/3/dispensa_ottimizzazione.pdf',
-   NULL,
-   0, '2025-10-01 14:00:00');  -- non ancora processato: is_processed=0
-
--- ============================================================================
--- STEP 3A: CHUNKS SEMANTICI
--- ============================================================================
--- Materiale 1 (Modello Relazionale): 3 chunks
--- Materiale 2 (SQL): 3 chunks
--- Materiale 3 (Intro ML): 3 chunks
--- Materiale 4: non processato → nessun chunk
-
-INSERT INTO materiali_chunks (id, materiale_id, corso_universitario_id, indice_chunk, titolo_sezione, testo, sommario, argomenti_chiave, livello_difficolta, pagine_riferimento, n_token) VALUES
--- Chunks materiale 1: Modello Relazionale
-(1, 1, 1, 0,
-   'Concetti fondamentali del modello relazionale',
-   'Il modello relazionale organizza i dati in relazioni (tabelle). Ogni relazione è caratterizzata da uno schema (nome + attributi) e da un''istanza (insieme di tuple). Gli attributi hanno un dominio che ne definisce i valori ammissibili. Il modello fu introdotto da E.F. Codd nel 1970 e rimane il paradigma dominante per i DBMS commerciali.',
-   'Introduzione al modello relazionale: relazioni, schemi, istanze e domini.',
-   '["modello relazionale", "relazione", "schema", "tupla", "dominio", "Codd"]',
-   1, '[3, 4]', 380),
-(2, 1, 1, 1,
-   'Chiavi primarie e integrità referenziale',
-   'Una chiave è un insieme minimale di attributi che identifica univocamente ogni tupla. La chiave primaria (PK) è quella scelta dal progettista. Il vincolo di integrità referenziale (FK) garantisce che ogni valore di chiave esterna corrisponda a un valore esistente nella tabella referenziata. La violazione di questi vincoli è impedita dal DBMS.',
-   'Chiavi primarie, chiavi esterne e vincoli di integrità referenziale.',
-   '["chiave primaria", "chiave esterna", "integrità referenziale", "vincoli", "PK", "FK"]',
-   2, '[5, 6, 7]', 420),
-(3, 1, 1, 2,
-   'Normalizzazione: 1NF, 2NF, 3NF',
-   'La normalizzazione è il processo di organizzazione degli attributi per ridurre la ridondanza. La Prima Forma Normale (1NF) richiede che ogni attributo contenga valori atomici. La Seconda Forma Normale (2NF) elimina le dipendenze parziali dalla chiave. La Terza Forma Normale (3NF) elimina le dipendenze transitive. La forma normale di Boyce-Codd (BCNF) è una versione più restrittiva della 3NF.',
-   'Le forme normali (1NF, 2NF, 3NF, BCNF) e il processo di normalizzazione.',
-   '["normalizzazione", "1NF", "2NF", "3NF", "BCNF", "dipendenze funzionali", "ridondanza"]',
-   3, '[10, 11, 12, 13]', 510),
-
--- Chunks materiale 2: SQL
-(4, 2, 1, 0,
-   'Comandi SQL fondamentali: SELECT e proiezione',
-   'Il comando SELECT recupera dati da una o più tabelle. La clausola WHERE filtra le righe in base a condizioni booleane. La clausola ORDER BY ordina i risultati. DISTINCT elimina i duplicati. La proiezione permette di selezionare solo alcune colonne. Esempio: SELECT nome, cognome FROM studenti WHERE anno_corso = 2 ORDER BY cognome ASC.',
-   'Sintassi e uso di SELECT, WHERE, ORDER BY, DISTINCT per interrogare il database.',
-   '["SQL", "SELECT", "WHERE", "ORDER BY", "DISTINCT", "proiezione", "filtro"]',
-   1, '[18, 19, 20]', 390),
-(5, 2, 1, 1,
-   'JOIN: combinare più tabelle',
-   'Il JOIN combina righe di due tabelle basandosi su una condizione. INNER JOIN restituisce solo le righe con corrispondenza in entrambe le tabelle. LEFT JOIN include anche le righe della tabella sinistra senza corrispondenza (NULL a destra). RIGHT JOIN e FULL OUTER JOIN completano il quadro. Il NATURAL JOIN effettua il join su attributi con lo stesso nome.',
-   'Tipi di JOIN (INNER, LEFT, RIGHT, FULL) per combinare tabelle nel database.',
-   '["JOIN", "INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN", "NATURAL JOIN"]',
-   2, '[22, 23, 24]', 440),
-(6, 2, 1, 2,
-   'Aggregazione: GROUP BY e funzioni aggregate',
-   'Le funzioni aggregate calcolano un valore su un insieme di righe: COUNT() conta le righe, SUM() somma valori numerici, AVG() calcola la media, MAX() e MIN() trovano il massimo e il minimo. La clausola GROUP BY raggruppa le righe per uno o più attributi. HAVING filtra i gruppi in base a condizioni sulle funzioni aggregate (a differenza di WHERE che filtra le righe).',
-   'Funzioni aggregate (COUNT, SUM, AVG, MAX, MIN) e clausole GROUP BY e HAVING.',
-   '["GROUP BY", "HAVING", "COUNT", "SUM", "AVG", "MAX", "MIN", "aggregazione"]',
-   2, '[26, 27, 28]', 460),
-
--- Chunks materiale 3: Machine Learning
-(7, 3, 3, 0,
-   'Apprendimento supervisionato: classificazione e regressione',
-   'Nell''apprendimento supervisionato il modello viene addestrato su un dataset etichettato (features + label). La classificazione predice una categoria discreta (es: spam/non-spam). La regressione predice un valore continuo (es: prezzo di un immobile). Il processo prevede: raccolta dati, feature engineering, scelta del modello, training, valutazione su test set.',
-   'Concetti base dell''apprendimento supervisionato: classificazione e regressione.',
-   '["apprendimento supervisionato", "classificazione", "regressione", "training set", "test set", "label"]',
-   2, '[5, 6, 7]', 470),
-(8, 3, 3, 1,
-   'Overfitting, underfitting e regolarizzazione',
-   'L''overfitting si verifica quando il modello memorizza il training set senza generalizzare (alta varianza). L''underfitting accade quando il modello è troppo semplice per catturare la struttura dei dati (alto bias). La regolarizzazione (L1/Lasso, L2/Ridge) aggiunge un termine di penalità alla funzione di costo per ridurre la complessità del modello. La cross-validation permette di stimare le performance su dati non visti.',
-   'Overfitting, underfitting, regolarizzazione L1/L2 e cross-validation.',
-   '["overfitting", "underfitting", "regolarizzazione", "Lasso", "Ridge", "cross-validation", "bias-variance"]',
-   3, '[12, 13, 14]', 530),
-(9, 3, 3, 2,
-   'Metriche di valutazione: accuracy, precision, recall, F1',
-   'La scelta della metrica dipende dal problema. L''accuracy misura la percentuale di predizioni corrette ma è fuorviante con classi sbilanciate. La precision misura quante predizioni positive sono corrette. La recall (o sensitivity) misura quante istanze positive sono state trovate. L''F1-score è la media armonica di precision e recall. La confusion matrix visualizza tutti i casi: TP, TN, FP, FN.',
-   'Metriche di valutazione dei modelli: accuracy, precision, recall, F1, confusion matrix.',
-   '["accuracy", "precision", "recall", "F1-score", "confusion matrix", "metriche", "classi sbilanciate"]',
-   2, '[18, 19]', 490);
-
--- ============================================================================
--- STEP 2: QUIZ
--- ============================================================================
--- Tipo C (id=1): quiz ufficiale Basi di Dati, approvato dal docente → alimenta analytics
--- Tipo B (id=2): quiz privato di Giulia su Basi di Dati → NON visibile al docente
--- Tipo A (id=3): quiz nel piano personalizzato di Giulia → NON collegato a corso
-
-INSERT INTO quiz (id, titolo, corso_universitario_id, studente_id, docente_id, creato_da, approvato, ripetibile) VALUES
-(1, 'Test Ufficiale — Modello Relazionale e SQL',   1, NULL, 1, 'ai',     1, 0), -- Tipo C
-(2, 'Ripasso Personale — Chiavi e Normalizzazione',  1, 1,    NULL, 'ai',  0, 1), -- Tipo B
-(3, 'Quiz Piano Studio — Intro Machine Learning',    NULL, 1, NULL, 'ai',  0, 1); -- Tipo A
-
--- ============================================================================
--- STEP 3A: DOMANDE QUIZ
--- ============================================================================
--- Quiz 1 (Tipo C, approvato): 4 domande collegate ai chunks di Basi di Dati
--- Quiz 2 (Tipo B, Giulia): 2 domande
--- Quiz 3 (Tipo A, piano): 2 domande
-
-INSERT INTO domande_quiz (id, quiz_id, testo, tipo, opzioni_json, risposta_corretta, spiegazione, ordine, chunk_id) VALUES
--- Quiz 1: Test Ufficiale
-(1,  1, 'Quale proprietà deve avere una chiave primaria?',
-   'scelta_multipla',
-   '["Può contenere valori NULL", "Identifica univocamente ogni tupla", "Può avere duplicati", "È sempre un numero intero"]',
-   'Identifica univocamente ogni tupla',
-   'La chiave primaria deve essere unica e non nulla per ogni record. Garantisce l''identificazione univoca di ogni tupla nella relazione.',
-   1, 2),
-(2,  1, 'Il vincolo di integrità referenziale garantisce che:',
-   'scelta_multipla',
-   '["La chiave primaria sia unica", "Ogni FK corrisponda a un valore esistente nella tabella referenziata", "Le tuple siano ordinate", "Gli attributi abbiano domini compatibili"]',
-   'Ogni FK corrisponda a un valore esistente nella tabella referenziata',
-   'L''integrità referenziale impedisce di avere valori di chiave esterna che non corrispondono ad alcuna chiave primaria nella tabella referenziata.',
-   2, 2),
-(3,  1, 'La 3NF (Terza Forma Normale) elimina:',
-   'scelta_multipla',
-   '["Le dipendenze parziali", "Le dipendenze transitive", "I valori NULL", "Gli attributi multivalore"]',
-   'Le dipendenze transitive',
-   'La 2NF elimina le dipendenze parziali. La 3NF va oltre ed elimina le dipendenze transitive: ogni attributo non chiave deve dipendere direttamente dalla chiave primaria, non da altri attributi non chiave.',
-   3, 3),
-(4,  1, 'Il comando SQL per filtrare gruppi aggregati è:',
-   'scelta_multipla',
-   '["WHERE", "HAVING", "GROUP BY", "ORDER BY"]',
-   'HAVING',
-   'WHERE filtra le righe prima dell''aggregazione. HAVING filtra i gruppi dopo l''aggregazione con GROUP BY. Non possono essere usati in modo intercambiabile.',
-   4, 6),
--- Quiz 2: Ripasso Giulia
-(5,  2, 'Cos''è una relazione nel modello relazionale?',
-   'scelta_multipla',
-   '["Un''associazione tra oggetti reali", "Un sottoinsieme del prodotto cartesiano di domini", "Un tipo di JOIN tra tabelle", "Un vincolo di integrità"]',
-   'Un sottoinsieme del prodotto cartesiano di domini',
-   'Nel modello relazionale, una relazione è formalmente un sottoinsieme del prodotto cartesiano degli insiemi di valori definiti dai domini degli attributi.',
-   1, 1),
-(6,  2, 'La BCNF è una versione più restrittiva di:',
-   'vero_falso',
-   NULL,
-   'true',
-   'Vero. La Boyce-Codd Normal Form (BCNF) è più restrittiva della 3NF: richiede che per ogni dipendenza funzionale X→Y, X sia una superchiave. Esistono relazioni in 3NF ma non in BCNF.',
-   2, 3),
--- Quiz 3: Piano Giulia (Machine Learning)
-(7,  3, 'Nell''apprendimento supervisionato, la regressione predice:',
-   'scelta_multipla',
-   '["Una categoria discreta", "Un valore continuo", "Un cluster di dati", "Una regola associativa"]',
-   'Un valore continuo',
-   'La classificazione predice categorie discrete. La regressione predice valori continui, come il prezzo di un immobile o la temperatura futura.',
-   1, 7),
-(8,  3, 'L''overfitting è caratterizzato da:',
-   'scelta_multipla',
-   '["Alta varianza, buona generalizzazione", "Alta varianza, scarsa generalizzazione", "Alto bias, scarsa generalizzazione", "Bassa varianza, alto bias"]',
-   'Alta varianza, scarsa generalizzazione',
-   'Un modello in overfitting memorizza il training set (alta varianza) ma non generalizza ai dati nuovi (scarsa performance sul test set). È il contrario dell''underfitting (alto bias).',
-   2, 8);
-
--- ============================================================================
--- STEP 2: TENTATIVI QUIZ E RISPOSTE
--- ============================================================================
--- Giulia ha completato il quiz ufficiale (Tipo C) → alimenta analytics docente
--- Marco ha completato il quiz ufficiale → alimenta analytics docente
--- Giulia ha completato il ripasso personale (Tipo B) → privato
-
--- Tentativo 1: Giulia, Quiz Ufficiale (punteggio 75%)
-INSERT INTO tentativi_quiz (id, quiz_id, studente_id, punteggio, aree_deboli_json, completato, created_at) VALUES
-(1, 1, 1, 75.0, '["normalizzazione", "HAVING", "dipendenze funzionali"]', 1, '2025-10-15 10:30:00');
-
-INSERT INTO risposte_domande (tentativo_id, domanda_id, risposta_data, corretta) VALUES
-(1, 1, 'Identifica univocamente ogni tupla', 1),  -- corretta
-(1, 2, 'La chiave primaria sia unica',       0),  -- sbagliata
-(1, 3, 'Le dipendenze transitive',           1),  -- corretta
-(1, 4, 'WHERE',                              0);  -- sbagliata
-
--- Tentativo 2: Marco, Quiz Ufficiale (punteggio 100%)
-INSERT INTO tentativi_quiz (id, quiz_id, studente_id, punteggio, aree_deboli_json, completato, created_at) VALUES
-(2, 1, 2, 100.0, '[]', 1, '2025-10-15 11:00:00');
-
-INSERT INTO risposte_domande (tentativo_id, domanda_id, risposta_data, corretta) VALUES
-(2, 1, 'Identifica univocamente ogni tupla',                          1),
-(2, 2, 'Ogni FK corrisponda a un valore esistente nella tabella referenziata', 1),
-(2, 3, 'Le dipendenze transitive',                                    1),
-(2, 4, 'HAVING',                                                      1);
-
--- Tentativo 3: Sara, Quiz Ufficiale (punteggio 50%)
-INSERT INTO tentativi_quiz (id, quiz_id, studente_id, punteggio, aree_deboli_json, completato, created_at) VALUES
-(3, 1, 3, 50.0, '["integrità referenziale", "normalizzazione", "SQL aggregazione"]', 1, '2025-10-16 09:15:00');
-
-INSERT INTO risposte_domande (tentativo_id, domanda_id, risposta_data, corretta) VALUES
-(3, 1, 'Identifica univocamente ogni tupla', 1),  -- corretta
-(3, 2, 'La chiave primaria sia unica',       0),  -- sbagliata
-(3, 3, 'I valori NULL',                      0),  -- sbagliata
-(3, 4, 'GROUP BY',                           0);  -- sbagliata
-
--- Tentativo 4: Giulia, Ripasso Personale (Tipo B — privato)
-INSERT INTO tentativi_quiz (id, quiz_id, studente_id, punteggio, aree_deboli_json, completato, created_at) VALUES
-(4, 2, 1, 50.0, '["prodotto cartesiano", "BCNF"]', 1, '2025-10-14 16:00:00');
-
-INSERT INTO risposte_domande (tentativo_id, domanda_id, risposta_data, corretta) VALUES
-(4, 5, 'Un''associazione tra oggetti reali', 0),  -- sbagliata
-(4, 6, 'true',                               1);  -- corretta
-
--- ============================================================================
--- STEP 3B: PIANI PERSONALIZZATI
--- ============================================================================
--- Piano 1: Giulia, tipo 'esame', Basi di Dati → struttura gerarchica completa
--- Piano 2: Marco, tipo 'libero', crescita personale su Python avanzato
-
-INSERT INTO piani_personalizzati (id, studente_id, titolo, descrizione, tipo, corso_universitario_id, stato, created_at, aggiornato_il) VALUES
-(1, 1,
-   'Preparazione Esame Basi di Dati',
-   'Piano strutturato per la preparazione all''esame di Basi di Dati del Prof. Rossi. Focus su normalizzazione e SQL avanzato, aree più critiche dai risultati del test.',
-   'esame', 1, 'attivo',
-   '2025-10-16 08:00:00', '2025-10-16 08:00:00'),
-(2, 2,
-   'Approfondimento Python per Data Science',
-   'Piano libero per consolidare le competenze Python orientate all''analisi dati, in preparazione al corso di Machine Learning del prossimo semestre.',
-   'libero', NULL, 'attivo',
-   '2025-10-10 09:00:00', '2025-10-10 09:00:00');
-
--- ============================================================================
--- PIANO MATERIALI UTILIZZATI
--- ============================================================================
--- Piano 1 (Giulia, esame BdD): usa chunks di entrambi i materiali di BdD
--- Piano 2 (Marco, libero): usa chunks di ML (più vicino al suo obiettivo)
-
-INSERT INTO piano_materiali_utilizzati (piano_id, chunk_id) VALUES
-(1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6),  -- piano Giulia: tutti i chunks BdD
-(2, 7), (2, 8), (2, 9);                             -- piano Marco: tutti i chunks ML
-
--- ============================================================================
--- PIANO CAPITOLI
--- ============================================================================
--- Piano 1 (Giulia): 2 capitoli
--- Piano 2 (Marco): 1 capitolo
-
-INSERT INTO piano_capitoli (id, piano_id, titolo, descrizione, ordine, completato) VALUES
-(1, 1, 'Modello Relazionale e Normalizzazione',
-   'Fondamenti teorici: relazioni, chiavi, vincoli di integrità e forme normali.',
-   1, 0),
-(2, 1, 'SQL Pratico',
-   'Padronanza del linguaggio SQL: query di base, JOIN e aggregazioni.',
-   2, 0),
-(3, 2, 'Python per l''Analisi Dati',
-   'Librerie Python fondamentali per il data science: NumPy, Pandas, visualizzazione.',
-   1, 0);
-
--- ============================================================================
--- PIANO PARAGRAFI
+-- STEP 4 — MAPPATURA CORSI DI LAUREA ↔ CORSI UNIVERSITARI
 -- ============================================================================
 
-INSERT INTO piano_paragrafi (id, capitolo_id, titolo, descrizione, ordine, completato) VALUES
--- Capitolo 1 (Modello Relazionale)
-(1, 1, 'Concetti base del modello relazionale',   'Relazioni, schemi, istanze, domini.',                    1, 1), -- completato
-(2, 1, 'Chiavi e vincoli di integrità',            'PK, FK, NOT NULL, UNIQUE e integrità referenziale.',     2, 0),
-(3, 1, 'Normalizzazione (1NF → BCNF)',             'Forme normali e dipendenze funzionali.',                  3, 0),
--- Capitolo 2 (SQL)
-(4, 2, 'SELECT, WHERE, ORDER BY',                  'Interrogazioni di base e filtri.',                        1, 0),
-(5, 2, 'JOIN tra tabelle',                         'INNER JOIN, LEFT JOIN e varianti.',                       2, 0),
-(6, 2, 'GROUP BY, HAVING e aggregazioni',          'Funzioni aggregate e raggruppamenti.',                    3, 0),
--- Capitolo 3 (Python - piano Marco)
-(7, 3, 'NumPy e operazioni vettoriali',            'Array, operazioni matriciali, broadcasting.',             1, 0),
-(8, 3, 'Pandas per la manipolazione dei dati',     'DataFrame, Series, merge, groupby.',                     2, 0);
+INSERT INTO corsi_laurea_universitari
+    (corso_di_laurea_id, corso_universitario_id, obbligatorio) VALUES
+    (1, 101, 1),  -- Ing. Informatica: Basi di Dati obbligatorio
+    (1, 102, 1),  -- Ing. Informatica: Algoritmi obbligatorio
+    (1, 103, 1),  -- Ing. Informatica: Analisi I obbligatorio
+    (2, 101, 1),  -- Informatica: Basi di Dati obbligatorio
+    (2, 102, 1),  -- Informatica: Algoritmi obbligatorio
+    (2, 103, 0);  -- Informatica: Analisi I a scelta
+
 
 -- ============================================================================
--- PIANO CONTENUTI
+-- STEP 5 — ISCRIZIONI STUDENTI AI CORSI
 -- ============================================================================
--- Paragrafo 1 (completato): ha una lezione già generata
--- Paragrafo 2: ha lezione + flashcard
--- Paragrafo 3: ha lezione + quiz (quiz Tipo A, id=3 per il piano ML)
--- Paragrafi rimanenti: vuoti (contenuto generato on-demand)
 
-INSERT INTO piano_contenuti (id, paragrafo_id, tipo, contenuto_json, quiz_id, chunk_ids_utilizzati, generato_al_momento) VALUES
--- Paragrafo 1: lezione (pre-generata, completata)
-(1, 1, 'lezione',
-   '{"testo": "## Modello Relazionale\n\nIl modello relazionale organizza i dati in **relazioni** (tabelle). Ogni relazione è caratterizzata da:\n\n- **Schema**: nome della relazione + lista degli attributi con i rispettivi domini\n- **Istanza**: insieme di tuple (righe) che soddisfano lo schema\n\n### Concetti chiave\n\n**Dominio**: insieme di valori ammissibili per un attributo (es: interi, stringhe, date).\n\n**Tupla**: una singola riga della relazione. Ogni tupla assegna un valore a ogni attributo.\n\n**Grado**: numero di attributi della relazione.\n\n**Cardinalità**: numero di tuple nell''istanza corrente.\n\n> 📌 Il modello relazionale fu introdotto da E.F. Codd nel 1970 e rimane il paradigma dominante nei DBMS commerciali (Oracle, PostgreSQL, MySQL, SQLite)."}',
-   NULL, '[1]', 0),
+INSERT INTO studenti_corsi
+    (studente_id, corso_universitario_id, anno_accademico, stato) VALUES
+    (1, 101, '2025-2026', 'iscritto'),   -- Giulia → Basi di Dati
+    (1, 102, '2025-2026', 'iscritto'),   -- Giulia → Algoritmi
+    (2, 101, '2025-2026', 'iscritto'),   -- Francesco → Basi di Dati
+    (2, 103, '2025-2026', 'iscritto'),   -- Francesco → Analisi I
+    (3, 101, '2025-2026', 'iscritto'),   -- Chiara → Basi di Dati
+    (3, 103, '2025-2026', 'iscritto');   -- Chiara → Analisi I
 
--- Paragrafo 2: lezione + flashcard
-(2, 2, 'lezione',
-   '{"testo": "## Chiavi e Vincoli di Integrità\n\n### Chiave Primaria (PK)\nUn insieme **minimale** di attributi che identifica univocamente ogni tupla. Deve essere:\n- **Unica**: non possono esistere due tuple con la stessa PK\n- **Non nulla**: nessun attributo della PK può essere NULL\n\n### Chiave Esterna (FK)\nUn attributo (o insieme) che referenzia la PK di un''altra relazione. Implementa il **vincolo di integrità referenziale**: ogni valore FK deve corrispondere a un valore PK esistente nella tabella referenziata.\n\n### Altri vincoli\n- **NOT NULL**: l''attributo non può essere NULL\n- **UNIQUE**: i valori devono essere distinti (ma ammette NULL)\n- **CHECK**: condizione booleana sul valore dell''attributo"}',
-   NULL, '[2]', 0),
-(3, 2, 'flashcard',
-   '[{"domanda": "Cosè una chiave primaria?", "risposta": "Un insieme minimale di attributi che identifica univocamente ogni tupla. Deve essere unica e non nulla."},
-     {"domanda": "Cosè il vincolo di integrita referenziale?", "risposta": "Garantisce che ogni valore di chiave esterna corrisponda a un valore esistente nella chiave primaria della tabella referenziata."},
-     {"domanda": "Qual e la differenza tra PRIMARY KEY e UNIQUE?", "risposta": "Entrambe garantiscono l unicita, ma PRIMARY KEY non ammette NULL mentre UNIQUE si. Ogni tabella ha una sola PK ma puo avere piu constraint UNIQUE."},
-     {"domanda": "Quando si verifica una violazione dell integrita referenziale?", "risposta": "Quando si inserisce un valore FK che non esiste come PK nella tabella referenziata, o si elimina una riga della tabella referenziata senza gestire le FK collegate."}]',
-   NULL, '[2]', 0),
-
--- Paragrafo 3: lezione (normalizzazione)
-(4, 3, 'lezione',
-   '{"testo": "## Normalizzazione\n\nLa normalizzazione riduce la **ridondanza** e previene le **anomalie** di inserimento, aggiornamento e cancellazione.\n\n### 1NF — Prima Forma Normale\nOgni attributo deve contenere valori **atomici** (indivisibili). Non sono ammessi attributi multivalore o gruppi ripetuti.\n\n### 2NF — Seconda Forma Normale\nDeve essere in 1NF. Ogni attributo non chiave deve dipendere **funzionalmente** dall''intera chiave primaria, non da una parte di essa (nessuna dipendenza parziale).\n\n### 3NF — Terza Forma Normale\nDeve essere in 2NF. Ogni attributo non chiave deve dipendere **direttamente** dalla PK, non transitivamente tramite altri attributi non chiave.\n\n### BCNF — Boyce-Codd Normal Form\nVersione più restrittiva della 3NF. Per ogni dipendenza funzionale X→Y, X deve essere una superchiave."}',
-   NULL, '[3]', 0),
-
--- Paragrafo 7: quiz nel piano di Marco (Machine Learning)
-(5, 7, 'lezione',
-   '{"testo": "## NumPy — Operazioni Vettoriali\n\nNumPy e la libreria fondamentale per il calcolo numerico in Python. Introduce ndarray, un array N-dimensionale omogeneo molto piu efficiente delle liste Python standard.\n\n### Creazione di array\nimport numpy as np\na = np.array([1, 2, 3, 4, 5])\nb = np.zeros((3, 3))\nc = np.linspace(0, 1, 100)\n\n### Broadcasting\nNumPy estende automaticamente array di forme diverse per operazioni elemento per elemento. Permette operazioni vettoriali senza loop Python espliciti."}',
-   NULL, '[7, 8]', 1);  -- generato on-demand
 
 -- ============================================================================
--- STEP 4: LEZIONI DEI CORSI
+-- STEP 6 — MATERIALE DIDATTICO (placeholder per test upload)
+-- Il campo s3_key e testo_estratto sono placeholder: in produzione vengono
+-- popolati dal flusso di upload (boto3 + PyPDF2).
+-- is_processed=0 → il Document Processor non ha ancora segmentato i chunks.
 -- ============================================================================
--- Lezione 1: Basi di Dati, approvata (approvato=1) → visibile agli studenti
--- Lezione 2: Basi di Dati, bozza (approvato=0) → visibile solo al docente
 
-INSERT INTO lezioni_corso (id, corso_universitario_id, docente_id, titolo, contenuto_md, creato_da, approvato, chunk_ids_utilizzati, created_at, aggiornato_il) VALUES
-(1, 1, 1,
-   'Lezione 1 — Il Modello Relazionale',
-   '# Il Modello Relazionale
+INSERT INTO materiali_didattici
+    (id, corso_universitario_id, docente_id, titolo, tipo,
+     s3_key, testo_estratto, is_processed) VALUES
+(
+    5001,
+    101, 10,
+    'Slide Capitolo 1 — Modello Relazionale',
+    'slide',
+    'didattica/corsi/101/slide_cap1_modello_relazionale.pdf',
+    'Il modello relazionale è basato sul concetto di relazione matematica. Una relazione è un sottoinsieme del prodotto cartesiano di domini. Ogni relazione ha uno schema (intestazione) e un''istanza (corpo). La chiave primaria identifica univocamente ogni tupla.',
+    0
+),
+(
+    5002,
+    101, 10,
+    'Slide Capitolo 2 — SQL Base',
+    'slide',
+    'didattica/corsi/101/slide_cap2_sql_base.pdf',
+    'SQL (Structured Query Language) è il linguaggio standard per interrogare basi di dati relazionali. Le istruzioni principali sono SELECT, INSERT, UPDATE e DELETE. La clausola WHERE filtra le righe. GROUP BY aggrega i risultati.',
+    0
+),
+(
+    5003,
+    102, 10,
+    'Dispensa — Complessità Algoritmica',
+    'dispensa',
+    'didattica/corsi/102/dispensa_complessita.pdf',
+    'La notazione O-grande descrive il comportamento asintotico degli algoritmi. Un algoritmo O(n log n) è più efficiente di O(n^2) per input grandi. MergeSort ha complessità O(n log n) nel caso peggiore.',
+    0
+);
 
-## Introduzione
 
-Il modello relazionale, introdotto da E.F. Codd nel 1970, è il paradigma dominante per i sistemi di gestione di basi di dati (DBMS) commerciali. Si basa su solide fondamenta matematiche derivate dalla teoria degli insiemi e dalla logica del primo ordine.
+-- ============================================================================
+-- STEP 7 — CHUNK SEMANTICI (per testare il RAG senza processare PDF reali)
+-- Normalmente generati automaticamente dal Document Processor.
+-- Qui inseriti manualmente per abilitare i test degli agenti AI.
+-- embedding_sync=0 → non ancora vettorizzati nel vector store.
+-- ============================================================================
 
-## Struttura fondamentale
+INSERT INTO materiali_chunks
+    (id, materiale_id, corso_universitario_id, indice_chunk,
+     titolo_sezione, testo, sommario, argomenti_chiave,
+     livello_difficolta, pagine_riferimento, n_token, embedding_sync) VALUES
+(
+    301,
+    5001, 101, 0,
+    'Introduzione al Modello Relazionale',
+    'Il modello relazionale è basato sul concetto di relazione matematica, introdotto da E.F. Codd nel 1970. Una relazione è un sottoinsieme del prodotto cartesiano di domini. Ogni relazione ha uno schema (intestazione) che definisce gli attributi e un''istanza (corpo) che contiene le tuple.',
+    'Definizione e origine del modello relazionale. Concetti di schema e istanza.',
+    '["modello relazionale", "relazione", "schema", "istanza", "Codd"]',
+    1, '[1, 2]', 380, 0
+),
+(
+    302,
+    5001, 101, 1,
+    'Chiavi Primarie e Vincoli di Integrità',
+    'La chiave primaria identifica univocamente ogni tupla in una relazione. Deve soddisfare due proprietà: unicità (nessuna altra tupla ha lo stesso valore) e non nullità (il valore non può essere NULL). Il vincolo di integrità referenziale garantisce che ogni valore di chiave esterna corrisponda a un valore esistente nella tabella referenziata.',
+    'Definizione e proprietà delle chiavi primarie. Vincolo di integrità referenziale.',
+    '["chiave primaria", "integrità referenziale", "chiave esterna", "vincoli", "NULL"]',
+    2, '[12, 13]', 420, 0
+),
+(
+    303,
+    5001, 101, 2,
+    'Normalizzazione — Forme Normali',
+    'La normalizzazione è il processo di organizzare gli attributi di una relazione per ridurre la ridondanza. La Prima Forma Normale (1NF) richiede che tutti gli attributi siano atomici. La Seconda Forma Normale (2NF) elimina le dipendenze parziali. La Terza Forma Normale (3NF) elimina le dipendenze transitive.',
+    'Processo di normalizzazione: 1NF, 2NF, 3NF e relative condizioni.',
+    '["normalizzazione", "1NF", "2NF", "3NF", "dipendenze funzionali", "ridondanza"]',
+    3, '[20, 21, 22]', 510, 0
+),
+(
+    304,
+    5002, 101, 0,
+    'SELECT e Clausola WHERE',
+    'L''istruzione SELECT recupera dati da una o più tabelle. La sintassi base è: SELECT colonne FROM tabella WHERE condizione. La clausola WHERE filtra le righe in base a condizioni booleane. Gli operatori disponibili sono: =, <>, <, >, BETWEEN, LIKE, IN, IS NULL. Le condizioni si combinano con AND e OR.',
+    'Sintassi SELECT con filtri WHERE. Operatori di confronto e combinazioni logiche.',
+    '["SELECT", "WHERE", "SQL", "filtro", "operatori", "AND", "OR"]',
+    2, '[5, 6, 7]', 460, 0
+),
+(
+    305,
+    5003, 102, 0,
+    'Notazione O-grande e Complessità',
+    'La notazione O-grande (Big-O) descrive il limite superiore del tempo di esecuzione di un algoritmo in funzione della dimensione dell''input. O(1) indica tempo costante, O(log n) logaritmico, O(n) lineare, O(n log n) linearitmico, O(n^2) quadratico. MergeSort e HeapSort hanno complessità O(n log n) nel caso peggiore.',
+    'Notazione Big-O e classificazione degli algoritmi per complessità temporale.',
+    '["complessità", "Big-O", "O(n log n)", "MergeSort", "analisi algoritmi"]',
+    2, '[1, 2, 3]', 390, 0
+);
 
-Una **relazione** è un sottoinsieme del prodotto cartesiano di uno o più domini. In pratica, corrisponde a una tabella con righe (tuple) e colonne (attributi).
+-- Marca i materiali come processati (chunks ora presenti)
+UPDATE materiali_didattici SET is_processed = 1 WHERE id IN (5001, 5002, 5003);
 
-### Componenti
-- **Schema**: definisce la struttura (nome + attributi + domini)
-- **Istanza**: i dati effettivi in un dato momento (insieme di tuple)
 
-## Chiavi e vincoli
+-- ============================================================================
+-- STEP 8 — QUIZ TIPO C (approvato dal docente — alimenta le analytics)
+-- ============================================================================
 
-La **chiave primaria** identifica univocamente ogni tupla. La **chiave esterna** implementa l''integrità referenziale tra tabelle. Questi meccanismi garantiscono la coerenza e l''integrità dei dati.
+INSERT INTO quiz
+    (id, titolo, corso_universitario_id, studente_id, docente_id,
+     creato_da, approvato, ripetibile) VALUES
+(
+    300,
+    'Test Modello Relazionale',
+    101, NULL, 10,
+    'ai', 1, 1
+);
 
-## Normalizzazione
+INSERT INTO domande_quiz
+    (id, quiz_id, testo, tipo, opzioni_json, risposta_corretta, spiegazione, ordine, chunk_id)
+VALUES
+(
+    1001, 300,
+    'Quale proprietà deve soddisfare una chiave primaria?',
+    'scelta_multipla',
+    '["Può contenere valori NULL", "Identifica univocamente ogni tupla", "Può avere duplicati", "È opzionale"]',
+    'Identifica univocamente ogni tupla',
+    'La chiave primaria deve essere unica e non nulla per ogni record della relazione.',
+    1, 302
+),
+(
+    1002, 300,
+    'Quale forma normale elimina le dipendenze parziali?',
+    'scelta_multipla',
+    '["Prima Forma Normale (1NF)", "Seconda Forma Normale (2NF)", "Terza Forma Normale (3NF)", "Forma Normale di Boyce-Codd"]',
+    'Seconda Forma Normale (2NF)',
+    'La 2NF richiede che ogni attributo non-chiave dipenda interamente dalla chiave primaria, eliminando le dipendenze parziali.',
+    2, 303
+),
+(
+    1003, 300,
+    'La notazione O(n log n) descrive un algoritmo:',
+    'scelta_multipla',
+    '["Costante", "Lineare", "Linearitmico", "Quadratico"]',
+    'Linearitmico',
+    'O(n log n) è detto linearitmico. È la complessità tipica degli algoritmi di ordinamento efficienti come MergeSort.',
+    3, 302
+);
 
-La normalizzazione organizza le relazioni per minimizzare la ridondanza attraverso le forme normali (1NF, 2NF, 3NF, BCNF).',
-   'ai', 1, '[1, 2, 3]',
-   '2025-09-20 10:00:00', '2025-09-22 14:00:00'),
 
-(2, 1, 1,
-   'Lezione 2 — SQL: dalle basi alle query avanzate',
-   '# SQL — Structured Query Language
+-- ============================================================================
+-- STEP 9 — PIANO PERSONALIZZATO (per testare gli agenti di studio)
+-- ============================================================================
 
-## Bozza in revisione
+INSERT INTO piani_personalizzati
+    (id, studente_id, titolo, descrizione, tipo,
+     corso_universitario_id, stato) VALUES
+(
+    50,
+    1,
+    'Preparazione Esame Basi di Dati',
+    'Piano per la preparazione all''esame di Basi di Dati. Focus su modello relazionale, SQL e normalizzazione.',
+    'esame',
+    101, 'attivo'
+);
 
-Questa lezione è in fase di revisione da parte del docente.',
-   'ai', 0, '[4, 5, 6]',
-   '2025-09-25 11:00:00', '2025-09-25 11:00:00');
+INSERT INTO piano_capitoli
+    (id, piano_id, titolo, descrizione, ordine, completato) VALUES
+(
+    200, 50,
+    'Modello Relazionale',
+    'Fondamenti del modello relazionale: relazioni, schemi, chiavi e vincoli di integrità.',
+    1, 0
+),
+(
+    201, 50,
+    'SQL',
+    'Linguaggio SQL: DDL, DML, query con JOIN, aggregazioni e subquery.',
+    2, 0
+);
+
+INSERT INTO piano_paragrafi
+    (id, capitolo_id, titolo, descrizione, ordine, completato) VALUES
+(
+    600, 200, 'Chiavi e Vincoli',       'Chiave primaria, chiave esterna, NOT NULL, UNIQUE.',    1, 0),
+(
+    601, 200, 'Normalizzazione',        '1NF, 2NF, 3NF e dipendenze funzionali.',                2, 0),
+(
+    602, 201, 'SELECT e WHERE',         'Sintassi SELECT, filtri, operatori di confronto.',      1, 0),
+(
+    603, 201, 'JOIN e Aggregazioni',    'INNER JOIN, LEFT JOIN, GROUP BY, HAVING.',              2, 0);
+
+INSERT INTO piano_contenuti
+    (paragrafo_id, tipo, contenuto_json, quiz_id, chunk_ids_utilizzati, generato_al_momento) VALUES
+(
+    600, 'flashcard',
+    '[{"domanda": "Cos''e una chiave primaria?", "risposta": "Un attributo che identifica univocamente ogni tupla. Non puo essere NULL."}, {"domanda": "Cosa garantisce il vincolo di integrita referenziale?", "risposta": "Che ogni valore di chiave esterna corrisponda a un valore esistente nella tabella referenziata."}]',
+    NULL, '[302]', 0
+),
+(
+    601, 'riassunto',
+    '"La normalizzazione organizza gli attributi per ridurre la ridondanza. 1NF: attributi atomici. 2NF: no dipendenze parziali. 3NF: no dipendenze transitive."',
+    NULL, '[303]', 0
+);
+
+
+-- ============================================================================
+-- STEP 10 — LEZIONE DEL CORSO (approvata, visibile agli studenti)
+-- ============================================================================
+
+INSERT INTO lezioni_corso
+    (id, corso_universitario_id, docente_id, titolo, contenuto_md,
+     creato_da, approvato, chunk_ids_utilizzati) VALUES
+(
+    700,
+    101, 10,
+    'Introduzione al Modello Relazionale',
+    '## Il Modello Relazionale
+
+Il modello relazionale è stato introdotto da **E.F. Codd nel 1970** e rappresenta il fondamento delle basi di dati moderne.
+
+### Concetti Chiave
+
+Una **relazione** è un sottoinsieme del prodotto cartesiano di domini. È composta da:
+- **Schema**: definisce il nome della relazione e i suoi attributi
+- **Istanza**: l''insieme delle tuple presenti in un dato momento
+
+### Chiavi
+
+La **chiave primaria** identifica univocamente ogni tupla e non può contenere valori NULL.
+
+La **chiave esterna** implementa il vincolo di integrità referenziale: ogni suo valore deve corrispondere a un valore esistente nella tabella referenziata.',
+    'ai', 1,
+    '[301, 302]'
+);
+
+
+-- Riabilita i vincoli FK
+PRAGMA foreign_keys = ON;
+
+-- ============================================================================
+-- RIEPILOGO DATI INSERITI
+-- ============================================================================
+-- users:                6  (1 admin, 2 docenti, 3 studenti)
+-- corsi_di_laurea:      3
+-- corsi_universitari:   3
+-- studenti_corsi:       6  (iscrizioni)
+-- materiali_didattici:  3  (is_processed=1)
+-- materiali_chunks:     5  (embedding_sync=0 — da vettorizzare)
+-- quiz:                 1  (Tipo C, approvato)
+-- domande_quiz:         3
+-- piani_personalizzati: 1
+-- piano_capitoli:       2
+-- piano_paragrafi:      4
+-- piano_contenuti:      2
+-- lezioni_corso:        1  (approvata)
+-- ============================================================================

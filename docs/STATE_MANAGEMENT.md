@@ -17,24 +17,36 @@ Poiché l'applicazione segue un'architettura ibrida Streamlit-LangGraph, la gest
 
 ## 2. Stato Utente e Autenticazione
 
-Al momento dell'accesso, l'applicazione recupera i dati dal database e instanzia chiavi fisse in `st.session_state`:
+Al momento dell'accesso, l'applicazione esegue una singola query su `users` e instanzia chiavi fisse in `st.session_state`:
 
 ```python
-st.session_state.is_logged_in    # bool — True se autenticato
-st.session_state.current_user_id # int  — PK di studenti.id o docenti.id
-st.session_state.user_role       # str  — 'Studente' | 'Docente' | 'Ospite'
-st.session_state.chat_history    # list — cronologia messaggi della sessione attiva
+# Query di autenticazione — unica per tutti i ruoli
+user = db.trova_uno("users", {"email": email})
+
+# Verifica password
+if not verifica_password(password, user["password_hash"]):
+    # gestione errore
+    ...
+
+# Popolamento session state
+st.session_state.is_logged_in    = True
+st.session_state.current_user_id = user["id"]        # int — PK di users.id
+st.session_state.user_role       = user["ruolo"].capitalize()  # 'Studente' | 'Docente' | 'Admin'
+st.session_state.chat_history    = []
 ```
+
+> **Convenzione ruolo:** nel database il valore è sempre minuscolo (`'studente'`, `'docente'`, `'admin'`). La capitalizzazione avviene **una sola volta** qui in `app.py`. Non normalizzare il valore in altri punti del codice.
 
 **Routing per ruolo:**
 - `'Ospite'`   → interfaccia di orientamento universitario (nessun record su DB, sessione volatile)
 - `'Studente'` → interfaccia piani personalizzati e preparazione esami
 - `'Docente'`  → interfaccia caricamento materiali, approvazione contenuti, report
+- `'Admin'`    → interfaccia di gestione piattaforma (sviluppo futuro)
 
-**Gatekeeper:** Ogni pagina verifica `st.session_state.user_role` prima di renderizzare. Un Ospite non può accedere alle pagine Studente o Docente.
+**Gatekeeper:** Ogni pagina verifica `st.session_state.user_role` prima di renderizzare. Un Ospite non può accedere alle pagine Studente, Docente o Admin.
 
 **Ospite — stato volatile:**
-L'Ospite non ha un record nelle tabelle `studenti`, `docenti` o `admin`. Tutto il suo stato (risposte al colloquio, dati CV analizzati) vive esclusivamente in `st.session_state` e si azzera alla chiusura della sessione. Nessun dato viene scritto sul database.
+L'Ospite non ha un record nella tabella `users`. Tutto il suo stato (risposte al colloquio, dati CV analizzati) vive esclusivamente in `st.session_state` e si azzera alla chiusura della sessione. Nessun dato viene scritto sul database.
 
 ---
 
@@ -54,6 +66,7 @@ I dati ad alta frequenza (risposte temporanee a un quiz prima del submit, naviga
 | Completamento di un capitolo del piano | `piano_capitoli.completato = 1` |
 | Modifica al piano tramite chat | `piani_personalizzati`, `piano_capitoli`, `piano_paragrafi`, `piano_contenuti` |
 | Approvazione contenuto da parte del docente | `lezioni_corso.approvato`, `quiz.approvato` |
+| Vettorizzazione di un chunk | `materiali_chunks.embedding_sync = 1` |
 
 **Regola:** Nessun dato viene scritto sul DB durante la navigazione passiva. Solo azioni esplicite dell'utente scatenano scritture.
 
@@ -77,8 +90,8 @@ I dati ad alta frequenza (risposte temporanee a un quiz prima del submit, naviga
 ## 5. Gestione dello Stato degli Agenti LangGraph
 
 **Thread ID per la persistenza conversazionale:**
-- Studente: `thread_id = str(studente_id)`
-- Docente: `thread_id = str(docente_id)`
+- Studente: `thread_id = str(user_id)`
+- Docente: `thread_id = str(user_id)`
 - Ospite: `thread_id = "ospite_" + str(session_uuid)` — non persistente tra sessioni
 
 **Stato del grafo (TypedDict):**

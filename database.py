@@ -5,17 +5,17 @@
 # Uso:
 #   from platform_sdk.database import db
 #
-#   db.init()                                               # Crea tabelle e carica dati iniziali
-#   db.inserisci("studenti", {"nome": "Giulia"})            # INSERT
-#   db.trova_uno("studenti", {"id": 1})                     # SELECT ... LIMIT 1
-#   db.trova_tutti("corsi_universitari")                    # SELECT *
-#   db.aggiorna("studenti", {"id": 1}, {"stato": "active"}) # UPDATE
-#   db.elimina("piano_contenuti", {"id": 1})                # DELETE
-#   db.esegui("SELECT * FROM studenti WHERE stato = ?", ["active"])  # Query custom
-#   db.conta("studenti", {"corso_di_laurea_id": 3})         # COUNT
+#   db.init()                                             # Crea tabelle e carica dati iniziali
+#   db.inserisci("users", {"nome": "Giulia"})             # INSERT
+#   db.trova_uno("users", {"id": 1})                      # SELECT ... LIMIT 1
+#   db.trova_tutti("corsi_universitari")                  # SELECT *
+#   db.aggiorna("users", {"id": 1}, {"stato": "active"})  # UPDATE
+#   db.elimina("piano_contenuti", {"id": 1})              # DELETE
+#   db.esegui("SELECT * FROM users WHERE ruolo = ?", ["studente"])  # Query custom
+#   db.conta("users", {"ruolo": "studente"})              # COUNT
 #
 # Tabelle disponibili (da schema.sql — usare SOLO questi nomi):
-#   studenti | docenti | admin
+#   users
 #   corsi_di_laurea | corsi_universitari
 #   corsi_laurea_universitari | studenti_corsi
 #   quiz | domande_quiz | tentativi_quiz | risposte_domande
@@ -23,6 +23,15 @@
 #   piani_personalizzati | piano_materiali_utilizzati
 #   piano_capitoli | piano_paragrafi | piano_contenuti
 #   lezioni_corso
+#
+# VINCOLO APPLICATIVO — verifica ruolo prima degli INSERT su:
+#   studenti_corsi      → studente_id  deve avere users.ruolo = 'studente'
+#   quiz                → studente_id  deve avere users.ruolo = 'studente'
+#                      → docente_id   deve avere users.ruolo = 'docente'
+#   tentativi_quiz      → studente_id  deve avere users.ruolo = 'studente'
+#   piani_personalizzati → studente_id deve avere users.ruolo = 'studente'
+#   materiali_didattici → docente_id   deve avere users.ruolo = 'docente'
+#   lezioni_corso       → docente_id   deve avere users.ruolo = 'docente'
 # ============================================================================
 
 import json
@@ -99,11 +108,13 @@ class Database:
             L'ID della riga inserita
 
         Esempio:
-            studente_id = db.inserisci("studenti", {
+            studente_id = db.inserisci("users", {
                 "nome": "Giulia",
                 "cognome": "Bianchi",
                 "email": "g.bianchi@studenti.unina.it",
                 "password_hash": "$2b$12$...",
+                "ruolo": "studente",
+                "matricola_studente": "N86001234",
                 "corso_di_laurea_id": 3,
                 "anno_corso": 2
             })
@@ -195,9 +206,9 @@ class Database:
             Un dizionario con i dati della riga, o None se non trovata
 
         Esempio:
-            studente = db.trova_uno("studenti", {"email": "g.bianchi@studenti.unina.it"})
-            if studente:
-                print(f"Trovato: {studente['nome']} {studente['cognome']}")
+            utente = db.trova_uno("users", {"email": "g.bianchi@studenti.unina.it"})
+            if utente:
+                print(f"Trovato: {utente['nome']} {utente['cognome']} ({utente['ruolo']})")
 
             # Verifica idempotenza RAG prima di processare un materiale
             materiale = db.trova_uno("materiali_didattici", {"id": materiale_id})
@@ -250,6 +261,9 @@ class Database:
                 {"corso_universitario_id": 101},
                 ordine="indice_chunk ASC"
             )
+
+            # Tutti i docenti della piattaforma
+            docenti = db.trova_tutti("users", {"ruolo": "docente"})
         """
         where, valori = self._costruisci_where(filtri)
         sql = f"SELECT * FROM {tabella}{where}"
@@ -278,14 +292,14 @@ class Database:
             Il numero di righe
 
         Esempio:
-            n_studenti = db.conta("studenti")
+            n_studenti = db.conta("users", {"ruolo": "studente"})
             n_iscritti = db.conta("studenti_corsi", {"corso_universitario_id": 101})
             n_completati = db.conta("piano_paragrafi", {"piano_id": 50, "completato": 1})
 
-            # Verifica idempotenza: i chunks esistono già?
-            n_chunks = db.conta("materiali_chunks", {"materiale_id": materiale_id})
-            if n_chunks > 0:
-                return  # già processato
+            # Verifica idempotenza embedding: i chunks sono già vettorizzati?
+            n_da_sync = db.conta("materiali_chunks", {"embedding_sync": 0})
+            if n_da_sync == 0:
+                return  # tutto già sincronizzato
         """
         where, valori = self._costruisci_where(filtri)
         sql = f"SELECT COUNT(*) as n FROM {tabella}{where}"

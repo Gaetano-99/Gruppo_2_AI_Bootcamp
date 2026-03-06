@@ -5,7 +5,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 1. Studente (`studenti`)
+### 1. Utente Studente (`users` — ruolo='studente')
+
+I campi `matricola_docente` e `dipartimento` sono assenti: non vanno inclusi nel payload, nemmeno come `null`. I campi specifici del ruolo opposto non esistono per quell'utente.
 
 ```json
 {
@@ -14,18 +16,22 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
   "cognome": "Bianchi",
   "email": "g.bianchi@studenti.unina.it",
   "password_hash": "$2b$12$...",
+  "ruolo": "studente",
+  "stato": "active",
+  "created_at": "2025-09-01T09:00:00",
   "data_nascita": "2001-04-15",
   "telefono": "+39 333 1234567",
+  "matricola_studente": "N86001234",
   "corso_di_laurea_id": 3,
-  "anno_corso": 2,
-  "stato": "active",
-  "created_at": "2025-09-01T09:00:00"
+  "anno_corso": 2
 }
 ```
 
 ---
 
-### 2. Docente (`docenti`)
+### 2. Utente Docente (`users` — ruolo='docente')
+
+I campi `data_nascita`, `telefono`, `matricola_studente`, `corso_di_laurea_id` e `anno_corso` sono assenti: appartengono al ruolo studente.
 
 ```json
 {
@@ -34,16 +40,36 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
   "cognome": "Rossi",
   "email": "m.rossi@unina.it",
   "password_hash": "$2b$12$...",
-  "matricola_docente": "DOC-2021-042",
-  "dipartimento": "Ingegneria Informatica",
+  "ruolo": "docente",
   "stato": "active",
-  "created_at": "2021-10-01T08:00:00"
+  "created_at": "2021-10-01T08:00:00",
+  "matricola_docente": "DOC-2021-042",
+  "dipartimento": "Ingegneria Informatica"
 }
 ```
 
 ---
 
-### 3. Corso di Laurea (`corsi_di_laurea`)
+### 3. Utente Admin (`users` — ruolo='admin')
+
+L'admin non ha campi ruolo-specifici. Record inserito manualmente — non esiste flusso di registrazione self-service per questo ruolo.
+
+```json
+{
+  "id": 99,
+  "nome": "Anna",
+  "cognome": "Verdi",
+  "email": "a.verdi@unina.it",
+  "password_hash": "$2b$12$...",
+  "ruolo": "admin",
+  "stato": "active",
+  "created_at": "2020-01-01T00:00:00"
+}
+```
+
+---
+
+### 4. Corso di Laurea (`corsi_di_laurea`)
 
 ```json
 {
@@ -56,7 +82,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 4. Corso Universitario (`corsi_universitari`)
+### 5. Corso Universitario (`corsi_universitari`)
+
+`docente_id` referenzia `users.id` di un utente con `ruolo='docente'`.
 
 ```json
 {
@@ -76,7 +104,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 5. Iscrizione Studente a Corso (`studenti_corsi`)
+### 6. Iscrizione Studente a Corso (`studenti_corsi`)
+
+`studente_id` referenzia `users.id` di un utente con `ruolo='studente'`.
 
 ```json
 {
@@ -93,7 +123,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 6. Materiale Didattico (`materiali_didattici`)
+### 7. Materiale Didattico (`materiali_didattici`)
+
+`docente_id` referenzia `users.id` di un utente con `ruolo='docente'`.
 
 ```json
 {
@@ -111,7 +143,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 7. Chunk Semantico (`materiali_chunks`)
+### 8. Chunk Semantico (`materiali_chunks`)
+
+`embedding_sync=0` indica che il chunk non è ancora stato vettorizzato nel vector store esterno (es. ChromaDB). Il campo `id` di questo record è usato come `document_id` nella collection vettoriale corrispondente al corso.
 
 ```json
 {
@@ -126,13 +160,16 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
   "livello_difficolta": 2,
   "pagine_riferimento": [12, 13],
   "n_token": 420,
+  "embedding_sync": 0,
   "created_at": "2025-09-05T15:00:00"
 }
 ```
 
 ---
 
-### 8. Quiz (`quiz`) — Tipo C (approvato dal docente)
+### 9. Quiz (`quiz`) — Tipo C (approvato dal docente)
+
+`docente_id` referenzia `users.id` con `ruolo='docente'`. `studente_id` è NULL per i quiz Tipo C.
 
 ```json
 {
@@ -150,7 +187,7 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 9. Domanda Quiz (`domande_quiz`)
+### 10. Domanda Quiz (`domande_quiz`)
 
 ```json
 {
@@ -168,7 +205,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 10. Tentativo Quiz (`tentativi_quiz`)
+### 11. Tentativo Quiz (`tentativi_quiz`)
+
+`studente_id` referenzia `users.id` con `ruolo='studente'`.
 
 ```json
 {
@@ -184,7 +223,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 11. Piano Personalizzato (`piani_personalizzati`)
+### 12. Piano Personalizzato (`piani_personalizzati`)
+
+`studente_id` referenzia `users.id` con `ruolo='studente'`.
 
 ```json
 {
@@ -202,7 +243,7 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 12. Capitolo del Piano (`piano_capitoli`)
+### 13. Capitolo del Piano (`piano_capitoli`)
 
 ```json
 {
@@ -218,7 +259,7 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 13. Paragrafo del Piano (`piano_paragrafi`)
+### 14. Paragrafo del Piano (`piano_paragrafi`)
 
 ```json
 {
@@ -234,7 +275,7 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 14. Contenuto del Piano — Flashcard (`piano_contenuti`)
+### 15. Contenuto del Piano — Flashcard (`piano_contenuti`)
 
 ```json
 {
@@ -254,7 +295,9 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
 
 ---
 
-### 15. Lezione del Corso (`lezioni_corso`)
+### 16. Lezione del Corso (`lezioni_corso`)
+
+`docente_id` referenzia `users.id` con `ruolo='docente'`.
 
 ```json
 {
@@ -270,3 +313,13 @@ Questo file funge da "contratto dei dati" per l'intera applicazione. Fornisce es
   "aggiornato_il": "2025-09-22T14:00:00"
 }
 ```
+
+---
+
+## Note Trasversali
+
+**Convenzione sul campo `ruolo`:** Nel database il valore è sempre minuscolo (`'studente'`, `'docente'`, `'admin'`). In `st.session_state.user_role` viene capitalizzato all'ingresso in `app.py` (`user["ruolo"].capitalize()`). Non normalizzare il valore in altri punti del codice.
+
+**Campi FK e validazione ruolo:** SQLite non impone CHECK constraint cross-tabella. Ogni volta che si inserisce un record con `studente_id` o `docente_id`, il codice in `db_handler.py` deve verificare che `users.ruolo` corrisponda al ruolo atteso prima dell'INSERT. Questo vale per: `studenti_corsi`, `quiz`, `tentativi_quiz`, `piani_personalizzati`, `materiali_didattici`, `lezioni_corso`.
+
+**`embedding_sync` nei chunks:** Il campo funziona esattamente come `is_processed` nei materiali. Prima di vettorizzare un chunk, verificare sempre `embedding_sync=0`. Se `embedding_sync=1` il vettore esiste già nel vector store — non rielaborare.

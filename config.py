@@ -36,7 +36,7 @@ LLM_MAX_TOKENS_FAST = 2048     # Lunghezza massima risposta modello veloce
 
 # --- Database SQLite ---
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), "database", "learnai.db")
-SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "database", "schema.sql")
+SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "database", "Nuovo_schema.sql")
 SEED_PATH = os.path.join(os.path.dirname(__file__), "database", "seed.sql")
 
 # --- Storage S3 ---
