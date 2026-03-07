@@ -241,11 +241,19 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
     is_corso: bool = stato.get("is_corso_docente", True)
 
     if not struttura:
-        return {}
+        return {"errore": "Struttura corso vuota: il modello non ha prodotto output valido."}
 
     titolo_corso: str = struttura.get("titolo_corso", argomento)
     descrizione: str = struttura.get("descrizione_breve", "")
 
+    try:
+        return _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_ids, corso_id, is_corso)
+    except Exception as exc:
+        return {"errore": f"Errore DB durante il salvataggio: {exc}"}
+
+
+def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_ids, corso_id, is_corso) -> dict:
+    """Esegue le insert nel DB. Separata da _nodo_salva_risultati per isolare il try/except."""
     # 1. Crea il piano (corso docente o piano studente)
     piano_id: int = db.inserisci(
         "piani_personalizzati",
@@ -286,7 +294,7 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
                     "paragrafo_id": paragrafo_id,
                     "tipo": "lezione",
                     "contenuto_json": paragrafo["testo"],
-                    "chunk_ids_utilizzati": chunk_ids,
+                    "chunk_ids_utilizzati": json.dumps(chunk_ids),  # FIX: lista → JSON string
                     "generato_al_momento": 0,
                 },
             )
