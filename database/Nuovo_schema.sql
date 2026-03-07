@@ -345,11 +345,15 @@ CREATE TABLE IF NOT EXISTS piani_personalizzati (
     titolo                  TEXT    NOT NULL,
     descrizione             TEXT,                    -- obiettivo del piano (scritto dall'agente)
     tipo                    TEXT    NOT NULL
-                                CHECK(tipo IN ('esame', 'libero')),
+                                CHECK(tipo IN ('esame', 'libero', 'corso')),
     corso_universitario_id  INTEGER REFERENCES corsi_universitari(id)
-                                ON DELETE SET NULL, -- NOT NULL se tipo='esame', NULL se 'libero'
+                                ON DELETE SET NULL, -- NOT NULL se tipo='esame'/'corso', NULL se 'libero'
     stato                   TEXT    NOT NULL DEFAULT 'attivo'
                                 CHECK(stato IN ('attivo', 'completato', 'archiviato')),
+    is_corso_docente        INTEGER NOT NULL DEFAULT 0
+                                CHECK(is_corso_docente IN (0, 1)),
+                                -- 0 = piano personalizzato studente
+                                -- 1 = corso strutturato generato per il docente
     created_at              DATETIME DEFAULT CURRENT_TIMESTAMP,
     aggiornato_il           DATETIME DEFAULT CURRENT_TIMESTAMP
 );

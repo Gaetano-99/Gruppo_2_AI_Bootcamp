@@ -99,6 +99,7 @@ class ContentGenState(TypedDict):
         corso_id: ID del corso universitario da cui recuperare i materiali.
         argomento_richiesto: Descrizione dell'argomento da trattare.
         docente_id: ID del docente che richiede la generazione.
+        is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
         chunks_recuperati: Lista di dizionari con i chunk RAG (id, testo, ...).
         n_chunk_totali_corso: Conteggio totale chunk del corso (per display).
         struttura_corso_generata: Dizionario JSON con la StrutturaCorso prodotta.
@@ -108,6 +109,7 @@ class ContentGenState(TypedDict):
     corso_id: int
     argomento_richiesto: str
     docente_id: int
+    is_corso_docente: bool
     chunks_recuperati: list[dict]
     n_chunk_totali_corso: int
     struttura_corso_generata: dict
@@ -216,10 +218,12 @@ Lingua: Italiano."""
 
 
 def _nodo_salva_risultati(stato: ContentGenState) -> dict:
-    """Nodo di persistenza: salva la struttura corso nel database.
+    """Nodo di persistenza: normalizza e salva la StrutturaCorso nel database.
 
-    Salva in ``lezioni_corso`` il JSON della StrutturaCorso serializzato
-    come stringa, insieme ai ``chunk_ids_utilizzati`` per tracciabilità.
+    Decompone il JSON generato e lo salva nelle tabelle relazionali:
+        piani_personalizzati → piano_capitoli → piano_paragrafi → piano_contenuti
+
+    Il campo ``is_corso_docente`` distingue tra corso docente (1) e piano studente (0).
 
     Args:
         stato: Stato corrente del grafo (deve essere completo).
@@ -234,21 +238,58 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
     chunk_ids: list[int] = stato.get("chunk_ids_utilizzati", [])
     argomento: str = stato["argomento_richiesto"]
     struttura: dict = stato.get("struttura_corso_generata", {})
+    is_corso: bool = stato.get("is_corso_docente", True)
 
-    if struttura:
-        titolo_corso: str = struttura.get("titolo_corso", argomento)
-        db.inserisci(
-            "lezioni_corso",
+    if not struttura:
+        return {}
+
+    titolo_corso: str = struttura.get("titolo_corso", argomento)
+    descrizione: str = struttura.get("descrizione_breve", "")
+
+    # 1. Crea il piano (corso docente o piano studente)
+    piano_id: int = db.inserisci(
+        "piani_personalizzati",
+        {
+            "studente_id": stato["docente_id"],  # docente come creatore
+            "titolo": titolo_corso,
+            "descrizione": descrizione,
+            "tipo": "corso" if is_corso else "esame",
+            "corso_universitario_id": corso_id,
+            "stato": "attivo",
+            "is_corso_docente": 1 if is_corso else 0,
+        },
+    )
+
+    # 2. Per ogni capitolo → piano_capitoli → piano_paragrafi → piano_contenuti
+    for capitolo in struttura.get("capitoli", []):
+        capitolo_id: int = db.inserisci(
+            "piano_capitoli",
             {
-                "corso_universitario_id": corso_id,
-                "docente_id": stato["docente_id"],
-                "titolo": titolo_corso,
-                "contenuto_md": json.dumps(struttura, ensure_ascii=False, indent=2),
-                "creato_da": "ai",
-                "approvato": 0,
-                "chunk_ids_utilizzati": chunk_ids,
+                "piano_id": piano_id,
+                "titolo": capitolo["titolo"],
+                "ordine": capitolo.get("ordine", 0),
             },
         )
+
+        for paragrafo in capitolo.get("paragrafi", []):
+            paragrafo_id: int = db.inserisci(
+                "piano_paragrafi",
+                {
+                    "capitolo_id": capitolo_id,
+                    "titolo": paragrafo["titolo"],
+                    "ordine": 0,
+                },
+            )
+            db.inserisci(
+                "piano_contenuti",
+                {
+                    "paragrafo_id": paragrafo_id,
+                    "tipo": "lezione",
+                    "contenuto_json": paragrafo["testo"],
+                    "chunk_ids_utilizzati": chunk_ids,
+                    "generato_al_momento": 0,
+                },
+            )
 
     return {}
 
@@ -285,6 +326,7 @@ def esegui_generazione(
     corso_id: int,
     argomento_richiesto: str,
     docente_id: int = 1,
+    is_corso_docente: bool = True,
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
@@ -293,6 +335,7 @@ def esegui_generazione(
         corso_id: ID del corso universitario.
         argomento_richiesto: Argomento su cui generare i contenuti.
         docente_id: ID del docente che richiede la generazione.
+        is_corso_docente: Se True, salva come corso docente; se False, come piano studente.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -300,6 +343,7 @@ def esegui_generazione(
     stato_iniziale: ContentGenState = {
         "corso_id": corso_id,
         "docente_id": docente_id,
+        "is_corso_docente": is_corso_docente,
         "argomento_richiesto": argomento_richiesto,
         "chunks_recuperati": [],
         "n_chunk_totali_corso": 0,
