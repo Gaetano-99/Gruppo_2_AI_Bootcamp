@@ -796,18 +796,13 @@ def _render_sidebar_piani(studente_id: int):
         </div>
         """, unsafe_allow_html=True)
 
-        col_studia, col_del = st.columns([3, 1])
-        with col_studia:
-            if st.button("Studia →", key=f"btn_piano_sx_{pid}", use_container_width=True):
-                st.session_state["_piano_sel"]  = pid
-                st.session_state["_view_mode"]  = "piano"
-                st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
-                st.session_state["_corso_nome"] = piano.get("corso_nome", "")
-                st.session_state["_chat_history"] = []
-                st.rerun()
-        with col_del:
-            if st.button("🗑", key=f"btn_del_piano_{pid}", use_container_width=True, help="Elimina piano"):
-                _dialog_elimina_piano(pid, piano["titolo"] or "Piano")
+        if st.button("Studia →", key=f"btn_piano_sx_{pid}", use_container_width=True):
+            st.session_state["_piano_sel"]  = pid
+            st.session_state["_view_mode"]  = "piano"
+            st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
+            st.session_state["_corso_nome"] = piano.get("corso_nome", "")
+            st.session_state["_chat_history"] = []
+            st.rerun()
 
 
 def _render_contenuto_piano(piano_id: int):
@@ -1014,23 +1009,14 @@ def _render_contenuto_piano(piano_id: int):
                             fronte_safe = fronte.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                             retro_safe  = retro.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                             uid = f"fc_{i}_{p_idx}_{fc_idx}_{j}"
-                            reveal_key = f"_fc_{uid}"
                             with cols_fc[j % n_col]:
-                                # Fronte sempre visibile
                                 st.markdown(
-                                    f'<div class="fc-front-side">{fronte_safe}</div>',
+                                    f'<input type="checkbox" id="{uid}" class="fc-toggle">'
+                                    f'<div class="fc-front-side">{fronte_safe}</div>'
+                                    f'<label for="{uid}" class="fc-reveal-btn">👁 Mostra risposta</label>'
+                                    f'<div class="fc-back-side">{retro_safe}</div>',
                                     unsafe_allow_html=True,
                                 )
-                                # Retro: toggle con st.button (non <input> che Streamlit sanitizza)
-                                if st.session_state.get(reveal_key):
-                                    st.markdown(
-                                        f'<div class="fc-back-side" style="display:block;">{retro_safe}</div>',
-                                        unsafe_allow_html=True,
-                                    )
-                                else:
-                                    if st.button("👁 Mostra risposta", key=f"fc_show_{uid}", use_container_width=True):
-                                        st.session_state[reveal_key] = True
-                                        st.rerun()
 
                 # ---- SCHEMA / ALTRI ----
                 for c in altri:
@@ -1265,43 +1251,6 @@ def _seed_iscrizioni_se_mancanti(studente_id: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Eliminazione piani personalizzati
-# ---------------------------------------------------------------------------
-
-def _elimina_piano_db(piano_id: int) -> None:
-    """Elimina un piano personalizzato e tutto il suo contenuto in cascata."""
-    paragrafi = db.esegui("""
-        SELECT pp.id FROM piano_paragrafi pp
-        JOIN piano_capitoli pc ON pp.capitolo_id = pc.id
-        WHERE pc.piano_id = ?
-    """, [piano_id])
-    par_ids = [p["id"] for p in paragrafi]
-    if par_ids:
-        placeholders = ",".join("?" * len(par_ids))
-        db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({placeholders})", par_ids)
-        db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({placeholders})", par_ids)
-    db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
-    db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
-
-
-@st.dialog("Elimina piano")
-def _dialog_elimina_piano(piano_id: int, piano_titolo: str):
-    st.warning(f"Stai per eliminare il piano **{piano_titolo}**.")
-    st.caption("Questa azione è irreversibile. Capitoli, sezioni e contenuti verranno eliminati definitivamente.")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Annulla", use_container_width=True):
-            st.rerun()
-    with col2:
-        if st.button("Elimina", type="primary", use_container_width=True):
-            _elimina_piano_db(piano_id)
-            if st.session_state.get("_piano_sel") == piano_id:
-                st.session_state["_piano_sel"] = None
-                st.session_state["_view_mode"] = "corso"
-            st.rerun()
-
-
-# ---------------------------------------------------------------------------
 # Dialogs materiale didattico
 # ---------------------------------------------------------------------------
 
@@ -1486,15 +1435,12 @@ def mostra_homepage_studente():
             <div class="section-sub">{corso_sel_nome} · Piano personalizzato</div>
             """, unsafe_allow_html=True)
 
-            col_back, col_del_piano, _ = st.columns([1, 1, 4])
+            col_back, _ = st.columns([1, 5])
             with col_back:
                 if st.button("← Corso"):
                     st.session_state["_view_mode"] = "corso"
                     st.session_state["_piano_sel"] = None
                     st.rerun()
-            with col_del_piano:
-                if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
-                    _dialog_elimina_piano(piano_sel_id, titolo_piano)
 
             # Materiale didattico (caricabile solo nel contesto del piano)
             with st.container(horizontal=True):
