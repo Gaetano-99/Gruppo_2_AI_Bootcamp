@@ -277,21 +277,58 @@ L'admin non ha campi ruolo-specifici. Record inserito manualmente — non esiste
 
 ### 15. Contenuto del Piano — Flashcard (`piano_contenuti`)
 
+Il campo `contenuto_json` delle flashcard può essere generato in formati diversi dai vari agenti AI.
+Il codice di rendering in `views/studente.py` riconosce tutti i formati seguenti — **non normalizzare
+a un solo formato in DB**: accettare e gestire tutti.
+
+**Formato 1 — lista diretta (formato storico):**
+```json
+[
+  { "domanda": "Cos'è una chiave primaria?", "risposta": "Un attributo che identifica univocamente ogni tupla." },
+  { "domanda": "Cosa garantisce l'integrità referenziale?", "risposta": "Che ogni FK corrisponda a una PK esistente." }
+]
+```
+
+**Formato 2 — wrapper `cards` (output ContentGen corrente):**
+```json
+{
+  "cards": [
+    { "fronte": "Cos'è una chiave primaria?", "retro": "Un attributo che identifica univocamente ogni tupla." },
+    { "fronte": "Cosa garantisce l'integrità referenziale?", "retro": "Che ogni FK corrisponda a una PK esistente." }
+  ]
+}
+```
+
+**Formato 3 — wrapper `flashcard`:**
+```json
+{
+  "flashcard": [
+    { "front": "What is a primary key?", "back": "An attribute that uniquely identifies each tuple." }
+  ]
+}
+```
+
+**Campi alternativi riconosciuti per fronte/retro:**
+- Fronte: `fronte` | `front` | `domanda`
+- Retro: `retro` | `back` | `risposta`
+
+**Record completo di esempio (`contenuto_json` come stringa serializzata):**
 ```json
 {
   "id": 900,
   "paragrafo_id": 600,
   "tipo": "flashcard",
-  "contenuto_json": [
-    { "domanda": "Cos'è una chiave primaria?", "risposta": "Un attributo o insieme di attributi che identifica univocamente ogni tupla." },
-    { "domanda": "Cosa garantisce il vincolo di integrità referenziale?", "risposta": "Che ogni valore di chiave esterna corrisponda a un valore esistente nella tabella referenziata." }
-  ],
+  "contenuto_json": "{\"cards\": [{\"fronte\": \"Cos'è una chiave primaria?\", \"retro\": \"Un attributo che identifica univocamente ogni tupla.\"}]}",
   "quiz_id": null,
-  "chunk_ids_utilizzati": [301, 302],
+  "chunk_ids_utilizzati": "[301, 302]",
   "generato_al_momento": 0,
   "created_at": "2025-10-05T08:05:00"
 }
 ```
+
+> **Nota implementativa — reveal interattivo:** Le flashcard usano `st.button` + `st.session_state`
+> per il toggle fronte/retro. Non usare `<input type="checkbox">` in HTML Streamlit: viene
+> sanitizzato dal renderer e il CSS `:checked ~` non funziona. Vedi `STATE_MANAGEMENT.md §3b`.
 
 ---
 
