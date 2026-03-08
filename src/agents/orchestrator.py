@@ -54,37 +54,32 @@ _SK_THREAD_ID     = "_orch_thread_id"
 _SK_CONTESTO      = "_orch_contesto_sessione"
 
 # ---------------------------------------------------------------------------
-# Contesto utente thread-safe
+# Variabile globale thread-safe per studente_id
 # ---------------------------------------------------------------------------
-# st.session_state NON è accessibile dai thread background di LangGraph
-# (confermato dai warning "missing ScriptRunContext" nel terminale).
-# Soluzione: dizionario a livello di modulo, popolato dal thread principale
-# Streamlit PRIMA di invocare l'agente, letto dai tool nel thread background.
+# PROBLEMA: LangGraph esegue i tool in thread background (ThreadPoolExecutor).
+# In quei thread st.session_state NON è accessibile — restituisce None
+# silenziosamente, causando il fallback a studente_id=1 (sempre Giulia).
+# Questo è confermato dai warning "missing ScriptRunContext" nel terminale.
 #
-# Struttura: { thread_id: { "studente_id": int, "contesto": dict } }
-_SESSIONE_UTENTE: dict[str, dict] = {}
+# SOLUZIONE: variabile globale a livello di modulo Python.
+# I moduli Python sono condivisi all'interno dello stesso processo,
+# quindi è visibile sia dal thread principale Streamlit che dai thread
+# background di LangGraph. Viene aggiornata PRIMA di ogni chiamata
+# all'agente, dal thread principale dove session_state funziona.
+_STUDENTE_ID_CORRENTE: int = 1
 
 
-def _salva_contesto_thread(thread_id: str) -> None:
-    """Copia i dati necessari da session_state nel dizionario thread-safe.
-    Da chiamare SOLO nel thread principale Streamlit, prima di esegui_agente.
-    """
-    _SESSIONE_UTENTE[thread_id] = {
-        "studente_id": (
-            st.session_state.get("current_user_id")
-            or st.session_state.get("user", {}).get("user_id")
-            or st.session_state.get("user", {}).get("id")
-            or 1
-        ),
-        "contesto": dict(st.session_state.get(_SK_CONTESTO, {})),
-    }
-
-
-def _get_studente_id(thread_id: str) -> int:
-    """Legge studente_id dal dizionario thread-safe.
-    Funziona sia dal thread principale che dai thread background LangGraph.
-    """
-    return _SESSIONE_UTENTE.get(thread_id, {}).get("studente_id", 1)
+def _aggiorna_studente_corrente() -> None:
+    """Legge studente_id da session_state (thread principale) e lo salva
+    nella variabile globale, rendendolo disponibile ai thread background."""
+    global _STUDENTE_ID_CORRENTE
+    sid = (
+        st.session_state.get("current_user_id")
+        or st.session_state.get("user", {}).get("user_id")
+        or st.session_state.get("user", {}).get("id")
+    )
+    if sid:
+        _STUDENTE_ID_CORRENTE = int(sid)
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +176,8 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str) -> str:
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
     """
-    # Legge dal dizionario thread-safe (non da st.session_state che non
-    # è accessibile nei thread background di LangGraph)
-    thread_id = st.session_state.get(_SK_THREAD_ID, "")
-    studente_id = _get_studente_id(thread_id)
+    # Usa la variabile globale aggiornata dal thread principale prima dell'invocazione
+    studente_id = _STUDENTE_ID_CORRENTE
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -237,8 +230,7 @@ def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     Genera strumenti pratici (quiz, flashcard, schema) per una sezione studiata.
     strumenti: lista con uno o più tra "quiz", "flashcard", "schema".
     """
-    thread_id = st.session_state.get(_SK_THREAD_ID, "")
-    studente_id = _get_studente_id(thread_id)
+    studente_id = _STUDENTE_ID_CORRENTE
 
     contenuti = db.trova_tutti(
         "piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"}
@@ -363,16 +355,15 @@ def chat_con_orchestratore(
             corso_nome=corso_contestuale_nome,
         )
 
-    # FONDAMENTALE: copia studente_id nel dizionario thread-safe PRIMA
-    # di invocare l'agente. I tool girano in thread background dove
-    # st.session_state non è accessibile (warning "missing ScriptRunContext").
-    thread_id = _get_thread_id()
-    _salva_contesto_thread(thread_id)
+    # Aggiorna la variabile globale dal thread principale PRIMA di invocare
+    # l'agente. I tool girano in thread background dove session_state
+    # non è accessibile — leggono _STUDENTE_ID_CORRENTE dal modulo.
+    _aggiorna_studente_corrente()
 
     return esegui_agente(
         _get_orchestratore(),
         messaggio_utente,
-        thread_id=thread_id,
+        thread_id=_get_thread_id(),
     )
 
 
