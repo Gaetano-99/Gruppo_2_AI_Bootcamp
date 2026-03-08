@@ -53,6 +53,39 @@ _SK_AGENTE_TEORICO = "_orch_agente_teorico"
 _SK_THREAD_ID     = "_orch_thread_id"
 _SK_CONTESTO      = "_orch_contesto_sessione"
 
+# ---------------------------------------------------------------------------
+# Contesto utente thread-safe
+# ---------------------------------------------------------------------------
+# st.session_state NON è accessibile dai thread background di LangGraph
+# (confermato dai warning "missing ScriptRunContext" nel terminale).
+# Soluzione: dizionario a livello di modulo, popolato dal thread principale
+# Streamlit PRIMA di invocare l'agente, letto dai tool nel thread background.
+#
+# Struttura: { thread_id: { "studente_id": int, "contesto": dict } }
+_SESSIONE_UTENTE: dict[str, dict] = {}
+
+
+def _salva_contesto_thread(thread_id: str) -> None:
+    """Copia i dati necessari da session_state nel dizionario thread-safe.
+    Da chiamare SOLO nel thread principale Streamlit, prima di esegui_agente.
+    """
+    _SESSIONE_UTENTE[thread_id] = {
+        "studente_id": (
+            st.session_state.get("current_user_id")
+            or st.session_state.get("user", {}).get("user_id")
+            or st.session_state.get("user", {}).get("id")
+            or 1
+        ),
+        "contesto": dict(st.session_state.get(_SK_CONTESTO, {})),
+    }
+
+
+def _get_studente_id(thread_id: str) -> int:
+    """Legge studente_id dal dizionario thread-safe.
+    Funziona sia dal thread principale che dai thread background LangGraph.
+    """
+    return _SESSIONE_UTENTE.get(thread_id, {}).get("studente_id", 1)
+
 
 # ---------------------------------------------------------------------------
 # System prompt — conversazione + routing in un unico prompt coerente
@@ -148,7 +181,10 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str) -> str:
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
     """
-    studente_id = st.session_state.get("current_user_id") or st.session_state.get("user", {}).get("user_id") or st.session_state.get("user", {}).get("id") or 1
+    # Legge dal dizionario thread-safe (non da st.session_state che non
+    # è accessibile nei thread background di LangGraph)
+    thread_id = st.session_state.get(_SK_THREAD_ID, "")
+    studente_id = _get_studente_id(thread_id)
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -201,7 +237,8 @@ def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     Genera strumenti pratici (quiz, flashcard, schema) per una sezione studiata.
     strumenti: lista con uno o più tra "quiz", "flashcard", "schema".
     """
-    studente_id = st.session_state.get("current_user_id") or st.session_state.get("user", {}).get("user_id") or st.session_state.get("user", {}).get("id") or 1
+    thread_id = st.session_state.get(_SK_THREAD_ID, "")
+    studente_id = _get_studente_id(thread_id)
 
     contenuti = db.trova_tutti(
         "piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"}
@@ -326,10 +363,16 @@ def chat_con_orchestratore(
             corso_nome=corso_contestuale_nome,
         )
 
+    # FONDAMENTALE: copia studente_id nel dizionario thread-safe PRIMA
+    # di invocare l'agente. I tool girano in thread background dove
+    # st.session_state non è accessibile (warning "missing ScriptRunContext").
+    thread_id = _get_thread_id()
+    _salva_contesto_thread(thread_id)
+
     return esegui_agente(
         _get_orchestratore(),
         messaggio_utente,
-        thread_id=_get_thread_id(),
+        thread_id=thread_id,
     )
 
 

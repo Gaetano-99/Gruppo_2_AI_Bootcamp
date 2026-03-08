@@ -4,7 +4,6 @@
 #
 # Funzionalità:
 #   - Autenticazione via email + password (hash SHA-256)
-#   - Blocco account dopo 5 tentativi falliti (15 minuti)
 #   - Routing automatico per ruolo dopo login riuscito
 #   - Palette colori ufficiale Federico II
 # ============================================================================
@@ -29,8 +28,6 @@ from platform_sdk.database import db
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_MAX_TENTATIVI: int = 5
-_MINUTI_BLOCCO: int = 15
 
 
 # ---------------------------------------------------------------------------
@@ -211,47 +208,6 @@ _CSS = """
 # Utility auth
 # ---------------------------------------------------------------------------
 
-def _controlla_blocco(utente: dict) -> str | None:
-    """
-    Restituisce un messaggio di errore se l'account è bloccato, None altrimenti.
-    """
-    bloccato_fino_a = utente.get("bloccato_fino_a")
-    if bloccato_fino_a:
-        try:
-            dt_blocco = datetime.fromisoformat(str(bloccato_fino_a))
-            if dt_blocco.tzinfo is None:
-                dt_blocco = dt_blocco.replace(tzinfo=timezone.utc)
-            ora = datetime.now(timezone.utc)
-            if ora < dt_blocco:
-                minuti_rimasti = int((dt_blocco - ora).total_seconds() // 60) + 1
-                return f"Account bloccato. Riprova tra {minuti_rimasti} minuti."
-        except (ValueError, TypeError):
-            pass
-    return None
-
-
-def _registra_login_fallito(utente_id: int, tentativi_attuali: int) -> str:
-    """
-    Incrementa il contatore dei tentativi falliti.
-    Se raggiunge il limite, blocca l'account per 15 minuti.
-    Restituisce il messaggio di errore da mostrare all'utente.
-    """
-    nuovi_tentativi = tentativi_attuali + 1
-
-    if nuovi_tentativi >= _MAX_TENTATIVI:
-        from datetime import timedelta
-        ora = datetime.now(timezone.utc)
-        blocco_fino = (ora + timedelta(minutes=_MINUTI_BLOCCO)).isoformat()
-        db.aggiorna(
-            "users",
-            {"id": utente_id},
-            {"tentativi_falliti": nuovi_tentativi, "bloccato_fino_a": blocco_fino},
-        )
-        return f"Troppi tentativi falliti. Account bloccato per {_MINUTI_BLOCCO} minuti."
-    else:
-        db.aggiorna("users", {"id": utente_id}, {"tentativi_falliti": nuovi_tentativi})
-        rimasti = _MAX_TENTATIVI - nuovi_tentativi
-        return f"Password errata. Tentativi rimasti: {rimasti}."
 
 
 def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
@@ -275,15 +231,9 @@ def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
     if utente.get("stato") == "sospeso":
         return None, "Account sospeso. Contatta l'amministratore."
 
-    # Controlla blocco temporaneo
-    msg_blocco = _controlla_blocco(utente)
-    if msg_blocco:
-        return None, msg_blocco
-
     # Verifica password (Werkzeug PBKDF2 — generato con generate_password_hash)
     if not check_password_hash(utente["password_hash"], password):
-        errore = _registra_login_fallito(utente["id"], utente.get("tentativi_falliti", 0))
-        return None, errore
+        return None, "Password errata."
 
     # Login riuscito — aggiorna last_login e reset tentativi
     db.aggiorna(
@@ -291,8 +241,6 @@ def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
         {"id": utente["id"]},
         {
             "last_login": datetime.now(timezone.utc).isoformat(),
-            "tentativi_falliti": 0,
-            "bloccato_fino_a": None,
         },
     )
 
@@ -382,6 +330,7 @@ def mostra_login():
         <div class="demo-box">
             <strong>Account demo disponibili:</strong><br>
             👩‍🎓 Studente: <code>studente@studenti.unina.it</code><br>
+            👩‍🎓 Studente: <code>g.bianchi@studenti.unina.it</code><br>
             👨‍🏫 Docente: &nbsp;<code>docente@unina.it</code><br>
             🔑 Password: <code>test1234</code>
         </div>
