@@ -568,6 +568,9 @@ def _get_struttura_piano(piano_id: int) -> list[dict]:
     Ogni paragrafo ha:
       - par["contenuti"]  → lista di tutti i record piano_contenuti
       - par["testo"]      → testo della prima lezione (stringa), o None
+
+    NOTA: piano_capitoli e piano_paragrafi hanno colonna 'ordine'.
+          piano_contenuti NON ha colonna 'ordine' — usa created_at.
     """
     capitoli = db.trova_tutti("piano_capitoli", {"piano_id": piano_id}, ordine="ordine ASC")
 
@@ -578,7 +581,7 @@ def _get_struttura_piano(piano_id: int) -> list[dict]:
             ordine="ordine ASC",
         )
         for par in cap["paragrafi"]:
-            # Fetch ALL tipi — ordine ASC per coerenza
+            # piano_contenuti NON ha colonna 'ordine' → nessun parametro ordine
             par["contenuti"] = db.trova_tutti(
                 "piano_contenuti",
                 {"paragrafo_id": par["id"]},
@@ -799,27 +802,38 @@ def _render_contenuto_piano(piano_id: int):
                 # ---- QUIZ ----
                 for c in quiz_list:
                     raw = (c.get("contenuto_json") or "").strip()
-                    dati: dict = {}
+                    domande = []
+
+                    # Caso A: contenuto_json ha le domande inline (JSON)
                     if raw.startswith("{") or raw.startswith("["):
                         try:
-                            dati = json.loads(raw)
+                            dati: dict = json.loads(raw)
+                            domande = dati.get("domande") or dati.get("questions") or []
                         except Exception:
                             pass
-                    domande = dati.get("domande") or dati.get("questions") or []
+
+                    # Caso B: contenuto_json è NULL → leggi da domande_quiz via quiz_id
+                    if not domande and c.get("quiz_id"):
+                        righe = db.trova_tutti(
+                            "domande_quiz",
+                            {"quiz_id": c["quiz_id"]},
+                            ordine="ordine ASC",
+                        )
+                        domande = [{"testo": r["testo"]} for r in righe]
+
                     st.markdown(
                         '<div class="content-type-badge badge-quiz">❓ Quiz</div>',
                         unsafe_allow_html=True,
                     )
-                    if domande:
-                        for idx, d in enumerate(domande[:5], 1):
-                            testo_d = (d.get("testo") or d.get("domanda") or d.get("question") or "")
-                            testo_d_safe = testo_d.replace("<", "&lt;").replace(">", "&gt;")
-                            st.markdown(
-                                f'<div class="quiz-domanda">'
-                                f'<span class="quiz-num">{idx}</span>{testo_d_safe}'
-                                f'</div>',
-                                unsafe_allow_html=True,
-                            )
+                    for idx, d in enumerate(domande[:5], 1):
+                        testo_d = (d.get("testo") or d.get("domanda") or d.get("question") or "")
+                        testo_d_safe = testo_d.replace("<", "&lt;").replace(">", "&gt;")
+                        st.markdown(
+                            f'<div class="quiz-domanda">'
+                            f'<span class="quiz-num">{idx}</span>{testo_d_safe}'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
 
                 # ---- FLASHCARD ----
                 for c in fc_list:
@@ -1131,6 +1145,17 @@ def _render_chatbot(utente: dict, corso_id: int | None, corso_nome: str | None):
             {"role": "user", "content": messaggio_finale}
         )
 
+        # Snapshot piani esistenti PRIMA della chiamata all'agente
+        _piani_prima: set[int] = set()
+        if corso_id:
+            _studente_id_chat = st.session_state.get("current_user_id")
+            _piani_prima = {
+                p["id"] for p in db.trova_tutti(
+                    "piani_personalizzati",
+                    {"studente_id": _studente_id_chat, "corso_universitario_id": corso_id},
+                )
+            }
+
         if chat_con_orchestratore is not None and aggiorna_contesto is not None:
             if corso_id:
                 aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome)
@@ -1151,6 +1176,23 @@ def _render_chatbot(utente: dict, corso_id: int | None, corso_nome: str | None):
         st.session_state["chat_history_display"].append(
             {"role": "assistant", "content": risposta}
         )
+
+        # Controlla se l'agente ha creato un nuovo piano → auto-naviga
+        if corso_id and _piani_prima:
+            _studente_id_chat = st.session_state.get("current_user_id")
+            _piani_dopo = {
+                p["id"] for p in db.trova_tutti(
+                    "piani_personalizzati",
+                    {"studente_id": _studente_id_chat, "corso_universitario_id": corso_id},
+                )
+            }
+            nuovi = _piani_dopo - _piani_prima
+            if nuovi:
+                # Seleziona il piano più recente tra quelli nuovi
+                nuovo_piano_id = max(nuovi)
+                st.session_state["_piano_sel"] = nuovo_piano_id
+                st.session_state["_corso_sel"] = corso_id
+
         st.rerun()
 
 

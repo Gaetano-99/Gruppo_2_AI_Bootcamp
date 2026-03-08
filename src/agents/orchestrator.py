@@ -148,7 +148,7 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str) -> str:
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
     """
-    studente_id = st.session_state.get("user", {}).get("user_id", 1)
+    studente_id = st.session_state.get("current_user_id") or st.session_state.get("user", {}).get("user_id") or st.session_state.get("user", {}).get("id") or 1
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -201,7 +201,7 @@ def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     Genera strumenti pratici (quiz, flashcard, schema) per una sezione studiata.
     strumenti: lista con uno o più tra "quiz", "flashcard", "schema".
     """
-    studente_id = st.session_state.get("user", {}).get("user_id", 1)
+    studente_id = st.session_state.get("current_user_id") or st.session_state.get("user", {}).get("user_id") or st.session_state.get("user", {}).get("id") or 1
 
     contenuti = db.trova_tutti(
         "piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"}
