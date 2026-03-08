@@ -107,6 +107,16 @@ REGOLE DI COMPORTAMENTO:
   chiede "fammi i quiz" subito dopo, usa direttamente quegli ID senza chiedere di nuovo.
 - Non mostrare mai ID numerici interni all'utente. Usali solo nei tool.
 - Gestisci gli errori con empatia: spiega cosa è andato storto e suggerisci il passo successivo.
+
+PERMESSI E ARCHITETTURA DATI:
+- I CORSI UNIVERSITARI (tabella corsi_universitari) sono in sola lettura per gli studenti.
+  Vengono creati dai docenti e non puoi modificarli né aggiungere materiale ad essi.
+- I PIANI PERSONALIZZATI (tabella piani_personalizzati) sono spazi privati dello studente.
+  Quando usi tool_genera_corso o tool_genera_pratica, stai sempre creando o arricchendo
+  un PIANO PERSONALIZZATO associato allo studente corrente — mai modificando il corso.
+  Questi piani sono visibili SOLO allo studente che li ha richiesti (filtro su studente_id).
+- Non dire mai all'utente di "caricare materiale nel corso": se vuole aggiungere materiale
+  personale, lo fa tramite il suo Piano Personalizzato nell'interfaccia.
 """
 
 
@@ -117,7 +127,7 @@ REGOLE DI COMPORTAMENTO:
 @tool
 def tool_leggi_contesto() -> str:
     """
-    Leggi il contesto corrente della sessione: corso visualizzato e ultime sezioni generate.
+    Leggi il contesto corrente della sessione: corso visualizzato, piano attivo e ultime sezioni generate.
     Usa questo tool PRIMA di chiedere all'utente su quale corso vuole lavorare.
     """
     contesto = st.session_state.get(_SK_CONTESTO, {})
@@ -125,9 +135,20 @@ def tool_leggi_contesto() -> str:
         return "Nessun contesto attivo. L'utente non ha ancora selezionato un corso."
 
     parti = []
+    tipo = contesto.get("tipo_vista")
+    if tipo == "corso":
+        parti.append("L'utente sta visualizzando un CORSO universitario (sola lettura).")
+    elif tipo == "piano":
+        parti.append("L'utente sta studiando nel proprio PIANO PERSONALIZZATO.")
+
     if contesto.get("corso_id"):
         nome = contesto.get("corso_nome", "nome non disponibile")
-        parti.append(f"Corso attivo: ID {contesto['corso_id']} — {nome}")
+        parti.append(f"Corso: ID {contesto['corso_id']} — {nome}")
+
+    if contesto.get("piano_id"):
+        titolo = contesto.get("piano_titolo", "Piano personalizzato")
+        parti.append(f"Piano personalizzato attivo: ID {contesto['piano_id']} — '{titolo}'")
+
     if contesto.get("ultimi_paragrafi"):
         lista = "\n".join(
             f"  - ID {p['id']}: {p['titolo']}"
@@ -304,15 +325,21 @@ def _get_thread_id() -> str:
 def aggiorna_contesto_sessione(
     corso_id: int | None = None,
     corso_nome: str | None = None,
+    tipo_vista: str | None = None,
+    piano_id: int | None = None,
+    piano_titolo: str | None = None,
 ) -> None:
     """Aggiorna il contesto della sessione quando l'utente naviga tra le pagine.
 
-    Chiamare dalle pagine Streamlit ogni volta che l'utente apre un corso.
+    Chiamare dalle pagine Streamlit ogni volta che l'utente apre un corso o un piano.
     L'agente leggerà questo contesto tramite tool_leggi_contesto.
 
     Args:
-        corso_id:   ID del corso attualmente visualizzato.
-        corso_nome: Nome leggibile del corso.
+        corso_id:     ID del corso attualmente visualizzato.
+        corso_nome:   Nome leggibile del corso.
+        tipo_vista:   "corso" (sola lettura) | "piano" (piano personalizzato studente).
+        piano_id:     ID del piano personalizzato attivo (solo quando tipo_vista="piano").
+        piano_titolo: Titolo del piano attivo.
     """
     contesto = st.session_state.get(_SK_CONTESTO, {})
     if corso_id is not None:
@@ -320,6 +347,12 @@ def aggiorna_contesto_sessione(
         contesto["ultimi_paragrafi"] = []   # reset sezioni al cambio corso
     if corso_nome is not None:
         contesto["corso_nome"] = corso_nome
+    if tipo_vista is not None:
+        contesto["tipo_vista"] = tipo_vista
+    if piano_id is not None:
+        contesto["piano_id"] = piano_id
+    if piano_titolo is not None:
+        contesto["piano_titolo"] = piano_titolo
     st.session_state[_SK_CONTESTO] = contesto
 
 

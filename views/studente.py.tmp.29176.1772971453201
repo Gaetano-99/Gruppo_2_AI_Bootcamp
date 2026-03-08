@@ -160,7 +160,6 @@ _CSS = """
     transition: box-shadow 0.15s;
 }
 .piano-card:hover { box-shadow: 0 4px 16px rgba(0,48,135,0.12); }
-.piano-card.attivo { border: 2px solid #003087; box-shadow: 0 4px 16px rgba(0,48,135,0.15); }
 .piano-card h5 {
     font-weight: 600;
     color: #001A4D;
@@ -616,18 +615,6 @@ def _get_piani_corso(studente_id: int, corso_id: int) -> list[dict]:
     )
 
 
-def _get_tutti_piani_studente(studente_id: int) -> list[dict]:
-    """Restituisce tutti i piani personalizzati dello studente, con nome del corso."""
-    return db.esegui("""
-        SELECT pp.id, pp.titolo, pp.created_at, pp.corso_universitario_id,
-               cu.nome AS corso_nome
-        FROM piani_personalizzati pp
-        JOIN corsi_universitari cu ON cu.id = pp.corso_universitario_id
-        WHERE pp.studente_id = ?
-        ORDER BY pp.created_at DESC
-    """, [studente_id])
-
-
 def _get_struttura_piano(piano_id: int) -> list[dict]:
     """
     Restituisce la struttura completa di un piano SOLO per il piano indicato:
@@ -720,8 +707,8 @@ def _render_topbar(utente: dict) -> bool:
     return False
 
 
-def _render_sidebar_corsi(corsi: list[dict]):
-    """Renderizza la lista corsi nella colonna sinistra (sola lettura per lo studente)."""
+def _render_sidebar_corsi(corsi: list[dict], corsi_chat_id: int | None = None):
+    """Renderizza la lista corsi nella colonna sinistra."""
     st.markdown('<div class="divider-label">I tuoi corsi</div>', unsafe_allow_html=True)
 
     if not corsi:
@@ -730,13 +717,7 @@ def _render_sidebar_corsi(corsi: list[dict]):
 
     for corso in corsi:
         cid = corso["id"]
-        # Attivo solo se si sta visualizzando questo corso in modalità corso (non piano)
-        attivo_cls = (
-            "attivo"
-            if st.session_state.get("_corso_sel") == cid
-            and st.session_state.get("_view_mode") == "corso"
-            else ""
-        )
+        attivo_cls = "attivo" if st.session_state.get("_corso_sel") == cid else ""
         stato = corso["stato"]
         stato_cls = {
             "iscritto": "stato-iscritto",
@@ -758,51 +739,47 @@ def _render_sidebar_corsi(corsi: list[dict]):
         if st.button("Apri →", key=f"btn_corso_{cid}", use_container_width=True):
             st.session_state["_corso_sel"]  = cid
             st.session_state["_corso_nome"] = corso["nome"]
-            st.session_state["_view_mode"]  = "corso"
-            st.session_state["_piano_sel"]  = None
             st.session_state["_chat_history"] = []
+
+            # Auto-selezione piano: se ce n'è uno solo, aprilo subito
+            studente_id_temp = st.session_state.get("current_user_id")
+            piani_temp = db.trova_tutti(
+                "piani_personalizzati",
+                {"studente_id": studente_id_temp, "corso_universitario_id": cid},
+            )
+            if len(piani_temp) == 1:
+                st.session_state["_piano_sel"] = piani_temp[0]["id"]
+            else:
+                st.session_state["_piano_sel"] = None
+
             st.rerun()
 
 
-def _render_sidebar_piani(studente_id: int):
-    """Renderizza la sezione 'I Tuoi Piani Personalizzati' nella colonna sinistra."""
-    piani = _get_tutti_piani_studente(studente_id)
-    st.markdown('<div class="divider-label">I tuoi piani personalizzati</div>', unsafe_allow_html=True)
+def _render_piani(studente_id: int, corso_id: int, corso_nome: str):
+    """Renderizza i piani AI disponibili per il corso selezionato."""
+    piani = _get_piani_corso(studente_id, corso_id)
+
+    st.markdown(f'<div class="divider-label">Piani AI — {corso_nome[:22]}...</div>', unsafe_allow_html=True)
 
     if not piani:
-        st.markdown(
-            '<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">'
-            'Nessun piano ancora. Chiedi a Lea di generarne uno!</p>',
-            unsafe_allow_html=True,
-        )
-        return
-
-    for piano in piani:
-        pid = piano["id"]
-        attivo = (
-            st.session_state.get("_piano_sel") == pid
-            and st.session_state.get("_view_mode") == "piano"
-        )
-        corso_nome_breve = (piano.get("corso_nome") or "")[:22]
-        titolo_breve = (piano["titolo"] or "")[:42]
-        st.markdown(f"""
-        <div class="piano-card {'attivo' if attivo else ''}">
-            <h5>{titolo_breve}{'…' if len(piano["titolo"] or '') > 42 else ''}</h5>
-            <div class="piano-meta">
-                <span class="ai-badge">AI</span>
-                &nbsp;{corso_nome_breve}
-                &nbsp;·&nbsp;{piano.get("created_at", "")[:10]}
+        st.caption("💡 Chiedi a Lea di generare un piano per questo corso!")
+    else:
+        for piano in piani:
+            pid = piano["id"]
+            attivo = st.session_state.get("_piano_sel") == pid
+            st.markdown(f"""
+            <div class="piano-card {'attivo' if attivo else ''}">
+                <h5>{piano["titolo"][:50]}{'…' if len(piano["titolo"]) > 50 else ''}</h5>
+                <div class="piano-meta">
+                    <span class="ai-badge">AI</span>
+                    &nbsp;{piano.get("created_at", "")[:10]}
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """, unsafe_allow_html=True)
 
-        if st.button("Studia →", key=f"btn_piano_sx_{pid}", use_container_width=True):
-            st.session_state["_piano_sel"]  = pid
-            st.session_state["_view_mode"]  = "piano"
-            st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
-            st.session_state["_corso_nome"] = piano.get("corso_nome", "")
-            st.session_state["_chat_history"] = []
-            st.rerun()
+            if st.button("Studia →", key=f"btn_piano_{pid}", use_container_width=True):
+                st.session_state["_piano_sel"] = pid
+                st.rerun()
 
 
 def _render_contenuto_piano(piano_id: int):
@@ -1084,14 +1061,7 @@ def _render_raccomandazioni(studente_id: int):
 # Chatbot Lea
 # ---------------------------------------------------------------------------
 
-def _render_chatbot(
-    utente: dict,
-    corso_id: int | None,
-    corso_nome: str | None,
-    view_mode: str | None = None,
-    piano_id: int | None = None,
-    piano_titolo: str | None = None,
-):
+def _render_chatbot(utente: dict, corso_id: int | None, corso_nome: str | None):
     """Renderizza il chatbot Lea nella colonna destra."""
     chat_con_orchestratore, aggiorna_contesto, _ = _import_orchestratore()
 
@@ -1175,13 +1145,7 @@ def _render_chatbot(
 
         if chat_con_orchestratore is not None and aggiorna_contesto is not None:
             if corso_id:
-                aggiorna_contesto(
-                    corso_id=corso_id,
-                    corso_nome=corso_nome,
-                    tipo_vista=view_mode,
-                    piano_id=piano_id,
-                    piano_titolo=piano_titolo,
-                )
+                aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome)
             try:
                 risposta = chat_con_orchestratore(
                     messaggio_utente=messaggio_finale,
@@ -1200,8 +1164,8 @@ def _render_chatbot(
             {"role": "assistant", "content": risposta}
         )
 
-        # Controlla se l'agente ha creato un nuovo piano → auto-naviga in vista piano
-        if corso_id:
+        # Controlla se l'agente ha creato un nuovo piano → auto-naviga
+        if corso_id and _piani_prima:
             _studente_id_chat = st.session_state.get("current_user_id")
             _piani_dopo = {
                 p["id"] for p in db.trova_tutti(
@@ -1211,10 +1175,10 @@ def _render_chatbot(
             }
             nuovi = _piani_dopo - _piani_prima
             if nuovi:
+                # Seleziona il piano più recente tra quelli nuovi
                 nuovo_piano_id = max(nuovi)
-                st.session_state["_piano_sel"]  = nuovo_piano_id
-                st.session_state["_corso_sel"]  = corso_id
-                st.session_state["_view_mode"]  = "piano"
+                st.session_state["_piano_sel"] = nuovo_piano_id
+                st.session_state["_corso_sel"] = corso_id
 
         st.rerun()
 
@@ -1337,9 +1301,8 @@ def mostra_homepage_studente():
     # Seed iscrizioni se lo studente non ha corsi nel DB (es. utenti demo)
     _seed_iscrizioni_se_mancanti(studente_id)
 
-    # Carica corsi e stato di navigazione corrente
-    corsi          = _get_corsi_studente(studente_id)
-    view_mode      = st.session_state.get("_view_mode")       # "corso" | "piano" | None
+    # Carica corsi e selezioni correnti
+    corsi = _get_corsi_studente(studente_id)
     corso_sel_id   = st.session_state.get("_corso_sel")
     corso_sel_nome = st.session_state.get("_corso_nome", "")
     piano_sel_id   = st.session_state.get("_piano_sel")
@@ -1351,18 +1314,14 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
-        # Sezione 1: Corsi universitari (sola lettura)
-        _render_sidebar_corsi(corsi)
-        # Sezione 2: Piani personalizzati dello studente
-        _render_sidebar_piani(studente_id)
-        # Sezione 3: Raccomandazioni AI
+        _render_sidebar_corsi(corsi, corso_sel_id)
         _render_raccomandazioni(studente_id)
 
     # -------------------------------------------------------------------------
-    # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)
+    # COLONNA CENTRALE — contenuto
     # -------------------------------------------------------------------------
     with col_cx:
-        if not view_mode:
+        if not corso_sel_id:
             # Welcome screen
             nome = utente["nome"]
             st.markdown(f"""
@@ -1370,31 +1329,31 @@ def mostra_homepage_studente():
                 <div class="icon">🎓</div>
                 <h3>Benvenuto, {nome}!</h3>
                 <p style="max-width:360px; margin:0 auto; line-height:1.7">
-                    Seleziona un <strong>corso</strong> per consultarlo,
-                    o apri un <strong>piano personalizzato</strong> per studiare.
-                    Chiedi a <strong>Lea</strong> di creare un nuovo piano su qualsiasi argomento.
+                    Seleziona un corso dalla barra laterale per visualizzare
+                    i tuoi piani personalizzati AI, o chiedi a <strong>Lea</strong>
+                    di creare un nuovo piano di studio.
                 </p>
             </div>
             """, unsafe_allow_html=True)
 
-        elif view_mode == "corso" and corso_sel_id:
-            # ── VISTA CORSO — sola lettura ─────────────────────────────────
+        elif not piano_sel_id:
+            # Mostra info corso e invita a scegliere un piano
             st.markdown(f"""
             <div class="section-header">{corso_sel_nome}</div>
-            <div class="section-sub">Corso universitario · Sola lettura</div>
+            <div class="section-sub">Seleziona un piano di studio o gestisci il materiale didattico.</div>
             """, unsafe_allow_html=True)
 
-            st.info(
-                "Questo corso è gestito dai docenti. "
-                "Puoi studiarlo aprendo uno dei tuoi piani personalizzati, "
-                "o chiedi a Lea di generarne uno nuovo.",
-                icon=":material/school:",
-            )
+            # Bottoni materiale didattico
+            with st.container(horizontal=True):
+                if st.button(":material/upload_file: Carica materiale", key="btn_upload_mat"):
+                    _dialog_upload_materiale(corso_sel_id, corso_sel_nome, studente_id)
+                if st.button(":material/folder_open: Visualizza materiale", key="btn_view_mat"):
+                    _dialog_view_materiale(corso_sel_id, corso_sel_nome)
 
-            # Piani esistenti per questo corso → link a vista piano
+            # Mostra i piani come card cliccabili anche qui
             piani = _get_piani_corso(studente_id, corso_sel_id)
             if piani:
-                st.markdown("#### I miei piani per questo corso")
+                st.markdown("### 📋 Piani disponibili")
                 for piano in piani:
                     pid = piano["id"]
                     struttura = _get_struttura_piano(pid)
@@ -1407,59 +1366,44 @@ def mostra_homepage_studente():
                             <h5>{piano["titolo"]}</h5>
                             <div class="piano-meta">
                                 <span class="ai-badge">AI</span>
-                                &nbsp;{n_cap} capitoli · {n_par} sezioni
-                                &nbsp;·&nbsp;{piano.get("created_at", "")[:10]}
+                                &nbsp;{n_cap} capitoli · {n_par} paragrafi
+                                &nbsp;·&nbsp; {piano.get("created_at", "")[:10]}
                             </div>
                         </div>
                         """, unsafe_allow_html=True)
                     with col_b:
-                        if st.button("Studia", key=f"open_piano_cx_{pid}", use_container_width=True):
+                        if st.button("Apri", key=f"open_piano_{pid}", use_container_width=True):
                             st.session_state["_piano_sel"] = pid
-                            st.session_state["_view_mode"] = "piano"
                             st.rerun()
             else:
-                st.caption("Nessun piano ancora per questo corso. Chiedi a Lea di generarne uno!")
+                st.info("💡 Nessun piano ancora. Chiedi a Lea: *\"Genera un piano per Basi di Dati\"*")
 
-        elif view_mode == "piano" and piano_sel_id:
-            # ── VISTA PIANO — spazio studio privato dello studente ──────────
+        else:
+            # Mostra il contenuto del piano selezionato
             piano_info = db.trova_tutti("piani_personalizzati", {"id": piano_sel_id})
             titolo_piano = piano_info[0]["titolo"] if piano_info else "Piano di studio"
 
             st.markdown(f"""
-            <div class="section-header">{titolo_piano}</div>
-            <div class="section-sub">{corso_sel_nome} · Piano personalizzato</div>
+            <div class="section-header">{corso_sel_nome}</div>
+            <div class="section-sub">{titolo_piano}</div>
             """, unsafe_allow_html=True)
 
-            col_back, _ = st.columns([1, 5])
+            col_back, col_space = st.columns([1, 5])
             with col_back:
-                if st.button("← Corso"):
-                    st.session_state["_view_mode"] = "corso"
+                if st.button("← Indietro"):
                     st.session_state["_piano_sel"] = None
                     st.rerun()
 
-            # Materiale didattico (caricabile solo nel contesto del piano)
             with st.container(horizontal=True):
-                if st.button(":material/upload_file: Carica materiale", key="btn_upload_mat"):
+                if st.button(":material/upload_file: Carica materiale", key="btn_upload_mat2"):
                     _dialog_upload_materiale(corso_sel_id, corso_sel_nome, studente_id)
-                if st.button(":material/folder_open: Visualizza materiale", key="btn_view_mat"):
+                if st.button(":material/folder_open: Visualizza materiale", key="btn_view_mat2"):
                     _dialog_view_materiale(corso_sel_id, corso_sel_nome)
 
             _render_contenuto_piano(piano_sel_id)
 
     # -------------------------------------------------------------------------
-    # COLONNA DESTRA — Chatbot Lea (con contesto completo corso + piano)
+    # COLONNA DESTRA — Chatbot Lea
     # -------------------------------------------------------------------------
-    piano_titolo_chat = None
-    if view_mode == "piano" and piano_sel_id:
-        info = db.trova_tutti("piani_personalizzati", {"id": piano_sel_id})
-        piano_titolo_chat = info[0]["titolo"] if info else None
-
     with col_dx:
-        _render_chatbot(
-            utente,
-            corso_sel_id,
-            corso_sel_nome,
-            view_mode=view_mode,
-            piano_id=piano_sel_id if view_mode == "piano" else None,
-            piano_titolo=piano_titolo_chat,
-        )
+        _render_chatbot(utente, corso_sel_id, corso_sel_nome)
