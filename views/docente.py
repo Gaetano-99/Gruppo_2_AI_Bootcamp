@@ -29,7 +29,7 @@ def _import_orchestratore():
 _CSS = r"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
-:root { --blue:#003087; --blue-dark:#001A4D; --blue-mid:#1351A8; --red:#C8102E; --gold:#C5A028; --light:#F0F4F8; --gray:#5A6A7E; --border:#C8D5E3; --white:#FFFFFF; --green:#1A7F4B; --card:#f8fafc; --input-bg:#f8fafc; --input-text:#1f2937; --placeholder:#4b5563; } /* modifica qui i colori di fondo/riquadri */
+:root { --blue:#003087; --blue-dark:#001A4D; --blue-mid:#1351A8; --red:#C8102E; --gold:#C5A028; --light:#F0F4F8; --gray:#5A6A7E; --border:#C8D5E3; --white:#FFFFFF; --green:#1A7F4B; --card:#f8fafc; --input-bg:#f8fafc; --input-text:#1f2937; --placeholder:#4b5563; }
 .stApp { background:#F0F4F8 !important; font-family:'Source Sans 3',sans-serif !important; }
 #MainMenu, footer { visibility:hidden; }
 .block-container { padding-top:0 !important; padding-bottom:0 !important; }
@@ -64,6 +64,16 @@ _CSS = r"""
 .stTextInput input::placeholder, .stTextArea textarea::placeholder, .stChatInput textarea::placeholder { color: var(--placeholder) !important; }
 div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(--input-text) !important; }
 div[data-baseweb="select"] input { color: var(--input-text) !important; }
+
+/* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
+label[data-testid="stWidgetLabel"] p, 
+label[data-testid="stWidgetLabel"] div,
+div[data-testid="stWidgetLabel"] p, 
+div[data-testid="stWidgetLabel"] div,
+label p {
+    color: var(--input-text) !important;
+    font-weight: 600 !important;
+}
 </style>
 """
 
@@ -254,8 +264,9 @@ def _dialog_elimina_corso(corso_id: int):
 
 
 def _render_materiali(corso: dict, docente_id: int):
-    st.markdown("**Materiali didattici (fonte RAG)**")
-    st.caption("Carica file associati al corso. Verranno usati come unica fonte per generazione e quiz.")
+    st.markdown("### Materiali didattici (fonte RAG)")
+    st.caption("Questi file alimentano la generazione di lezioni/quiz. Formati accettati: pdf, docx, txt, pptx, xlsx.")
+
     materiali = _get_materiali_corso(corso["id"])
     if materiali:
         for m in materiali:
@@ -274,39 +285,40 @@ def _render_materiali(corso: dict, docente_id: int):
     else:
         st.info("Nessun materiale caricato per questo corso.")
 
-    with st.container(border=True):
-        files = st.file_uploader(
-            "Carica uno o più file",
-            type=["pdf", "docx", "txt", "pptx", "xlsx"],
-            accept_multiple_files=True,
-            key=f"upload_{corso['id']}",
-        )
-        tipo_scelto = st.selectbox(
-            "Tipo documento (salvato su DB)", ["pdf", "slide", "video", "dispensa", "libro"], key=f"tipo_{corso['id']}"
-        )
-        if files and st.button("Carica materiali", key=f"do_upload_{corso['id']}"):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
-            os.makedirs(upload_dir, exist_ok=True)
-            ok = 0
-            for f in files:
-                path = os.path.join(upload_dir, f.name)
-                with open(path, "wb") as out:
-                    out.write(f.getbuffer())
-                db.inserisci(
-                    "materiali_didattici",
-                    {
-                        "corso_universitario_id": corso["id"],
-                        "docente_id": docente_id,
-                        "titolo": f.name,
-                        "tipo": tipo_scelto,
-                        "s3_key": f"uploads/{corso['id']}/{f.name}",
-                        "is_processed": 0,
-                    },
-                )
-                ok += 1
-            st.success(f"{ok} file caricati. La pipeline di elaborazione partirà automaticamente.")
-            st.session_state["_doc_refresh"] = True
+    st.markdown("---")
+    st.markdown("#### Carica nuovi materiali")
+    files = st.file_uploader(
+        "Carica uno o più file (drag & drop)",
+        type=["pdf", "docx", "txt", "pptx", "xlsx"],
+        accept_multiple_files=True,
+        key=f"upload_{corso['id']}",
+    )
+    tipo_scelto = st.selectbox(
+        "Tipo documento (salvato su DB)", ["pdf", "slide", "video", "dispensa", "libro"], key=f"tipo_{corso['id']}"
+    )
+    if files and st.button("Carica materiali", key=f"do_upload_{corso['id']}"):
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
+        os.makedirs(upload_dir, exist_ok=True)
+        ok = 0
+        for f in files:
+            path = os.path.join(upload_dir, f.name)
+            with open(path, "wb") as out:
+                out.write(f.getbuffer())
+            db.inserisci(
+                "materiali_didattici",
+                {
+                    "corso_universitario_id": corso["id"],
+                    "docente_id": docente_id,
+                    "titolo": f.name,
+                    "tipo": tipo_scelto,
+                    "s3_key": f"uploads/{corso['id']}/{f.name}",
+                    "is_processed": 0,
+                },
+            )
+            ok += 1
+        st.success(f"{ok} file caricati. La pipeline di elaborazione partirà automaticamente.")
+        st.session_state["_doc_refresh"] = True
 
 
 def _init_schema_state(corso_id: int):
@@ -352,7 +364,6 @@ def _render_contenuti_ai(corso: dict):
                 st.info("Configura gli agenti AI (AWS Bedrock) per usare la generazione automatica. Uso schema di esempio.")
                 st.session_state[key] = schema
 
-    # editor capitoli/paragrafi
     for idx, capitolo in enumerate(schema):
         st.markdown(f"### Capitolo {idx+1}")
         capitolo["titolo"] = st.text_input("Titolo capitolo", value=capitolo["titolo"], key=f"cap_tit_{corso['id']}_{idx}")
