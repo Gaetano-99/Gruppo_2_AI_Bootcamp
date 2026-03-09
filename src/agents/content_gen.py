@@ -21,6 +21,8 @@ Note architetturali:
 import json
 import sys
 import os
+import re
+from functools import lru_cache
 from typing import TypedDict
 
 from pydantic import BaseModel, Field
@@ -59,6 +61,36 @@ Regole:
 - Ogni paragrafo deve contenere testo didattico sostanzioso estratto dai chunk.
 - Assegna ID univoci a capitoli (cap_01, cap_02, ...) e paragrafi (par_01_01, par_01_02, ...).
 """
+
+
+@lru_cache(maxsize=1)
+def _db_supporta_tipo_corso() -> bool:
+    """Rileva se il DB corrente accetta `tipo='corso'` in piani_personalizzati."""
+    try:
+        righe = db.esegui(
+            "SELECT sql FROM sqlite_master WHERE type = ? AND name = ?",
+            ["table", "piani_personalizzati"],
+        )
+    except Exception:
+        return False
+
+    if not righe:
+        return False
+
+    create_sql = (righe[0].get("sql") or "").lower()
+    return bool(
+        re.search(
+            r"check\s*\(\s*tipo\s+in\s*\(\s*'esame'\s*,\s*'libero'\s*,\s*'corso'\s*\)\s*\)",
+            create_sql,
+        )
+    )
+
+
+def _tipo_piano_da_salvare(is_corso: bool) -> str:
+    """Mantiene compatibilita' con DB legacy che non accettano ancora `corso`."""
+    if not is_corso:
+        return "esame"
+    return "corso" if _db_supporta_tipo_corso() else "esame"
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +293,8 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
             "studente_id": stato["docente_id"],  # docente come creatore
             "titolo": titolo_corso,
             "descrizione": descrizione,
-            "tipo": "corso" if is_corso else "esame",
+            # `is_corso_docente` resta la fonte di verita' anche sui DB legacy.
+            "tipo": _tipo_piano_da_salvare(is_corso),
             "corso_universitario_id": corso_id,
             "stato": "attivo",
             "is_corso_docente": 1 if is_corso else 0,

@@ -57,7 +57,7 @@ _CSS = r"""
 .chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
 .chat-title { font-weight:700; font-size:0.95rem; }
 .chat-sub { font-size:0.75rem; opacity:0.75; }
-.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; height:420px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; min-height:420px; overflow:visible; padding:16px; display:flex; flex-direction:column; gap:10px; }
 .msg-user { background:#003087; color:#fff; border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:0.87rem; max-width:82%; align-self:flex-end; line-height:1.5; }
 .msg-ai { background:#F0F4F8; color:#1A2535; border-radius:4px 14px 14px 14px; padding:10px 14px; font-size:0.87rem; max-width:88%; align-self:flex-start; line-height:1.55; border:1px solid #E0E8F2; }
 .stTextInput input, .stTextArea textarea, .stSelectbox select, .stNumberInput input, .stChatInput textarea { background: var(--input-bg) !important; color: var(--input-text) !important; }
@@ -66,13 +66,20 @@ div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(
 div[data-baseweb="select"] input { color: var(--input-text) !important; }
 
 /* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
-label[data-testid="stWidgetLabel"] p, 
+label[data-testid="stWidgetLabel"] p,
 label[data-testid="stWidgetLabel"] div,
-div[data-testid="stWidgetLabel"] p, 
+div[data-testid="stWidgetLabel"] p,
 div[data-testid="stWidgetLabel"] div,
 label p {
     color: var(--input-text) !important;
     font-weight: 600 !important;
+}
+
+/* La colonna chat segue lo scroll della pagina */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-of-type {
+    position: static;
+    max-height: none;
+    overflow: visible;
 }
 </style>
 """
@@ -217,6 +224,14 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
 
 
 def _dialog_crea_corso(docente_id: int):
+    header_col, close_col = st.columns([10, 1])
+    with header_col:
+        st.markdown("#### Nuovo corso")
+    with close_col:
+        if st.button("X", key="close_create_course", help="Chiudi"):
+            st.session_state["_doc_show_create"] = False
+            st.rerun()
+
     with st.form("crea_corso_form"):
         nome = st.text_input("Nome corso")
         descrizione = st.text_area("Descrizione")
@@ -242,7 +257,8 @@ def _dialog_crea_corso(docente_id: int):
                 "attivo": 0,
             },
         )
-        st.success("Corso salvato in bozza.")
+        st.session_state["_doc_show_create"] = False
+        st.session_state["_doc_create_feedback"] = "Corso salvato in bozza."
         st.session_state["_doc_refresh"] = True
 
 
@@ -380,61 +396,217 @@ def _render_materiali(corso: dict, docente_id: int):
 def _init_schema_state(corso_id: int):
     key = f"_schema_{corso_id}"
     if key not in st.session_state:
-        st.session_state[key] = [
-            {"titolo": "Capitolo 1", "paragrafi": ["Introduzione"]},
-            {"titolo": "Capitolo 2", "paragrafi": ["Argomento principale"]},
-        ]
+        st.session_state[key] = []
     return key
 
 
+def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
+    """Recupera l'ID del primo paragrafo DB per un capitolo appena salvato da content_gen."""
+    try:
+        piani = db.trova_tutti(
+            "piani_personalizzati",
+            {"corso_universitario_id": corso_id, "is_corso_docente": 1},
+            ordine="id DESC",
+        )
+        if not piani:
+            return 0
+        piano_id = piani[0]["id"]
+        capitoli_db = db.trova_tutti("piano_capitoli", {"piano_id": piano_id})
+        cap_match = next(
+            (c for c in capitoli_db if c["titolo"] == titolo_capitolo),
+            capitoli_db[0] if capitoli_db else None,
+        )
+        if not cap_match:
+            return 0
+        paragrafi_db = db.trova_tutti("piano_paragrafi", {"capitolo_id": cap_match["id"]})
+        return paragrafi_db[0]["id"] if paragrafi_db else 0
+    except Exception:
+        return 0
+
+
+def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str) -> None:
+    """Invoca agente teorico e agente pratico in sequenza, poi aggiorna lo stato UI."""
+    try:
+        from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
+        from src.agents.practice_gen import esegui_generazione_pratica
+    except Exception as e:
+        st.error(f"Impossibile importare gli agenti AI: {e}")
+        return
+
+    # — Fase 1: Teoria —
+    with st.spinner("Fase 1/2 — Generazione contenuti teorici…"):
+        agente = crea_agente_content_gen()
+        argomento = f"{corso['nome']}. {prompt}".strip(". ") if prompt else corso["nome"]
+        stato_t = esegui_generazione(
+            agente=agente,
+            corso_id=corso["id"],
+            argomento_richiesto=argomento,
+            docente_id=docente_id,
+            is_corso_docente=True,
+        )
+
+    if stato_t.get("errore"):
+        st.error(f"Errore teoria: {stato_t['errore']}")
+        return
+
+    struttura = stato_t.get("struttura_corso_generata", {})
+    if not struttura or not struttura.get("capitoli"):
+        st.error("L'agente non ha prodotto una struttura valida. Verifica che siano presenti materiali RAG.")
+        return
+
+    # — Fase 2: Quiz per ogni capitolo —
+    nuovo_schema: list[dict] = []
+    chunk_ids = stato_t.get("chunk_ids_utilizzati", [])
+    with st.spinner("Fase 2/2 — Generazione quiz di verifica…"):
+        for capitolo in struttura["capitoli"]:
+            nuovo_schema.append({
+                "tipo": "capitolo",
+                "titolo": capitolo["titolo"],
+                "paragrafi": [
+                    {"titolo": p["titolo"], "testo": p["testo"]}
+                    for p in capitolo.get("paragrafi", [])
+                ],
+            })
+            testo_cap = "\n\n".join(
+                p["testo"] for p in capitolo.get("paragrafi", []) if p.get("testo")
+            )
+            if not testo_cap:
+                continue
+            par_id = _get_primo_paragrafo_id(corso["id"], capitolo["titolo"])
+            stato_p = esegui_generazione_pratica(
+                paragrafo_id=par_id,
+                testo_paragrafo=testo_cap,
+                strumenti_richiesti=["quiz"],
+                studente_id=docente_id,
+                corso_universitario_id=corso["id"],
+                chunk_ids_utilizzati=chunk_ids,
+            )
+            quiz_list = stato_p.get("strumenti_generati", {}).get("quiz", [])
+            if quiz_list:
+                nuovo_schema.append({
+                    "tipo": "test",
+                    "titolo": f"Test — {capitolo['titolo']}",
+                    "domande": [
+                        {
+                            "testo": d["testo"],
+                            "opzioni": d["opzioni"],
+                            "corretta": d["indice_corretta"],
+                        }
+                        for d in quiz_list
+                    ],
+                })
+
+    # — Fase 3: Aggiornamento UI —
+    st.session_state[key] = nuovo_schema
+    st.success("Contenuto corso generato con successo!")
+    st.rerun()
+
+
 def _render_contenuti_ai(corso: dict):
-    st.markdown("**Contenuti generati AI (capitoli e paragrafi)**")
-    st.caption("Schema modificabile prima della pubblicazione. Usa i materiali caricati per il RAG.")
+    st.markdown("**Contenuti generati AI (capitoli e test)**")
+    st.caption(
+        "Premi 'Genera contenuto corso' per produrre teoria e quiz in un solo click. "
+        "Poi leggi, modifica i campi, o chiedi a Lea di riscrivere un paragrafo nella chat a destra."
+    )
+    docente_id = st.session_state.get("current_user_id", 1)
     key = _init_schema_state(corso["id"])
     schema = st.session_state[key]
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        prompt = st.text_area("Prompt per rigenerare lo schema", key=f"prompt_{corso['id']}")
-    with col2:
-        if st.button("Genera schema AI", key=f"gen_schema_{corso['id']}"):
-            chat, aggiorna, _ = _import_orchestratore()
-            if chat and aggiorna:
-                try:
-                    aggiorna(corso_id=corso["id"], corso_nome=corso["nome"], tipo_vista="docente", piano_id=None, piano_titolo=None)
-                    risposta = chat(
-                        messaggio_utente=f"Genera uno schema con capitoli e paragrafi per il corso {corso['nome']}. {prompt}",
-                        corso_contestuale_id=corso["id"],
-                        corso_contestuale_nome=corso["nome"],
-                    )
-                    schema = [
-                        {"titolo": "Capitolo 1", "paragrafi": ["Paragrafo 1", "Paragrafo 2"]},
-                        {"titolo": "Capitolo 2", "paragrafi": ["Paragrafo 1"]},
-                    ]
-                    st.session_state[key] = schema
-                    st.success("Schema generato. Personalizza i testi sotto.")
-                    st.caption(str(risposta))
-                except Exception as e:
-                    st.error(f"Errore AI: {e}")
-            else:
-                st.info("Configura gli agenti AI (AWS Bedrock) per usare la generazione automatica. Uso schema di esempio.")
-                st.session_state[key] = schema
+    # — Prompt centrale —
+    prompt = st.text_area(
+        "Istruzioni per generare la lezione",
+        placeholder="Es: Focalizzati su esempi pratici. Usa un linguaggio accessibile agli studenti del primo anno.",
+        key=f"prompt_{corso['id']}",
+    )
+    if st.button("Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
+        _genera_contenuto_corso(corso, docente_id, prompt, key)
 
-    for idx, capitolo in enumerate(schema):
-        st.markdown(f"### Capitolo {idx+1}")
-        capitolo["titolo"] = st.text_input("Titolo capitolo", value=capitolo["titolo"], key=f"cap_tit_{corso['id']}_{idx}")
-        for p_idx, par in enumerate(capitolo["paragrafi"]):
-            capitolo["paragrafi"][p_idx] = st.text_input(
-                f"Paragrafo {p_idx+1}", value=par, key=f"par_{corso['id']}_{idx}_{p_idx}"
+    st.markdown("---")
+
+    # — Rendering schema misto —
+    for idx, blocco in enumerate(schema):
+        tipo = blocco.get("tipo", "capitolo")
+
+        if tipo == "capitolo":
+            st.markdown(f"#### Capitolo {idx + 1}")
+            blocco["titolo"] = st.text_input(
+                "Titolo capitolo",
+                value=blocco.get("titolo", ""),
+                key=f"cap_tit_{corso['id']}_{idx}",
             )
-        if st.button("Aggiungi paragrafo", key=f"add_par_{corso['id']}_{idx}"):
-            capitolo["paragrafi"].append("Nuovo paragrafo")
+            for p_idx, par in enumerate(blocco.get("paragrafi", [])):
+                par["titolo"] = st.text_input(
+                    f"Titolo paragrafo {p_idx + 1}",
+                    value=par.get("titolo", ""),
+                    key=f"par_tit_{corso['id']}_{idx}_{p_idx}",
+                )
+                par["testo"] = st.text_area(
+                    f"Testo paragrafo {p_idx + 1}",
+                    value=par.get("testo", ""),
+                    height=220,
+                    key=f"par_txt_{corso['id']}_{idx}_{p_idx}",
+                )
+
+        elif tipo == "test":
+            st.markdown(f"#### Test {idx + 1}")
+            blocco["titolo"] = st.text_input(
+                "Titolo test",
+                value=blocco.get("titolo", ""),
+                key=f"test_tit_{corso['id']}_{idx}",
+            )
+            for d_idx, dom in enumerate(blocco.get("domande", [])):
+                st.markdown(f"**Domanda {d_idx + 1}**")
+                dom["testo"] = st.text_input(
+                    "Testo domanda",
+                    value=dom.get("testo", ""),
+                    key=f"dom_txt_{corso['id']}_{idx}_{d_idx}",
+                )
+                opzioni = dom.get("opzioni", ["", "", "", ""])
+                for o_idx, opz in enumerate(opzioni):
+                    opzioni[o_idx] = st.text_input(
+                        f"Opzione {chr(65 + o_idx)}",
+                        value=opz,
+                        key=f"opz_{corso['id']}_{idx}_{d_idx}_{o_idx}",
+                    )
+                dom["opzioni"] = opzioni
+                dom["corretta"] = st.number_input(
+                    "Indice risposta corretta (0 = prima opzione)",
+                    min_value=0,
+                    max_value=max(0, len(opzioni) - 1),
+                    value=int(dom.get("corretta", 0)),
+                    step=1,
+                    key=f"corr_{corso['id']}_{idx}_{d_idx}",
+                )
+                st.markdown("---")
+
+    st.markdown("---")
+
+    # — Bottoni di aggiunta manuale —
+    col_add1, col_add2 = st.columns(2)
+    with col_add1:
+        if st.button("➕ Aggiungi Capitolo", key=f"add_cap_{corso['id']}"):
+            schema.append({
+                "tipo": "capitolo",
+                "titolo": "Nuovo capitolo",
+                "paragrafi": [{"titolo": "Paragrafo 1", "testo": ""}],
+            })
             st.session_state[key] = schema
             st.rerun()
-    if st.button("Aggiungi capitolo", key=f"add_cap_{corso['id']}"):
-        schema.append({"titolo": "Nuovo capitolo", "paragrafi": ["Paragrafo"]})
-        st.session_state[key] = schema
-        st.rerun()
+    with col_add2:
+        if st.button("📝 Aggiungi Test", key=f"add_test_{corso['id']}"):
+            schema.append({
+                "tipo": "test",
+                "titolo": "Nuovo test",
+                "domande": [
+                    {
+                        "testo": "Inserisci una domanda",
+                        "opzioni": ["Opzione A", "Opzione B", "Opzione C", "Opzione D"],
+                        "corretta": 0,
+                    }
+                ],
+            })
+            st.session_state[key] = schema
+            st.rerun()
 
     if st.button("Salva contenuti (bozza)", key=f"save_schema_{corso['id']}"):
         st.success("Contenuti salvati in bozza (sessione). Persistenza DB da implementare.")
@@ -442,37 +614,18 @@ def _render_contenuti_ai(corso: dict):
 
 def _render_dettaglio_corso(corso: dict, docente_id: int):
     stato_lbl, stato_class = _stato_corso(corso)
-    st.markdown(
-        f"""
-        <div class='course-card' style='border-left-color:#003087'>
-            <div class='title'>{corso['nome']}</div>
-            <div class='meta'><span class='status-pill {stato_class}'>{stato_lbl}</span>
-            <span class='chip'>CFU {corso.get('cfu') or '—'}</span>
-            <span class='chip'>Anno {corso.get('anno_di_corso') or '—'}</span>
-            <span class='chip'>{corso.get('livello') or '—'}</span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    actions_col1, actions_col2 = st.columns(2)
-    if not corso.get("attivo"):
-        with actions_col1:
-            if st.button("Salva bozza", key=f"draft_{corso['id']}"):
-                db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 0})
-                st.success("Bozza salvata.")
-        with actions_col2:
-            if st.button("Pubblica", key=f"pub_det_{corso['id']}"):
-                db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 1})
-                st.success("Corso pubblicato.")
-                st.session_state["_doc_refresh"] = True
-                st.rerun()
-    else:
-        with actions_col1:
-            if st.button("Disattiva", key=f"dis_det_{corso['id']}"):
-                db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 0})
-                st.session_state["_doc_refresh"] = True
-                st.rerun()
+    title_col, close_col = st.columns([10, 1])
+    with title_col:
+        st.markdown(
+            f"<div style='font-family:Playfair Display,serif; font-size:1.2rem; font-weight:700; color:#001A4D; "
+            f"margin:12px 0 4px 0;'>✏️ {corso['nome']} "
+            f"<span class='status-pill {stato_class}' style='font-size:0.72rem; vertical-align:middle;'>{stato_lbl}</span></div>",
+            unsafe_allow_html=True,
+        )
+    with close_col:
+        if st.button("X", key=f"close_course_detail_{corso['id']}", help="Chiudi"):
+            st.session_state["_corso_doc_sel"] = None
+            st.rerun()
 
     tab1, tab2, tab3, tab4 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso"])
 
@@ -529,6 +682,10 @@ def _render_corsi(docente_id: int):
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">I tuoi corsi</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-sub">Gestisci bozze, pubblicazioni e materiali.</div>', unsafe_allow_html=True)
+
+    feedback = st.session_state.pop("_doc_create_feedback", None)
+    if feedback:
+        st.success(feedback)
 
     if st.button("Crea nuovo corso", type="primary"):
         st.session_state["_doc_show_create"] = True
@@ -635,8 +792,19 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
                 target = corso_nome or "il tuo corso"
                 messaggio_da_suggerimento = f"{testo} per {target}"
 
-    user_input = st.chat_input("Chiedi a Lea (docente)...", key="lea_doc_input")
-    messaggio_finale = user_input or messaggio_da_suggerimento
+    with st.form("lea_doc_form", clear_on_submit=True):
+        input_col, send_col = st.columns([5, 1], vertical_alignment="bottom")
+        with input_col:
+            user_input = st.text_input(
+                "Chiedi a Lea (docente)...",
+                key="lea_doc_input_text",
+                placeholder="Chiedi a Lea (docente)...",
+                label_visibility="collapsed",
+            )
+        with send_col:
+            invia = st.form_submit_button("Invia", type="primary", use_container_width=True)
+
+    messaggio_finale = messaggio_da_suggerimento or ((user_input or "").strip() if invia else None)
     if messaggio_finale:
         st.session_state["chat_history_doc"].append({"role": "user", "content": messaggio_finale})
         risposta = "Lea non è configurata (AWS Bedrock non attivo)."
@@ -680,3 +848,7 @@ def mostra_homepage_docente():
 
 if __name__ == "__main__":
     mostra_homepage_docente()
+
+
+
+
