@@ -263,6 +263,26 @@ def _dialog_elimina_corso(corso_id: int):
                 st.error(f"Impossibile eliminare: {e}")
 
 
+def _elimina_materiale(materiale_id: int, s3_key: str | None) -> None:
+    """Elimina un materiale didattico, i suoi chunk e il file fisico dal disco."""
+    # 1. Elimina i chunk associati
+    try:
+        db.elimina("materiali_chunks", {"materiale_id": materiale_id})
+    except Exception:
+        pass
+    # 2. Elimina il record dal DB
+    db.elimina("materiali_didattici", {"id": materiale_id})
+    # 3. Elimina il file fisico (se presente)
+    if s3_key:
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            file_path = os.path.join(base_dir, s3_key)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+
 def _render_materiali(corso: dict, docente_id: int):
     st.markdown("### Materiali didattici (fonte RAG)")
     st.caption("Questi file alimentano la generazione di lezioni/quiz. Formati accettati: pdf, docx, txt, pptx, xlsx.")
@@ -275,11 +295,15 @@ def _render_materiali(corso: dict, docente_id: int):
                 st.markdown(f"**{m['titolo']}**")
                 st.caption(f"Tipo: {m['tipo']} · Caricato: {(m.get('caricato_il') or '')[:10]}")
             with col2:
-                st.caption("Processed" if m.get("is_processed") else "In attesa")
+                if m.get("is_processed"):
+                    n_chunks = db.conta("materiali_chunks", {"materiale_id": m["id"]})
+                    st.caption(f"✅ Processato ({n_chunks} chunk)")
+                else:
+                    st.caption("⏳ In attesa")
             with col3:
                 if st.button("Elimina", key=f"del_mat_{m['id']}"):
-                    db.elimina("materiali_didattici", {"id": m["id"]})
-                    st.success("Materiale eliminato.")
+                    _elimina_materiale(m["id"], m.get("s3_key"))
+                    st.success("Materiale e chunk eliminati.")
                     st.session_state["_doc_refresh"] = True
                     st.rerun()
     else:
@@ -297,27 +321,59 @@ def _render_materiali(corso: dict, docente_id: int):
         "Tipo documento (salvato su DB)", ["pdf", "slide", "video", "dispensa", "libro"], key=f"tipo_{corso['id']}"
     )
     if files and st.button("Carica materiali", key=f"do_upload_{corso['id']}"):
+        try:
+            from src.tools.document_processor import elabora_e_salva_documento as _elabora
+        except Exception:
+            _elabora = None
+
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
         os.makedirs(upload_dir, exist_ok=True)
         ok = 0
+        errori = []
         for f in files:
-            path = os.path.join(upload_dir, f.name)
-            with open(path, "wb") as out:
+            # Salva il file fisico sul disco
+            disk_path = os.path.join(upload_dir, f.name)
+            with open(disk_path, "wb") as out:
                 out.write(f.getbuffer())
-            db.inserisci(
-                "materiali_didattici",
-                {
-                    "corso_universitario_id": corso["id"],
-                    "docente_id": docente_id,
-                    "titolo": f.name,
-                    "tipo": tipo_scelto,
-                    "s3_key": f"uploads/{corso['id']}/{f.name}",
-                    "is_processed": 0,
-                },
-            )
-            ok += 1
-        st.success(f"{ok} file caricati. La pipeline di elaborazione partirà automaticamente.")
+            f.seek(0)  # reset per la lettura successiva
+
+            if _elabora:
+                try:
+                    mat_id = _elabora(
+                        uploaded_file=f,
+                        corso_universitario_id=corso["id"],
+                        titolo=f.name,
+                        tipo=tipo_scelto,
+                    )
+                    # Aggiorna s3_key con il percorso reale sul disco
+                    db.aggiorna(
+                        "materiali_didattici",
+                        {"id": mat_id},
+                        {"s3_key": f"uploads/{corso['id']}/{f.name}"},
+                    )
+                    ok += 1
+                except Exception as e:
+                    errori.append(f"{f.name}: {e}")
+            else:
+                # Fallback senza elaborazione testo
+                db.inserisci(
+                    "materiali_didattici",
+                    {
+                        "corso_universitario_id": corso["id"],
+                        "docente_id": docente_id,
+                        "titolo": f.name,
+                        "tipo": tipo_scelto,
+                        "s3_key": f"uploads/{corso['id']}/{f.name}",
+                        "is_processed": 0,
+                    },
+                )
+                ok += 1
+
+        if ok:
+            st.success(f"{ok} file caricati e processati per la RAG.")
+        for err in errori:
+            st.error(f"Errore: {err}")
         st.session_state["_doc_refresh"] = True
 
 
