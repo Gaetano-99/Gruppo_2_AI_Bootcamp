@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # LearnAI Platform — Entry Point
 # Università Federico II di Napoli
 #
@@ -7,7 +7,7 @@
 # Routing basato su st.session_state["user"]:
 #   None           → pagina di login
 #   ruolo=studente → views/studente.py
-#   ruolo=docente  → views/docente.py  (futura implementazione)
+#   ruolo=docente  → views/docente.py
 #   ruolo=admin    → views/admin.py    (futura implementazione)
 # ============================================================================
 
@@ -18,7 +18,7 @@ import streamlit as st
 # ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="LearnAI – Federico II",
-    page_icon="🎓",
+    page_icon="📓",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -28,6 +28,7 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 from views.login import mostra_login
 from views.studente import mostra_homepage_studente
+from views.docente import mostra_homepage_docente
 
 
 # ---------------------------------------------------------------------------
@@ -44,10 +45,7 @@ def main():
     if ruolo == "Studente":
         mostra_homepage_studente()
     elif ruolo == "Docente":
-        st.info("🚧 Pagina docente in costruzione.")
-        if st.button("Logout"):
-            st.session_state.clear()
-            st.rerun()
+        mostra_homepage_docente()
     elif ruolo == "Admin":
         st.info("🚧 Pagina admin in costruzione.")
         if st.button("Logout"):
