@@ -23,35 +23,42 @@ L'applicazione segue un'architettura a tre livelli (Three-Tier), orientata all'o
 
 ## 2. Alberatura del Progetto
 
+> **Nota:** la struttura sotto rispecchia il codice **effettivamente implementato** (marzo 2026).
+> Moduli pianificati nel PRD ma non ancora sviluppati sono annotati con `[TODO]`.
+
 ```text
 /
-├── .env                        # Variabili d'ambiente (AWS keys, DB URI) — MAI COMMITTATO
+├── .env                            # Variabili d'ambiente (AWS keys, DB URI) — MAI COMMITTATO
 ├── .gitignore
 ├── requirements.txt
-├── docs/                       # Documentazione di progetto (PRD, ARCHITECTURE, etc.)
+├── learnai.db                      # Database SQLite (generato da schema.sql)
+├── uploads/                        # File caricati dagli studenti (local, non su S3)
+├── docs/                           # Documentazione di progetto
+├── app.py                          # Entry point Streamlit — routing per ruolo
+├── views/                          # Pagine Streamlit per ruolo
+│   ├── studente.py                 # Homepage studente (corsi, piani, chatbot Lea)
+│   ├── docente.py                  # Homepage docente [parziale]
+│   └── ospite.py                   # Interfaccia orientamento [TODO]
+├── platform_sdk/                   # SDK interno — accesso DB e agenti
+│   ├── database/
+│   │   └── db.py                   # CRUD: trova_tutti, trova_uno, esegui, inserisci
+│   └── agent/
+│       └── agent.py                # crea_agente, esegui_agente (wrapper LangGraph)
 └── src/
-    ├── app.py                  # Entry point Streamlit — routing per ruolo
-    ├── ui/
-    │   ├── pages/              # Pagine per ruolo (ospite, studente, docente)
-    │   └── components/         # Widget riutilizzabili (cards, forms, grafici)
-    ├── core/
-    │   ├── config.py           # Caricamento variabili da .env
-    │   └── aws_client.py       # Setup Boto3 per S3 e Bedrock
-    ├── agents/                 # I 6 agenti LangGraph
-    │   ├── onboarding.py       # Agent 1 — Onboarding Assistant
-    │   ├── scheduler.py        # Agent 2 — Learning Path Scheduler
-    │   ├── optimizer.py        # Agent 3 — Conversational Plan Optimizer
-    │   ├── content_gen.py      # Agent 4 — Adaptive Content Generation Engine
-    │   ├── gap_analysis.py     # Agent 5 — Competency Gap Analysis AI
-    │   └── course_analysis.py  # Agent 6 — Course Performance Analysis
-    ├── tools/
-    │   ├── rag_engine.py       # Retrieval ibrido: ChromaDB (similarità) + SQLite (metadati)
-    │   └── pdf_parser.py       # Estrazione testo con PyPDF2
-    └── data/
-        ├── schema.sql          # Schema database SQLite (fonte di verità)
-        ├── schemas.py          # Entità tipizzate (Pydantic/TypedDict)
-        └── db_handler.py       # Funzioni CRUD + validazione ruolo su FK
+    ├── agents/                     # Agenti LangGraph implementati
+    │   ├── orchestrator.py         # Orchestratore Lea — punto unico di contatto UI↔AI
+    │   ├── content_gen.py          # Generazione lezioni teoriche da materiali_chunks
+    │   └── practice_gen.py         # Generazione quiz, flashcard, schemi
+    └── services/
+        └── recommender.py          # Raccomandazione corsi (3 segnali: curriculum, engagement, semantica)
 ```
+
+**Agenti pianificati nel PRD ma non ancora implementati `[TODO]`:**
+- `agents/onboarding.py` — Onboarding Assistant (colloquio guidato / analisi CV Ospiti)
+- `agents/scheduler.py` — Learning Path Scheduler (pianificazione automatica)
+- `agents/optimizer.py` — Conversational Plan Optimizer (modifica piani via chat)
+- `agents/gap_analysis.py` — Competency Gap Analysis AI
+- `agents/course_analysis.py` — Course Performance Analysis (dashboard docente)
 
 ---
 

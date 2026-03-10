@@ -1,0 +1,1052 @@
+﻿"""Homepage Docente - LearnAI Platform."""
+
+import json
+import os
+import sys
+from typing import Any, List, Dict
+
+import plotly.express as px
+import streamlit as st
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from platform_sdk.database import db
+
+
+def _import_orchestratore():
+    try:
+        from src.agents.orchestrator import (
+            chat_con_orchestratore,
+            aggiorna_contesto_sessione,
+            reset_sessione_chat,
+        )
+        return chat_con_orchestratore, aggiorna_contesto_sessione, reset_sessione_chat
+    except Exception:
+        return None, None, None
+
+
+_CSS = r"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+:root { --blue:#003087; --blue-dark:#001A4D; --blue-mid:#1351A8; --red:#C8102E; --gold:#C5A028; --light:#F0F4F8; --gray:#5A6A7E; --border:#C8D5E3; --white:#FFFFFF; --green:#1A7F4B; --card:#f8fafc; --input-bg:#f8fafc; --input-text:#1f2937; --placeholder:#4b5563; }
+.stApp { background:#F0F4F8 !important; font-family:'Source Sans 3',sans-serif !important; }
+#MainMenu, footer { visibility:hidden; }
+.block-container { padding-top:0 !important; padding-bottom:0 !important; }
+.topbar { background:linear-gradient(135deg,#001A4D 0%,#003087 60%,#1351A8 100%); border-bottom:3px solid #C5A028; padding:14px 32px; display:flex; align-items:center; justify-content:space-between; margin:-1rem -1rem 24px -1rem; }
+.topbar-brand { font-family:'Playfair Display',serif; color:#fff; font-size:1.25rem; font-weight:700; }
+.topbar-brand span { color:#C5A028; }
+.topbar-user { color:rgba(255,255,255,0.85); font-size:0.88rem; display:flex; align-items:center; gap:12px; }
+.topbar-avatar { width:34px; height:34px; border-radius:50%; background:#C5A028; color:#001A4D; font-weight:700; font-size:0.85rem; display:inline-flex; align-items:center; justify-content:center; }
+.section-card { background:var(--card); border-radius:12px; padding:18px 20px; margin-bottom:18px; box-shadow:0 4px 18px rgba(0,48,135,0.08); border:1px solid #E3EAF3; }
+.section-title { font-family:'Playfair Display',serif; font-size:1.35rem; color:#001A4D; margin:0 0 8px 0; font-weight:700; }
+.section-sub { color:#5A6A7E; font-size:0.90rem; margin-bottom:12px; }
+.metric-box { background:linear-gradient(135deg,#EEF4FF 0%,#F7FAFF 100%); border:1px solid #D6E0F0; border-radius:12px; padding:14px 16px; box-shadow:inset 0 1px 0 rgba(255,255,255,0.6); }
+.metric-label { color:#5A6A7E; font-size:0.82rem; margin-bottom:4px; }
+.metric-value { color:#001A4D; font-size:1.4rem; font-weight:700; }
+.course-card { background:var(--card); border-radius:12px; padding:14px 16px; border-left:4px solid #C8D5E3; box-shadow:0 2px 10px rgba(0,48,135,0.07); margin-bottom:10px; }
+.course-card .title { font-weight:700; color:#001A4D; margin:0; }
+.course-card .meta { color:#5A6A7E; font-size:0.82rem; }
+.status-pill { display:inline-block; font-size:0.72rem; font-weight:700; padding:4px 10px; border-radius:999px; text-transform:uppercase; letter-spacing:0.4px; }
+.pill-pub { background:#E6F9F0; color:#1A7F4B; }
+.pill-bozza { background:#FFF6E0; color:#8A6800; }
+.chip { display:inline-block; background:#EEF4FF; color:#003087; padding:3px 9px; border-radius:10px; font-size:0.75rem; font-weight:700; margin-right:6px; }
+.tab-note { background:#F8FAFD; border:1px solid #E3EAF3; border-radius:10px; padding:10px 12px; color:#5A6A7E; font-size:0.85rem; }
+.upload-box { border:1.5px dashed #C8D5E3; border-radius:12px; padding:16px; background:var(--card); }
+.chat-header { background:linear-gradient(135deg,#001A4D 0%,#003087 100%); color:#fff; padding:14px 18px; border-radius:12px 12px 0 0; display:flex; align-items:center; gap:10px; margin-bottom:0; }
+.chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
+.chat-title { font-weight:700; font-size:0.95rem; }
+.chat-sub { font-size:0.75rem; opacity:0.75; }
+.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; min-height:420px; overflow:visible; padding:16px; display:flex; flex-direction:column; gap:10px; }
+.msg-user { background:#003087; color:#fff; border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:0.87rem; max-width:82%; align-self:flex-end; line-height:1.5; }
+.msg-ai { background:#F0F4F8; color:#1A2535; border-radius:4px 14px 14px 14px; padding:10px 14px; font-size:0.87rem; max-width:88%; align-self:flex-start; line-height:1.55; border:1px solid #E0E8F2; }
+.stTextInput input, .stTextArea textarea, .stSelectbox select, .stNumberInput input, .stChatInput textarea { background: var(--input-bg) !important; color: var(--input-text) !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder, .stChatInput textarea::placeholder { color: var(--placeholder) !important; }
+div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(--input-text) !important; }
+div[data-baseweb="select"] input { color: var(--input-text) !important; }
+
+/* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
+label[data-testid="stWidgetLabel"] p,
+label[data-testid="stWidgetLabel"] div,
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] div,
+label p {
+    color: var(--input-text) !important;
+    font-weight: 600 !important;
+}
+
+/* La colonna chat segue lo scroll della pagina */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-of-type {
+    position: static;
+    max-height: none;
+    overflow: visible;
+}
+</style>
+"""
+
+
+def _get_corsi_docente(docente_id: int) -> List[dict]:
+    return db.trova_tutti("corsi_universitari", {"docente_id": docente_id}, ordine="created_at DESC")
+
+
+def _get_tutti_cdl() -> List[dict]:
+    try:
+        return db.trova_tutti("corsi_di_laurea", {}, ordine="nome ASC")
+    except Exception:
+        return []
+
+
+def _get_cdl_corso(corso_id: int) -> List[int]:
+    try:
+        rows = db.trova_tutti("corsi_laurea_universitari", {"corso_universitario_id": corso_id})
+        return [r["corso_di_laurea_id"] for r in rows]
+    except Exception:
+        return []
+
+
+def _salva_cdl_corso(corso_id: int, cdl_ids: List[int]) -> None:
+    try:
+        db.esegui("DELETE FROM corsi_laurea_universitari WHERE corso_universitario_id = ?", [corso_id])
+    except Exception:
+        pass
+    for cdl_id in cdl_ids:
+        try:
+            db.inserisci("corsi_laurea_universitari", {
+                "corso_di_laurea_id": cdl_id,
+                "corso_universitario_id": corso_id,
+                "obbligatorio": 1,
+            })
+        except Exception:
+            pass
+
+
+def _get_materiali_corso(corso_id: int) -> List[dict]:
+    try:
+        return db.trova_tutti("materiali_didattici", {"corso_universitario_id": corso_id}, ordine="caricato_il DESC")
+    except Exception:
+        return []
+
+
+def _conta_studenti_corso(corso_id: int) -> int:
+    try:
+        rows = db.esegui(
+            "SELECT COUNT(DISTINCT studente_id) AS n FROM studenti_corsi WHERE corso_universitario_id = ?",
+            [corso_id],
+        )
+        return int(rows[0]["n"]) if rows else 0
+    except Exception:
+        return 0
+
+
+def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
+    filtri = ""
+    params = [docente_id]
+    if corso_id:
+        filtri = " AND cu.id = ?"
+        params.append(corso_id)
+
+    def one(sql: str, default: int = 0) -> int:
+        try:
+            res = db.esegui(sql, params)
+            return int(res[0]["n"]) if res else default
+        except Exception:
+            return default
+
+    studenti = one(
+        """
+        SELECT COUNT(DISTINCT sc.studente_id) AS n
+        FROM corsi_universitari cu
+        LEFT JOIN studenti_corsi sc ON sc.corso_universitario_id = cu.id
+        WHERE cu.docente_id = ?""" + filtri
+    )
+    quiz_appr = one(
+        """
+        SELECT COUNT(*) AS n
+        FROM quiz q
+        JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
+        WHERE cu.docente_id = ? AND q.approvato = 1""" + filtri
+    )
+    tentativi = one(
+        """
+        SELECT COUNT(*) AS n
+        FROM tentativi_quiz t
+        JOIN quiz q ON q.id = t.quiz_id
+        JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
+        WHERE cu.docente_id = ? AND q.approvato = 1""" + filtri
+    )
+    corsi = one("SELECT COUNT(*) AS n FROM corsi_universitari cu WHERE cu.docente_id = ?" + filtri)
+
+    return {"studenti": studenti, "quiz": quiz_appr, "tentativi": tentativi, "corsi": corsi}
+
+
+def _stato_corso(corso: dict) -> tuple[str, str]:
+    return ("Pubblicato", "pill-pub") if corso.get("attivo") else ("Da pubblicare", "pill-bozza")
+
+
+def _render_topbar(utente: dict) -> bool:
+    st.markdown(_CSS, unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        <div class='topbar'>
+            <div class='topbar-brand'>LearnAI <span>Docente</span></div>
+            <div class='topbar-user'>
+                <div class='topbar-avatar'>{(utente.get('nome','')[:1] or '?').upper()}</div>
+                <div>
+                    <div>{utente.get('nome','')} {utente.get('cognome','')}</div>
+                    <div style='font-size:0.78rem; opacity:0.8'>Docente</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    col_logout, _ = st.columns([1, 5])
+    with col_logout:
+        if st.button("Logout", type="secondary"):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
+            st.rerun()
+            return True
+    return False
+
+
+def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">Analytics</div>', unsafe_allow_html=True)
+    scope_options = ["Generale"] + [f"Corso: {c['nome']} (ID {c['id']})" for c in corsi]
+    scelta = st.selectbox("Ambito analytics", scope_options, key="analytics_scope")
+    corso_sel_id = None
+    if scelta.startswith("Corso:"):
+        label_to_id = {f"Corso: {c['nome']} (ID {c['id']})": c["id"] for c in corsi}
+        corso_sel_id = label_to_id.get(scelta)
+    dati = _metrics(docente_id, corso_sel_id)
+
+    col_a, col_b, col_c, col_d = st.columns(4)
+    for col, label, val in [
+        (col_a, "Studenti unici", dati["studenti"]),
+        (col_b, "Quiz pubblicati", dati["quiz"]),
+        (col_c, "Tentativi quiz", dati["tentativi"]),
+        (col_d, "Corsi gestiti", dati["corsi"]),
+    ]:
+        with col:
+            st.markdown(
+                f"""
+                <div class='metric-box'>
+                    <div class='metric-label'>{label}</div>
+                    <div class='metric-value'>{val}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    if corsi:
+        serie = [{"Corso": c["nome"], "Quiz approvati": _metrics(docente_id, c["id"])['quiz']} for c in corsi]
+        fig = px.bar(serie, x="Corso", y="Quiz approvati", title="Quiz approvati per corso")
+        fig.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Carica almeno un corso per vedere le analytics.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+def _dialog_crea_corso(docente_id: int):
+    header_col, close_col = st.columns([10, 1])
+    with header_col:
+        st.markdown("#### Nuovo corso")
+    with close_col:
+        if st.button("X", key="close_create_course", help="Chiudi"):
+            st.session_state["_doc_show_create"] = False
+            st.rerun()
+
+    tutti_cdl = _get_tutti_cdl()
+    cdl_nomi = [c["nome"] for c in tutti_cdl]
+
+    with st.form("crea_corso_form"):
+        nome = st.text_input("Nome corso")
+        descrizione = st.text_area("Descrizione")
+        cfu = st.number_input("CFU", min_value=0, max_value=30, step=1, value=0)
+        anno = st.number_input("Anno di corso (1-5)", min_value=1, max_value=5, step=1, value=1)
+        livello = st.selectbox("Livello", ["base", "intermedio", "avanzato"])
+        semestre = st.selectbox("Semestre", [1, 2])
+        cdl_sel = st.multiselect("Corsi di Laurea", cdl_nomi)
+        submitted = st.form_submit_button("Salva bozza", type="primary")
+    if submitted:
+        if not nome:
+            st.error("Inserisci il nome del corso.")
+            return
+        corso_id = db.inserisci(
+            "corsi_universitari",
+            {
+                "nome": nome,
+                "descrizione": descrizione,
+                "docente_id": docente_id,
+                "cfu": cfu or None,
+                "anno_di_corso": anno,
+                "livello": livello,
+                "semestre": semestre,
+                "attivo": 0,
+            },
+        )
+        cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
+        _salva_cdl_corso(corso_id, cdl_sel_ids)
+        st.session_state["_doc_show_create"] = False
+        st.session_state["_doc_create_feedback"] = "Corso salvato in bozza."
+        st.session_state["_doc_refresh"] = True
+
+
+def _dialog_elimina_corso(corso_id: int):
+    st.warning("Eliminerai definitivamente il corso e i relativi materiali.")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Annulla"):
+            st.session_state["_doc_delete_confirm"] = None
+    with c2:
+        if st.button("Elimina", type="primary"):
+            try:
+                db.elimina("corsi_universitari", {"id": corso_id})
+                st.session_state["_doc_refresh"] = True
+                st.session_state["_corso_doc_sel"] = None
+                st.success("Corso eliminato.")
+            except Exception as e:
+                st.error(f"Impossibile eliminare: {e}")
+
+
+def _elimina_materiale(materiale_id: int, s3_key: str | None) -> None:
+    """Elimina un materiale didattico, i suoi chunk e il file fisico dal disco."""
+    # 1. Elimina i chunk associati
+    try:
+        db.elimina("materiali_chunks", {"materiale_id": materiale_id})
+    except Exception:
+        pass
+    # 2. Elimina il record dal DB
+    db.elimina("materiali_didattici", {"id": materiale_id})
+    # 3. Elimina il file fisico (se presente)
+    if s3_key:
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            file_path = os.path.join(base_dir, s3_key)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
+
+
+def _render_materiali(corso: dict, docente_id: int):
+    st.markdown("### Materiali didattici (fonte RAG)")
+    st.caption("Questi file alimentano la generazione di lezioni/quiz. Formati accettati: pdf, docx, txt, pptx, xlsx.")
+
+    materiali = _get_materiali_corso(corso["id"])
+    if materiali:
+        for m in materiali:
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.markdown(f"**{m['titolo']}**")
+                st.caption(f"Tipo: {m['tipo']} · Caricato: {(m.get('caricato_il') or '')[:10]}")
+            with col2:
+                if m.get("is_processed"):
+                    n_chunks = db.conta("materiali_chunks", {"materiale_id": m["id"]})
+                    st.caption(f"✅ Processato ({n_chunks} chunk)")
+                else:
+                    st.caption("⏳ In attesa")
+            with col3:
+                if st.button("Elimina", key=f"del_mat_{m['id']}"):
+                    _elimina_materiale(m["id"], m.get("s3_key"))
+                    st.success("Materiale e chunk eliminati.")
+                    st.session_state["_doc_refresh"] = True
+                    st.rerun()
+    else:
+        st.info("Nessun materiale caricato per questo corso.")
+
+    st.markdown("---")
+    st.markdown("#### Carica nuovi materiali")
+    files = st.file_uploader(
+        "Carica uno o più file (drag & drop)",
+        type=["pdf", "docx", "txt", "pptx", "xlsx"],
+        accept_multiple_files=True,
+        key=f"upload_{corso['id']}",
+    )
+    tipo_scelto = st.selectbox(
+        "Tipo documento (salvato su DB)", ["pdf", "slide", "video", "dispensa", "libro"], key=f"tipo_{corso['id']}"
+    )
+    if files and st.button("Carica materiali", key=f"do_upload_{corso['id']}"):
+        try:
+            from src.tools.document_processor import elabora_e_salva_documento as _elabora
+        except Exception:
+            _elabora = None
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
+        os.makedirs(upload_dir, exist_ok=True)
+        ok = 0
+        errori = []
+        for f in files:
+            # Salva il file fisico sul disco
+            disk_path = os.path.join(upload_dir, f.name)
+            with open(disk_path, "wb") as out:
+                out.write(f.getbuffer())
+            f.seek(0)  # reset per la lettura successiva
+
+            if _elabora:
+                try:
+                    mat_id = _elabora(
+                        uploaded_file=f,
+                        corso_universitario_id=corso["id"],
+                        titolo=f.name,
+                        tipo=tipo_scelto,
+                    )
+                    # Aggiorna s3_key con il percorso reale sul disco
+                    db.aggiorna(
+                        "materiali_didattici",
+                        {"id": mat_id},
+                        {"s3_key": f"uploads/{corso['id']}/{f.name}"},
+                    )
+                    ok += 1
+                except Exception as e:
+                    errori.append(f"{f.name}: {e}")
+            else:
+                # Fallback senza elaborazione testo
+                db.inserisci(
+                    "materiali_didattici",
+                    {
+                        "corso_universitario_id": corso["id"],
+                        "docente_id": docente_id,
+                        "titolo": f.name,
+                        "tipo": tipo_scelto,
+                        "s3_key": f"uploads/{corso['id']}/{f.name}",
+                        "is_processed": 0,
+                    },
+                )
+                ok += 1
+
+        if ok:
+            st.success(f"{ok} file caricati e processati per la RAG.")
+        for err in errori:
+            st.error(f"Errore: {err}")
+        st.session_state["_doc_refresh"] = True
+
+
+def _cancella_contenuto_piano_corso(corso_id: int) -> None:
+    """Elimina il piano docente esistente (is_corso_docente=1) e tutto il suo contenuto."""
+    piani = db.trova_tutti("piani_personalizzati", {"corso_universitario_id": corso_id, "is_corso_docente": 1})
+    if not piani:
+        return
+    piano_id = piani[0]["id"]
+    paragrafi = db.esegui(
+        "SELECT pp.id FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id WHERE pc.piano_id = ?",
+        [piano_id],
+    )
+    par_ids = [p["id"] for p in paragrafi]
+    if par_ids:
+        ph = ",".join("?" * len(par_ids))
+        contenuti_quiz = db.esegui(
+            f"SELECT quiz_id FROM piano_contenuti WHERE paragrafo_id IN ({ph}) AND quiz_id IS NOT NULL", par_ids
+        )
+        quiz_ids = [c["quiz_id"] for c in contenuti_quiz if c.get("quiz_id")]
+        db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({ph})", par_ids)
+        db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({ph})", par_ids)
+        if quiz_ids:
+            qph = ",".join("?" * len(quiz_ids))
+            db.esegui(f"DELETE FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+            db.esegui(f"DELETE FROM quiz WHERE id IN ({qph})", quiz_ids)
+    db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
+    db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
+
+
+def _salva_contenuti_corso_db(corso_id: int, docente_id: int, schema: List[dict]) -> tuple[bool, str]:
+    """Salva lo schema (capitoli + test) nel DB come contenuto ufficiale del corso."""
+    try:
+        _cancella_contenuto_piano_corso(corso_id)
+
+        piano_id = db.inserisci("piani_personalizzati", {
+            "studente_id": docente_id,
+            "titolo": "Contenuto corso (docente)",
+            "descrizione": "",
+            "tipo": "corso",
+            "corso_universitario_id": corso_id,
+            "stato": "attivo",
+            "is_corso_docente": 1,
+        })
+
+        ordine_cap = 0
+        ultimo_paragrafo_id = None
+
+        for blocco in schema:
+            tipo = blocco.get("tipo", "capitolo")
+
+            if tipo == "capitolo":
+                ordine_cap += 1
+                cap_id = db.inserisci("piano_capitoli", {
+                    "piano_id": piano_id,
+                    "titolo": blocco.get("titolo", ""),
+                    "ordine": ordine_cap,
+                })
+                for p_idx, par in enumerate(blocco.get("paragrafi", [])):
+                    par_id = db.inserisci("piano_paragrafi", {
+                        "capitolo_id": cap_id,
+                        "titolo": par.get("titolo", ""),
+                        "ordine": p_idx + 1,
+                    })
+                    ultimo_paragrafo_id = par_id
+                    testo = (par.get("testo") or "").strip()
+                    if testo:
+                        db.inserisci("piano_contenuti", {
+                            "paragrafo_id": par_id,
+                            "tipo": "lezione",
+                            "contenuto_json": testo,
+                        })
+
+            elif tipo == "test" and ultimo_paragrafo_id:
+                domande = blocco.get("domande", [])
+                if not domande:
+                    continue
+                quiz_id = db.inserisci("quiz", {
+                    "titolo": blocco.get("titolo", "Quiz"),
+                    "corso_universitario_id": corso_id,
+                    "docente_id": docente_id,
+                    "creato_da": "docente",
+                    "approvato": 1,
+                    "ripetibile": 1,
+                })
+                for q_idx, dom in enumerate(domande):
+                    opzioni = dom.get("opzioni", [])
+                    corretta_idx = int(dom.get("corretta", 0))
+                    risposta_corretta = opzioni[corretta_idx] if corretta_idx < len(opzioni) else ""
+                    db.inserisci("domande_quiz", {
+                        "quiz_id": quiz_id,
+                        "testo": dom.get("testo", ""),
+                        "tipo": "scelta_multipla",
+                        "opzioni_json": json.dumps(opzioni, ensure_ascii=False),
+                        "risposta_corretta": risposta_corretta,
+                        "ordine": q_idx + 1,
+                    })
+                db.inserisci("piano_contenuti", {
+                    "paragrafo_id": ultimo_paragrafo_id,
+                    "tipo": "quiz",
+                    "quiz_id": quiz_id,
+                })
+
+        return True, f"Contenuto salvato: {ordine_cap} capitoli pubblicati."
+    except Exception as e:
+        return False, f"Errore durante il salvataggio: {e}"
+
+
+def _init_schema_state(corso_id: int):
+    key = f"_schema_{corso_id}"
+    if key not in st.session_state:
+        st.session_state[key] = []
+    return key
+
+
+def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
+    """Recupera l'ID del primo paragrafo DB per un capitolo appena salvato da content_gen."""
+    try:
+        piani = db.trova_tutti(
+            "piani_personalizzati",
+            {"corso_universitario_id": corso_id, "is_corso_docente": 1},
+            ordine="id DESC",
+        )
+        if not piani:
+            return 0
+        piano_id = piani[0]["id"]
+        capitoli_db = db.trova_tutti("piano_capitoli", {"piano_id": piano_id})
+        cap_match = next(
+            (c for c in capitoli_db if c["titolo"] == titolo_capitolo),
+            capitoli_db[0] if capitoli_db else None,
+        )
+        if not cap_match:
+            return 0
+        paragrafi_db = db.trova_tutti("piano_paragrafi", {"capitolo_id": cap_match["id"]})
+        return paragrafi_db[0]["id"] if paragrafi_db else 0
+    except Exception:
+        return 0
+
+
+def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str) -> None:
+    """Invoca agente teorico e agente pratico in sequenza, poi aggiorna lo stato UI."""
+    try:
+        from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
+        from src.agents.practice_gen import esegui_generazione_pratica
+    except Exception as e:
+        st.error(f"Impossibile importare gli agenti AI: {e}")
+        return
+
+    # — Fase 1: Teoria —
+    with st.spinner("Fase 1/2 — Generazione contenuti teorici…"):
+        agente = crea_agente_content_gen()
+        argomento = f"{corso['nome']}. {prompt}".strip(". ") if prompt else corso["nome"]
+        stato_t = esegui_generazione(
+            agente=agente,
+            corso_id=corso["id"],
+            argomento_richiesto=argomento,
+            docente_id=docente_id,
+            is_corso_docente=True,
+        )
+
+    if stato_t.get("errore"):
+        st.error(f"Errore teoria: {stato_t['errore']}")
+        return
+
+    struttura = stato_t.get("struttura_corso_generata", {})
+    if not struttura or not struttura.get("capitoli"):
+        st.error("L'agente non ha prodotto una struttura valida. Verifica che siano presenti materiali RAG.")
+        return
+
+    # — Fase 2: Quiz per ogni capitolo —
+    nuovo_schema: list[dict] = []
+    chunk_ids = stato_t.get("chunk_ids_utilizzati", [])
+    with st.spinner("Fase 2/2 — Generazione quiz di verifica…"):
+        for capitolo in struttura["capitoli"]:
+            nuovo_schema.append({
+                "tipo": "capitolo",
+                "titolo": capitolo["titolo"],
+                "paragrafi": [
+                    {"titolo": p["titolo"], "testo": p["testo"]}
+                    for p in capitolo.get("paragrafi", [])
+                ],
+            })
+            testo_cap = "\n\n".join(
+                p["testo"] for p in capitolo.get("paragrafi", []) if p.get("testo")
+            )
+            if not testo_cap:
+                continue
+            par_id = _get_primo_paragrafo_id(corso["id"], capitolo["titolo"])
+            stato_p = esegui_generazione_pratica(
+                paragrafo_id=par_id,
+                testo_paragrafo=testo_cap,
+                strumenti_richiesti=["quiz"],
+                studente_id=docente_id,
+                corso_universitario_id=corso["id"],
+                chunk_ids_utilizzati=chunk_ids,
+            )
+            quiz_list = stato_p.get("strumenti_generati", {}).get("quiz", [])
+            if quiz_list:
+                nuovo_schema.append({
+                    "tipo": "test",
+                    "titolo": f"Test — {capitolo['titolo']}",
+                    "domande": [
+                        {
+                            "testo": d["testo"],
+                            "opzioni": d["opzioni"],
+                            "corretta": d["indice_corretta"],
+                        }
+                        for d in quiz_list
+                    ],
+                })
+
+    # — Fase 3: Aggiornamento UI —
+    st.session_state[key] = nuovo_schema
+    st.success("Contenuto corso generato con successo!")
+    st.rerun()
+
+
+def _render_contenuti_ai(corso: dict):
+    st.markdown("**Contenuti generati AI (capitoli e test)**")
+    st.caption(
+        "Premi 'Genera contenuto corso' per produrre teoria e quiz in un solo click. "
+        "Poi leggi, modifica i campi, o chiedi a Lea di riscrivere un paragrafo nella chat a destra."
+    )
+    docente_id = st.session_state.get("current_user_id", 1)
+    key = _init_schema_state(corso["id"])
+    schema = st.session_state[key]
+
+    # Version counter: incrementato ad ogni cancellazione per forzare il refresh dei widget
+    ver_key = f"_schema_ver_{corso['id']}"
+    if ver_key not in st.session_state:
+        st.session_state[ver_key] = 0
+    ver = st.session_state[ver_key]
+
+    # — Prompt centrale —
+    prompt = st.text_area(
+        "Istruzioni per generare la lezione",
+        placeholder="Es: Focalizzati su esempi pratici. Usa un linguaggio accessibile agli studenti del primo anno.",
+        key=f"prompt_{corso['id']}",
+    )
+    if st.button("Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
+        _genera_contenuto_corso(corso, docente_id, prompt, key)
+
+    st.markdown("---")
+
+    # — Rendering schema misto —
+    idx_to_delete = None
+    cap_num = 0
+    test_num = 0
+
+    for idx, blocco in enumerate(schema):
+        tipo = blocco.get("tipo", "capitolo")
+
+        if tipo == "capitolo":
+            cap_num += 1
+            col_header, col_del = st.columns([11, 1])
+            with col_header:
+                st.markdown(f"#### Capitolo {cap_num}")
+            with col_del:
+                if st.button(
+                    "🗑️",
+                    key=f"del_cap_{corso['id']}_{idx}_{ver}",
+                    help="Elimina capitolo e i suoi paragrafi",
+                ):
+                    idx_to_delete = idx
+
+            blocco["titolo"] = st.text_input(
+                "Titolo capitolo",
+                value=blocco.get("titolo", ""),
+                key=f"cap_tit_{corso['id']}_{idx}_{ver}",
+            )
+            for p_idx, par in enumerate(blocco.get("paragrafi", [])):
+                par["titolo"] = st.text_input(
+                    f"Titolo paragrafo {p_idx + 1}",
+                    value=par.get("titolo", ""),
+                    key=f"par_tit_{corso['id']}_{idx}_{p_idx}_{ver}",
+                )
+                par["testo"] = st.text_area(
+                    f"Testo paragrafo {p_idx + 1}",
+                    value=par.get("testo", ""),
+                    height=220,
+                    key=f"par_txt_{corso['id']}_{idx}_{p_idx}_{ver}",
+                )
+
+        elif tipo == "test":
+            test_num += 1
+            col_header, col_del = st.columns([11, 1])
+            with col_header:
+                st.markdown(f"#### Test {test_num}")
+            with col_del:
+                if st.button(
+                    "🗑️",
+                    key=f"del_test_{corso['id']}_{idx}_{ver}",
+                    help="Elimina set di domande",
+                ):
+                    idx_to_delete = idx
+
+            blocco["titolo"] = st.text_input(
+                "Titolo test",
+                value=blocco.get("titolo", ""),
+                key=f"test_tit_{corso['id']}_{idx}_{ver}",
+            )
+            for d_idx, dom in enumerate(blocco.get("domande", [])):
+                st.markdown(f"**Domanda {d_idx + 1}**")
+                dom["testo"] = st.text_input(
+                    "Testo domanda",
+                    value=dom.get("testo", ""),
+                    key=f"dom_txt_{corso['id']}_{idx}_{d_idx}_{ver}",
+                )
+                opzioni = dom.get("opzioni", ["", "", "", ""])
+                for o_idx, opz in enumerate(opzioni):
+                    opzioni[o_idx] = st.text_input(
+                        f"Opzione {chr(65 + o_idx)}",
+                        value=opz,
+                        key=f"opz_{corso['id']}_{idx}_{d_idx}_{o_idx}_{ver}",
+                    )
+                dom["opzioni"] = opzioni
+                dom["corretta"] = st.number_input(
+                    "Indice risposta corretta (0 = prima opzione)",
+                    min_value=0,
+                    max_value=max(0, len(opzioni) - 1),
+                    value=int(dom.get("corretta", 0)),
+                    step=1,
+                    key=f"corr_{corso['id']}_{idx}_{d_idx}_{ver}",
+                )
+                st.markdown("---")
+
+    # — Gestione cancellazione —
+    if idx_to_delete is not None:
+        schema.pop(idx_to_delete)
+        st.session_state[key] = schema
+        st.session_state[ver_key] = ver + 1
+        st.rerun()
+
+    st.markdown("---")
+
+    # — Bottoni di aggiunta manuale —
+    col_add1, col_add2 = st.columns(2)
+    with col_add1:
+        if st.button("➕ Aggiungi Capitolo", key=f"add_cap_{corso['id']}"):
+            schema.append({
+                "tipo": "capitolo",
+                "titolo": "Nuovo capitolo",
+                "paragrafi": [{"titolo": "Paragrafo 1", "testo": ""}],
+            })
+            st.session_state[key] = schema
+            st.rerun()
+    with col_add2:
+        if st.button("📝 Aggiungi Test", key=f"add_test_{corso['id']}"):
+            schema.append({
+                "tipo": "test",
+                "titolo": "Nuovo test",
+                "domande": [
+                    {
+                        "testo": "Inserisci una domanda",
+                        "opzioni": ["Opzione A", "Opzione B", "Opzione C", "Opzione D"],
+                        "corretta": 0,
+                    }
+                ],
+            })
+            st.session_state[key] = schema
+            st.rerun()
+
+    pubblicato = corso.get("attivo")
+    label_salva = "💾 Salva e pubblica contenuti" if pubblicato else "💾 Salva contenuti (bozza)"
+    if st.button(label_salva, type="primary", key=f"save_schema_{corso['id']}"):
+        ok, msg = _salva_contenuti_corso_db(corso["id"], docente_id, schema)
+        if ok:
+            if pubblicato:
+                st.success(f"{msg} Gli studenti possono ora vedere le lezioni.")
+            else:
+                st.success(f"{msg} Pubblica il corso per renderlo visibile agli studenti.")
+        else:
+            st.error(msg)
+
+
+def _render_dettaglio_corso(corso: dict, docente_id: int):
+    stato_lbl, stato_class = _stato_corso(corso)
+    title_col, close_col = st.columns([10, 1])
+    with title_col:
+        st.markdown(
+            f"<div style='font-family:Playfair Display,serif; font-size:1.2rem; font-weight:700; color:#001A4D; "
+            f"margin:12px 0 4px 0;'>✏️ {corso['nome']} "
+            f"<span class='status-pill {stato_class}' style='font-size:0.72rem; vertical-align:middle;'>{stato_lbl}</span></div>",
+            unsafe_allow_html=True,
+        )
+    with close_col:
+        if st.button("X", key=f"close_course_detail_{corso['id']}", help="Chiudi"):
+            st.session_state["_corso_doc_sel"] = None
+            st.rerun()
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso"])
+
+    with tab1:
+        st.markdown(
+            f"""
+            <div class='tab-note'>
+            <strong>Descrizione:</strong> {corso.get('descrizione') or '—'}<br>
+            <strong>CFU:</strong> {corso.get('cfu') or '—'}<br>
+            <strong>Anno:</strong> {corso.get('anno_di_corso') or '—'} · Livello: {corso.get('livello') or '—'} · Semestre: {corso.get('semestre') or '—'}<br>
+            <strong>Studenti iscritti:</strong> {_conta_studenti_corso(corso['id'])}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if not corso.get("attivo"):
+            st.info("Puoi modificare questo corso finché non viene pubblicato.")
+            tutti_cdl = _get_tutti_cdl()
+            cdl_correnti_ids = _get_cdl_corso(corso["id"])
+            cdl_nomi_tutti = [c["nome"] for c in tutti_cdl]
+            cdl_correnti_nomi = [c["nome"] for c in tutti_cdl if c["id"] in cdl_correnti_ids]
+            with st.form(f"modifica_corso_{corso['id']}"):
+                nome = st.text_input("Nome corso", value=corso.get("nome", ""))
+                descrizione = st.text_area("Descrizione", value=corso.get("descrizione", "") or "")
+                cfu = st.number_input("CFU", min_value=0, max_value=30, step=1, value=int(corso.get("cfu") or 0))
+                anno = st.number_input(
+                    "Anno di corso (1-5)", min_value=1, max_value=5, step=1, value=int(corso.get("anno_di_corso") or 1)
+                )
+                livello = st.selectbox(
+                    "Livello", ["base", "intermedio", "avanzato"], index=["base", "intermedio", "avanzato"].index(corso.get("livello") or "base")
+                )
+                semestre = st.selectbox("Semestre", [1, 2], index=[1, 2].index(corso.get("semestre") or 1))
+                cdl_sel = st.multiselect("Corsi di Laurea", cdl_nomi_tutti, default=cdl_correnti_nomi)
+                if st.form_submit_button("Aggiorna bozza", type="primary"):
+                    db.aggiorna(
+                        "corsi_universitari",
+                        {"id": corso["id"]},
+                        {"nome": nome, "descrizione": descrizione, "cfu": cfu, "anno_di_corso": anno, "livello": livello, "semestre": semestre},
+                    )
+                    cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
+                    _salva_cdl_corso(corso["id"], cdl_sel_ids)
+                    st.success("Bozza aggiornata.")
+                    st.session_state["_doc_refresh"] = True
+
+    with tab2:
+        _render_materiali(corso, docente_id)
+
+    with tab3:
+        _render_contenuti_ai(corso)
+
+    with tab4:
+        dati = _metrics(docente_id, corso["id"])
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Studenti unici", dati["studenti"])
+        col2.metric("Quiz pubblicati", dati["quiz"])
+        col3.metric("Tentativi quiz", dati["tentativi"])
+        st.caption("Drill-down per capitolo/argomento verrà aggiunto dopo la raccolta dati.")
+
+
+def _render_corsi(docente_id: int):
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">I tuoi corsi</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-sub">Gestisci bozze, pubblicazioni e materiali.</div>', unsafe_allow_html=True)
+
+    feedback = st.session_state.pop("_doc_create_feedback", None)
+    if feedback:
+        st.success(feedback)
+
+    if st.button("Crea nuovo corso", type="primary"):
+        st.session_state["_doc_show_create"] = True
+    if st.session_state.get("_doc_show_create"):
+        _dialog_crea_corso(docente_id)
+
+    corsi = _get_corsi_docente(docente_id)
+    if not corsi:
+        st.info("Nessun corso presente. Crea il primo corso per iniziare.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    for corso in corsi:
+        stato_lbl, stato_class = _stato_corso(corso)
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            st.markdown(
+                f"""
+                <div class='course-card'>
+                    <div class='title'>{corso['nome']}</div>
+                    <div class='meta'>
+                        <span class='status-pill {stato_class}'>{stato_lbl}</span>
+                        <span class='chip'>CFU {corso.get('cfu') or '—'}</span>
+                        <span class='chip'>Anno {corso.get('anno_di_corso') or '—'}</span>
+                        <span class='chip'>{corso.get('livello') or '—'}</span>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with col2:
+            c_a, c_b, c_c = st.columns(3)
+            with c_a:
+                if st.button("Apri", key=f"apri_{corso['id']}"):
+                    st.session_state["_corso_doc_sel"] = corso["id"]
+            with c_b:
+                if corso.get("attivo"):
+                    if st.button("Disattiva", key=f"dis_{corso['id']}"):
+                        db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 0})
+                        st.session_state["_doc_refresh"] = True
+                        st.rerun()
+                else:
+                    if st.button("Pubblica", key=f"pub_{corso['id']}"):
+                        db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 1})
+                        st.session_state["_doc_refresh"] = True
+                        st.rerun()
+            with c_c:
+                if st.button("Elimina", key=f"del_{corso['id']}"):
+                    st.session_state["_doc_delete_confirm"] = corso["id"]
+        st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:6px 0'>", unsafe_allow_html=True)
+
+    if st.session_state.get("_doc_delete_confirm"):
+        _dialog_elimina_corso(st.session_state["_doc_delete_confirm"])
+
+    sel_id = st.session_state.get("_corso_doc_sel")
+    if sel_id:
+        corso_sel = next((c for c in corsi if c["id"] == sel_id), None)
+        if corso_sel:
+            _render_dettaglio_corso(corso_sel, docente_id)
+    else:
+        st.caption("Seleziona un corso per caricare materiale didattico o generare contenuti.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str | None):
+    chat_con_orchestratore, aggiorna_contesto, _ = _import_orchestratore()
+    st.markdown(
+        """
+        <div class="chat-header">
+            <div class="chat-online"></div>
+            <div>
+                <div class="chat-title">Lea — Tutor AI</div>
+                <div class="chat-sub">Supporto ai docenti</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if "chat_history_doc" not in st.session_state:
+        st.session_state["chat_history_doc"] = [
+            {"role": "assistant", "content": f"Ciao {utente.get('nome','')}! Sono Lea. Posso aiutarti a creare materiali, quiz e monitorare i corsi."}
+        ]
+    chat_html = '<div class="chat-container" id="chat-box">'
+    for msg in st.session_state["chat_history_doc"]:
+        if msg["role"] == "user":
+            testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            chat_html += f'<div class="msg-user">{testo_safe}</div>'
+        else:
+            import re as _re
+            contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            contenuto = _re.sub(r"\*\*(.*?)\*\*", r"<strong>\\1</strong>", contenuto)
+            contenuto = contenuto.replace("\n", "<br>")
+            chat_html += f'<div class="msg-ai">{contenuto}</div>'
+    chat_html += "</div>"
+    st.markdown(chat_html, unsafe_allow_html=True)
+
+    suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz approvato"), ("🧠", "Crea flashcard")]
+    messaggio_da_suggerimento = None
+    cols = st.columns(len(suggerimenti))
+    for idx, (icona, testo) in enumerate(suggerimenti):
+        with cols[idx]:
+            if st.button(f"{icona} {testo}", key=f"sug_doc_{idx}"):
+                target = corso_nome or "il tuo corso"
+                messaggio_da_suggerimento = f"{testo} per {target}"
+
+    with st.form("lea_doc_form", clear_on_submit=True):
+        input_col, send_col = st.columns([5, 1], vertical_alignment="bottom")
+        with input_col:
+            user_input = st.text_input(
+                "Chiedi a Lea (docente)...",
+                key="lea_doc_input_text",
+                placeholder="Chiedi a Lea (docente)...",
+                label_visibility="collapsed",
+            )
+        with send_col:
+            invia = st.form_submit_button("Invia", type="primary", use_container_width=True)
+
+    messaggio_finale = messaggio_da_suggerimento or ((user_input or "").strip() if invia else None)
+    if messaggio_finale:
+        st.session_state["chat_history_doc"].append({"role": "user", "content": messaggio_finale})
+        risposta = "Lea non è configurata (AWS Bedrock non attivo)."
+        if chat_con_orchestratore and aggiorna_contesto:
+            try:
+                if corso_id:
+                    aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
+                risposta = chat_con_orchestratore(
+                    messaggio_utente=messaggio_finale,
+                    corso_contestuale_id=corso_id,
+                    corso_contestuale_nome=corso_nome,
+                )
+            except Exception as e:
+                risposta = f"Errore: {str(e)[:120]}"
+        st.session_state["chat_history_doc"].append({"role": "assistant", "content": risposta})
+        st.rerun()
+
+
+def mostra_homepage_docente():
+    utente = st.session_state.user
+    docente_id = st.session_state.current_user_id
+    if _render_topbar(utente):
+        return
+    col_main, col_chat = st.columns([4, 2.5], gap="medium")
+    corsi = _get_corsi_docente(docente_id)
+    with col_main:
+        _render_analytics(docente_id, corsi)
+        _render_corsi(docente_id)
+    with col_chat:
+        corso_nome = None
+        sel_id = st.session_state.get("_corso_doc_sel")
+        if sel_id:
+            corso_sel = next((c for c in corsi if c["id"] == sel_id), None)
+            if corso_sel:
+                corso_nome = corso_sel["nome"]
+        _render_chatbot_docente(utente, sel_id, corso_nome)
+    if st.session_state.get("_doc_refresh"):
+        st.session_state["_doc_refresh"] = False
+        st.rerun()
+
+
+if __name__ == "__main__":
+    mostra_homepage_docente()
+
+
+
+

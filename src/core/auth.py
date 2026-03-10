@@ -54,6 +54,9 @@ class UserSession(TypedDict):
 def verifica_credenziali(email: str, password: str) -> UserSession | None:
     """Verifica le credenziali dell'utente sulla tabella `users`.
 
+    Il confronto dell'email non è sensibile a maiuscole/minuscole e vengono
+    rimossi eventuali spazi bianchi di troppo sia in testa che in coda.
+
     Args:
         email:    Email inserita dall'utente.
         password: Password in chiaro inserita dall'utente.
@@ -64,13 +67,19 @@ def verifica_credenziali(email: str, password: str) -> UserSession | None:
         account sospeso).
 
     Esempio:
-        sessione = verifica_credenziali("m.rossi@unina.it", "docente123")
+        sessione = verifica_credenziali("m.Rossi@unina.IT ", "docente123")
         if sessione:
             print(sessione["ruolo"])   # "docente"
         else:
             print("Credenziali errate")
     """
-    utente = db.trova_uno("users", {"email": email})
+    # Normalizziamo l'email per confronto: tagliamo spazi e utilizziamo
+    # sempre minuscole. Assumiamo che le email salvate nel DB siano già
+    # normalized in questo modo (la popolazione iniziale segue questa
+    # convenzione).
+    email_norm = email.strip().lower()
+
+    utente = db.trova_uno("users", {"email": email_norm})
 
     if utente is None:
         return None

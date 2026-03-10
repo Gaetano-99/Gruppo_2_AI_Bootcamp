@@ -25,6 +25,7 @@ Architettura:
 import sys
 import os
 import re
+import json
 from typing import Optional
 
 # ---------------------------------------------------------------------------
@@ -278,7 +279,16 @@ def _calcola_score(
 
         testo: str = (chunk.get("testo") or "").lower()
         sommario: str = (chunk.get("sommario") or "").lower()
-        argomenti: str = (chunk.get("argomenti_chiave") or "").lower()
+
+        # argomenti_chiave è salvato come JSON array string (es. '["sql", "select"]').
+        # Parsiamo l'array e uniamo le keyword in una stringa per il matching,
+        # evitando falsi positivi sui caratteri JSON come virgolette e parentesi.
+        raw_argomenti: str = chunk.get("argomenti_chiave") or ""
+        try:
+            argomenti_list: list[str] = json.loads(raw_argomenti)
+            argomenti: str = " ".join(argomenti_list).lower()
+        except (json.JSONDecodeError, TypeError):
+            argomenti: str = raw_argomenti.lower()
 
         for parola in parole_chiave:
             trovata: bool = False

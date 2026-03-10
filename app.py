@@ -1,60 +1,87 @@
-"""
-LearnAI Platform — Login + routing per ruolo.
-"""
-import sys, os
-
-_ROOT = os.path.abspath(os.path.dirname(__file__))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
+﻿# ============================================================================
+# LearnAI Platform — Entry Point
+# Università Federico II di Napoli
+#
+# Avvio: streamlit run app.py
+#
+# Routing basato su st.session_state["user"]:
+#   None           → pagina di login
+#   ruolo=studente → views/studente.py
+#   ruolo=docente  → views/docente.py
+#   ruolo=admin    → views/admin.py    (futura implementazione)
+# ============================================================================
 
 import streamlit as st
-from platform_sdk.database import db
-from src.core.auth import verifica_credenziali
 
-st.set_page_config(page_title="LearnAI — Login", page_icon="🎓", layout="centered")
+# ---------------------------------------------------------------------------
+# Configurazione pagina — deve essere il PRIMO comando Streamlit
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="LearnAI – Federico II",
+    page_icon="📓",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-# Nasconde la navigazione automatica della sidebar
-st.markdown("<style>[data-testid='stSidebarNav']{display:none}</style>", unsafe_allow_html=True)
+# ---------------------------------------------------------------------------
+# Import views (dopo set_page_config)
+# ---------------------------------------------------------------------------
+from views.login import mostra_login
+from views.studente import mostra_homepage_studente
+from views.docente import mostra_homepage_docente
+from views.ospite import mostra_homepage_ospite
 
-# DB init (una sola volta)
-if "db_initialized" not in st.session_state:
-    try:
-        db.init()
-    except Exception:
-        pass
-    st.session_state.db_initialized = True
+# ---------------------------------------------------------------------------
+# Routing
+# ---------------------------------------------------------------------------
+def main():
+    # Query params routing — dalla landing page HTML esterna
+    azione = st.query_params.get("azione", "")
+    if azione == "ospite":
+        st.session_state.is_logged_in    = True
+        st.session_state.current_user_id = "ospite_000"
+        st.session_state.user_role       = "Ospite"
+        st.session_state.chat_history    = []
+        st.session_state.user = {
+            "user_id": "ospite_000",
+            "nome":    "Ospite",
+            "cognome": "",
+            "email":   "ospite@unina.it",
+            "ruolo":   "Ospite",
+            "matricola":          None,
+            "corso_di_laurea_id": None,
+            "anno_corso":         None,
+            "dipartimento":       None,
+        }
+        st.query_params.clear()
+        st.rerun()
+    elif azione == "login":
+        st.query_params.clear()
 
-# Se già loggato → redirect immediato
-if st.session_state.get("is_logged_in"):
-    if st.session_state.get("user_role") in ("docente", "admin"):
-        st.switch_page("pages/docente.py")
+    # Gatekeeper — standard STATE_MANAGEMENT.md
+    if not st.session_state.get("is_logged_in"):
+        mostra_login()
+        return
+
+    ruolo = st.session_state.get("user_role", "")  # 'Studente' | 'Docente' | 'Admin'
+
+    if ruolo == "Studente":
+        mostra_homepage_studente()
+    elif ruolo == "Docente":
+        mostra_homepage_docente()
+    elif ruolo == "Admin":
+        st.info("🚧 Pagina admin in costruzione.")
+        if st.button("Logout"):
+            st.session_state.clear()
+            st.rerun()
+    elif ruolo == "Ospite":
+        mostra_homepage_ospite()
     else:
-        st.switch_page("pages/studente.py")
+        st.error("Ruolo non riconosciuto. Effettua il logout.")
+        if st.button("Logout"):
+            st.session_state.clear()
+            st.rerun()
 
-# Form di login
-st.title("🎓 LearnAI Platform")
 
-with st.form("login"):
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    submitted = st.form_submit_button("Accedi", type="primary", use_container_width=True)
-
-if submitted:
-    sessione = verifica_credenziali(email, password)
-    if sessione:
-        st.session_state.is_logged_in = True
-        st.session_state.current_user = sessione
-        st.session_state.user_id = sessione["user_id"]
-        st.session_state.user_role = sessione["ruolo"]
-        if sessione["ruolo"] in ("docente", "admin"):
-            st.switch_page("pages/docente.py")
-        else:
-            st.switch_page("pages/studente.py")
-    else:
-        st.error("Credenziali errate.")
-
-st.divider()
-st.markdown("### Sei un nuovo utente?")
-st.markdown("Esplora la nostra offerta formativa e chiedi consiglio alla nostra IA d'orientamento.")
-if st.button("Entra come Ospite 👤", type="secondary", use_container_width=True):
-    st.switch_page("pages/ospite.py")
+if __name__ == "__main__":
+    main()

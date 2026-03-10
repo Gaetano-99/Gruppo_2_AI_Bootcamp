@@ -27,14 +27,29 @@ L'applicazione segue un'architettura Three-Tier orientata all'orchestrazione AI 
 
 **Core AI Framework:** `langchain` per la gestione dei prompt e l'interazione con i modelli LLM.
 
-**Orchestrazione Multiagente:** `langgraph` governa il ciclo di vita e la comunicazione tra i 6 agenti specializzati:
+**Orchestrazione Multiagente:** `langgraph` governa il ciclo di vita e la comunicazione tra gli agenti.
+
+**Agenti implementati** (marzo 2026):
+
+| File | Agente | Responsabilità principale |
+|---|---|---|
+| `src/agents/orchestrator.py` | Orchestratore Lea | Unico punto di contatto UI↔AI. Gestisce conversazione, routing tool, contesto sessione |
+| `src/agents/content_gen.py` | Content Generation Engine | Generazione lezioni teoriche da `materiali_chunks` via RAG |
+| `src/agents/practice_gen.py` | Practice Generation Engine | Generazione quiz, flashcard, schemi per un `paragrafo_id` esistente |
+
+**Tool esposti dall'Orchestratore a Lea:**
+- `tool_leggi_contesto` — legge corso attivo, tipo vista (corso/piano), piano aperto, ultime sezioni generate
+- `tool_esplora_catalogo` — lista corsi attivi o materiali di un corso specifico
+- `tool_genera_corso` — invoca ContentGen per creare un piano personalizzato con lezioni
+- `tool_genera_pratica` — invoca PracticeGen per quiz/flashcard/schemi su un paragrafo
+
+**Agenti pianificati nel PRD ma non ancora implementati `[TODO]`:**
 
 | File | Agente | Responsabilità principale |
 |---|---|---|
 | `agents/onboarding.py` | Onboarding Assistant | Colloquio guidato o analisi CV per Ospiti e nuovi Studenti |
-| `agents/scheduler.py` | Learning Path Scheduler | Generazione piani personalizzati (`piani_personalizzati`) |
+| `agents/scheduler.py` | Learning Path Scheduler | Generazione automatica piani personalizzati (`piani_personalizzati`) |
 | `agents/optimizer.py` | Conversational Plan Optimizer | Modifica piani tramite linguaggio naturale |
-| `agents/content_gen.py` | Adaptive Content Generation Engine | Generazione lezioni, quiz, flashcard, riassunti da `materiali_chunks` |
 | `agents/gap_analysis.py` | Competency Gap Analysis AI | Analisi lacune su `tentativi_quiz` e `risposte_domande` |
 | `agents/course_analysis.py` | Course Performance Analysis | Report aggregati per il docente da quiz approvati (`approvato=1`) |
 
