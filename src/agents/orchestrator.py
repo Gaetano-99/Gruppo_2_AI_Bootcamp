@@ -44,6 +44,7 @@ from platform_sdk.agent import crea_agente, esegui_agente
 
 from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
 from src.agents.practice_gen import esegui_generazione_pratica
+from src.agents.gap_analysis import analizza_gap
 
 # ---------------------------------------------------------------------------
 # Chiavi session_state
@@ -93,10 +94,12 @@ comandi: capisci il contesto, anticipi i bisogni e rendi l'esperienza di studio
 piacevole. Dopo ogni azione completata, proponi proattivamente il passo successivo logico.
 
 COSA SAI FARE (tool a tua disposizione):
-1. tool_leggi_contesto    → sapere quale corso sta visualizzando l'utente in questo momento.
-2. tool_esplora_catalogo  → scoprire corsi o materiali disponibili.
-3. tool_genera_corso      → creare una nuova lezione teorica su un argomento.
-4. tool_genera_pratica    → creare quiz, flashcard o schemi su una sezione studiata.
+1. tool_leggi_contesto          → sapere quale corso sta visualizzando l'utente in questo momento.
+2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili.
+3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
+5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare le lacune dello studente.
+6. tool_modifica_piano          → rinominare, riordinare, eliminare o aggiungere capitoli/paragrafi in un piano.
 
 REGOLE DI COMPORTAMENTO:
 - Se l'utente fa small talk o saluta, rispondi in modo naturale senza invocare tool.
@@ -283,6 +286,130 @@ def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     return f"SUCCESSO: {' e '.join(leggibili)} generati e salvati per la sezione {paragrafo_id}."
 
 
+@tool
+def tool_analizza_preparazione(tentativo_id: int) -> str:
+    """
+    Analizza le risposte errate di un tentativo quiz e identifica le lacune dello studente.
+    Fornisce consigli su cosa rivedere e può proporre di ottimizzare il piano di studio.
+    Usa questo tool quando lo studente chiede di analizzare i risultati di un quiz o
+    vuole capire cosa migliorare dopo aver completato un questionario.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+    try:
+        return analizza_gap(tentativo_id, studente_id)
+    except Exception as e:
+        return f"Errore durante l'analisi delle lacune: {e}"
+
+
+@tool
+def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore: str = "") -> str:
+    """
+    Modifica la struttura di un piano personalizzato dello studente.
+
+    azione può essere:
+      - 'rinomina_capitolo'    → rinomina piano_capitoli.titolo (target_id = capitolo_id)
+      - 'rinomina_paragrafo'   → rinomina piano_paragrafi.titolo (target_id = paragrafo_id)
+      - 'riordina_capitolo'    → sposta il capitolo in una nuova posizione (nuovo_valore = intero)
+      - 'riordina_paragrafo'   → sposta il paragrafo in una nuova posizione (nuovo_valore = intero)
+      - 'elimina_capitolo'     → elimina il capitolo e tutti i suoi paragrafi (target_id = capitolo_id)
+      - 'elimina_paragrafo'    → elimina il paragrafo e i suoi contenuti (target_id = paragrafo_id)
+      - 'aggiungi_capitolo'    → aggiunge un nuovo capitolo al piano (nuovo_valore = titolo)
+
+    Usa questo tool quando lo studente chiede di rinominare, riordinare, eliminare o aggiungere
+    capitoli o paragrafi nel suo piano personalizzato.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Verifica che il piano appartenga allo studente corrente
+    piano = db.trova_uno("piani_personalizzati", {"id": piano_id, "studente_id": studente_id})
+    if not piano:
+        return f"Piano ID {piano_id} non trovato o non appartiene allo studente corrente."
+
+    try:
+        if azione == "rinomina_capitolo":
+            if not nuovo_valore:
+                return "Specifica il nuovo titolo per il capitolo."
+            db.aggiorna("piano_capitoli", {"id": target_id, "piano_id": piano_id}, {"titolo": nuovo_valore})
+            return f"Capitolo rinominato in '{nuovo_valore}'."
+
+        elif azione == "rinomina_paragrafo":
+            if not nuovo_valore:
+                return "Specifica il nuovo titolo per il paragrafo."
+            # Verifica che il paragrafo appartenga al piano
+            par = db.esegui(
+                "SELECT pp.id FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            db.aggiorna("piano_paragrafi", {"id": target_id}, {"titolo": nuovo_valore})
+            return f"Paragrafo rinominato in '{nuovo_valore}'."
+
+        elif azione == "riordina_capitolo":
+            try:
+                nuovo_ordine = int(nuovo_valore)
+            except (ValueError, TypeError):
+                return "Specifica la nuova posizione (numero intero, partendo da 1)."
+            db.aggiorna("piano_capitoli", {"id": target_id, "piano_id": piano_id}, {"ordine": nuovo_ordine - 1})
+            return f"Capitolo spostato alla posizione {nuovo_ordine}."
+
+        elif azione == "riordina_paragrafo":
+            try:
+                nuovo_ordine = int(nuovo_valore)
+            except (ValueError, TypeError):
+                return "Specifica la nuova posizione (numero intero, partendo da 1)."
+            par = db.esegui(
+                "SELECT pp.id FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            db.aggiorna("piano_paragrafi", {"id": target_id}, {"ordine": nuovo_ordine - 1})
+            return f"Paragrafo spostato alla posizione {nuovo_ordine}."
+
+        elif azione == "elimina_capitolo":
+            cap = db.trova_uno("piano_capitoli", {"id": target_id, "piano_id": piano_id})
+            if not cap:
+                return f"Capitolo ID {target_id} non trovato in questo piano."
+            titolo = cap.get("titolo", "")
+            db.esegui("DELETE FROM piano_capitoli WHERE id = ? AND piano_id = ?", [target_id, piano_id])
+            return f"Capitolo '{titolo}' e tutti i suoi contenuti eliminati."
+
+        elif azione == "elimina_paragrafo":
+            par = db.esegui(
+                "SELECT pp.id, pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            titolo = par[0].get("titolo", "")
+            db.esegui("DELETE FROM piano_paragrafi WHERE id = ?", [target_id])
+            return f"Paragrafo '{titolo}' e i suoi contenuti eliminati."
+
+        elif azione == "aggiungi_capitolo":
+            if not nuovo_valore:
+                return "Specifica il titolo per il nuovo capitolo."
+            # Trova l'ordine massimo attuale
+            capitoli = db.trova_tutti("piano_capitoli", {"piano_id": piano_id}, ordine="ordine DESC", limite=1)
+            nuovo_ordine = (capitoli[0]["ordine"] + 1) if capitoli else 0
+            nuovo_id = db.inserisci("piano_capitoli", {
+                "piano_id": piano_id,
+                "titolo": nuovo_valore,
+                "ordine": nuovo_ordine,
+                "completato": 0,
+            })
+            return f"Nuovo capitolo '{nuovo_valore}' aggiunto al piano (ID: {nuovo_id})."
+
+        else:
+            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo."
+
+    except Exception as e:
+        return f"Errore durante la modifica del piano: {e}"
+
+
 # ===========================================================================
 # Singleton helpers (tutti in session_state)
 # ===========================================================================
@@ -303,6 +430,8 @@ def _get_orchestratore():
                 tool_esplora_catalogo,
                 tool_genera_corso,
                 tool_genera_pratica,
+                tool_analizza_preparazione,
+                tool_modifica_piano,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,

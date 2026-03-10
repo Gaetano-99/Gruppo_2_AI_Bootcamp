@@ -874,67 +874,8 @@ def _render_sidebar_piani(studente_id: int):
             if st.button("🗑", key=f"btn_del_piano_{pid}", use_container_width=True, help="Elimina piano"):
                 _dialog_elimina_piano(pid, piano["titolo"] or "Piano")
 
-        # ---- Plan Optimizer: editor capitoli (solo per il piano attivo) ----
-        if attivo:
-            with st.expander("✏️ Gestisci struttura", expanded=False):
-                capitoli_edit = db.trova_tutti("piano_capitoli", {"piano_id": pid}, ordine="ordine ASC")
-                if not capitoli_edit:
-                    st.caption("Nessun capitolo. Chiedi a Lea di generare il contenuto del piano.")
-                else:
-                    for cap in capitoli_edit:
-                        cid = cap["id"]
-                        st.markdown(f"**Capitolo {cap['ordine'] + 1}: {cap['titolo']}**")
-                        col_rin, col_up, col_dn, col_dc = st.columns([4, 1, 1, 1])
-                        with col_rin:
-                            nuovo_titolo = st.text_input(
-                                "Rinomina", value=cap["titolo"],
-                                key=f"_rin_cap_{cid}", label_visibility="collapsed"
-                            )
-                        with col_up:
-                            if st.button("↑", key=f"_up_cap_{cid}", help="Sposta su"):
-                                if cap["ordine"] > 0:
-                                    db.aggiorna("piano_capitoli", {"id": cid}, {"ordine": cap["ordine"] - 1})
-                                    # Scambia con il precedente
-                                    prev = [c for c in capitoli_edit if c["ordine"] == cap["ordine"] - 1]
-                                    if prev:
-                                        db.aggiorna("piano_capitoli", {"id": prev[0]["id"]}, {"ordine": cap["ordine"]})
-                                    st.rerun()
-                        with col_dn:
-                            if st.button("↓", key=f"_dn_cap_{cid}", help="Sposta giù"):
-                                if cap["ordine"] < len(capitoli_edit) - 1:
-                                    db.aggiorna("piano_capitoli", {"id": cid}, {"ordine": cap["ordine"] + 1})
-                                    nxt = [c for c in capitoli_edit if c["ordine"] == cap["ordine"] + 1]
-                                    if nxt:
-                                        db.aggiorna("piano_capitoli", {"id": nxt[0]["id"]}, {"ordine": cap["ordine"]})
-                                    st.rerun()
-                        with col_dc:
-                            if st.button("🗑", key=f"_del_cap_{cid}", help="Elimina capitolo"):
-                                db.esegui("DELETE FROM piano_capitoli WHERE id = ?", [cid])
-                                st.rerun()
-                        # Applica rinomina se cambiato
-                        if nuovo_titolo and nuovo_titolo != cap["titolo"]:
-                            if st.button("Salva nome", key=f"_save_cap_{cid}"):
-                                db.aggiorna("piano_capitoli", {"id": cid}, {"titolo": nuovo_titolo})
-                                st.rerun()
-                        st.divider()
 
-                # Aggiungi nuovo capitolo
-                nuovo_cap_title = st.text_input("Titolo nuovo capitolo", key=f"_new_cap_{pid}", placeholder="Es. Capitolo aggiuntivo")
-                if st.button("+ Aggiungi capitolo", key=f"_add_cap_{pid}", use_container_width=True):
-                    if nuovo_cap_title.strip():
-                        max_ord = len(capitoli_edit)
-                        db.inserisci("piano_capitoli", {
-                            "piano_id": pid,
-                            "titolo": nuovo_cap_title.strip(),
-                            "ordine": max_ord,
-                            "completato": 0,
-                        })
-                        st.rerun()
-                    else:
-                        st.warning("Inserisci un titolo per il capitolo.")
-
-
-def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docente: bool = False):
+def _render_contenuto_piano(piano_id: int):
     """Renderizza il piano con:
     1. Indice di navigazione (TOC) cliccabile per capitolo
     2. Capitoli espandibili → paragrafi → lezione/quiz/flashcard/riassunto
@@ -1033,30 +974,17 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
                             {"quiz_id": c["quiz_id"]},
                             ordine="ordine ASC",
                         )
-                        domande_tmp = []
-                        for r in righe:
-                            opzioni_parsed = []
-                            try:
-                                opzioni_parsed = json.loads(r.get("opzioni_json") or "[]")
-                            except Exception:
-                                pass
-                            corretta_raw = r.get("risposta_corretta") or "0"
-                            try:
-                                indice_corretta = int(corretta_raw)
-                            except (ValueError, TypeError):
-                                try:
-                                    indice_corretta = opzioni_parsed.index(corretta_raw)
-                                except (ValueError, IndexError):
-                                    indice_corretta = 0
-                            domande_tmp.append({
+                        domande = [
+                            {
                                 "id": r["id"],
                                 "testo": r["testo"],
-                                "risposta_corretta": corretta_raw,
+                                "risposta_corretta": r.get("risposta_corretta") or "0",
                                 "spiegazione": r.get("spiegazione") or "",
                                 "opzioni_json": r.get("opzioni_json") or "[]",
-                                "indice_corretta": indice_corretta,
-                            })
-                        domande = domande_tmp
+                                "indice_corretta": int(r.get("risposta_corretta") or 0),
+                            }
+                            for r in righe
+                        ]
 
                     if not domande:
                         continue
@@ -1069,35 +997,16 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
 
                     stato_quiz = st.session_state.get(stato_key, "pending")
 
-                    # Ripristina tentativo già completato dal DB (sopravvive al refresh)
-                    if stato_quiz == "pending" and ha_quiz_id:
-                        tent_db = db.esegui(
-                            "SELECT id FROM tentativi_quiz WHERE quiz_id=? AND studente_id=? AND completato=1 ORDER BY id DESC LIMIT 1",
-                            [c["quiz_id"], studente_id],
-                        )
-                        if tent_db:
-                            st.session_state[tent_key] = tent_db[0]["id"]
-                            st.session_state[stato_key] = "submitted"
-                            stato_quiz = "submitted"
-
                     st.markdown(
                         '<div class="content-type-badge badge-quiz">❓ Quiz</div>',
                         unsafe_allow_html=True,
                     )
 
                     if stato_quiz == "submitted":
-                        # Ricostruisce punteggio/corrette: da DB se la sessione è persa, altrimenti da session_state
-                        tentativo_id_disp = st.session_state.get(tent_key)
-                        if tentativo_id_disp and ris_key not in st.session_state:
-                            tent_row = db.trova_uno("tentativi_quiz", {"id": tentativo_id_disp})
-                            punteggio = float(tent_row["punteggio"]) if tent_row else 0.0
-                            risp_db = db.trova_tutti("risposte_domande", {"tentativo_id": tentativo_id_disp})
-                            corrette_map = {r["domanda_id"]: bool(r["corretta"]) for r in risp_db}
-                            corrette = [corrette_map.get(d.get("id"), False) for d in domande]
-                        else:
-                            from src.agents.gap_analysis import calcola_punteggio
-                            risposte_salvate = st.session_state.get(ris_key, {})
-                            punteggio, corrette = calcola_punteggio(domande, risposte_salvate)
+                        # Mostra risultati
+                        from src.agents.gap_analysis import calcola_punteggio
+                        risposte_salvate = st.session_state.get(ris_key, {})
+                        punteggio, corrette = calcola_punteggio(domande, risposte_salvate)
                         n_ok = sum(corrette)
                         n_tot = len(corrette)
                         colore = "#1A7F4B" if punteggio >= 70 else ("#C5A028" if punteggio >= 40 else "#C8102E")
@@ -1144,13 +1053,9 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
                                         except Exception as ex:
                                             st.session_state[gap_key] = f"Errore analisi: {ex}"
                                 else:
-                                    err_detail = st.session_state.get(tent_key + "_err", "")
-                                    st.session_state[gap_key] = (
-                                        "Tentativo non salvato — impossibile analizzare."
-                                        + (f"\n\nDettaglio errore: `{err_detail}`" if err_detail else "")
-                                    )
+                                    st.session_state[gap_key] = "Tentativo non salvato — impossibile analizzare."
                         with col_gap2:
-                            if not is_corso_docente and st.button("🔄 Rifai quiz", key=f"redo_quiz_{c['id']}_{q_idx}"):
+                            if st.button("🔄 Rifai quiz", key=f"redo_quiz_{c['id']}_{q_idx}"):
                                 for k in [stato_key, ris_key, tent_key, gap_key]:
                                     st.session_state.pop(k, None)
                                 st.rerun()
@@ -1202,8 +1107,8 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
                                         domande=domande,
                                         risposte_studente=risposte_correnti,
                                     )
-                                except Exception as _save_err:
-                                    st.session_state[tent_key + "_err"] = str(_save_err)
+                                except Exception:
+                                    pass
                             st.session_state[tent_key] = tentativo_id
                             st.session_state[stato_key] = "submitted"
                             st.rerun()
@@ -1807,7 +1712,7 @@ def mostra_homepage_studente():
             piano_docente = _get_piano_docente_corso(corso_sel_id)
             if piano_docente:
                 st.markdown("#### Lezioni del corso")
-                _render_contenuto_piano(piano_docente["id"], studente_id=studente_id, is_corso_docente=True)
+                _render_contenuto_piano(piano_docente["id"])
                 st.markdown("---")
             else:
                 st.info(
@@ -1815,6 +1720,34 @@ def mostra_homepage_studente():
                     icon=":material/school:",
                 )
 
+            # — Piani personalizzati dello studente per questo corso —
+            piani = _get_piani_corso(studente_id, corso_sel_id)
+            if piani:
+                st.markdown("#### I miei piani di studio")
+                for piano in piani:
+                    pid = piano["id"]
+                    struttura = _get_struttura_piano(pid)
+                    n_cap = len(struttura)
+                    n_par = sum(len(c.get("paragrafi", [])) for c in struttura)
+                    col_a, col_b = st.columns([4, 1])
+                    with col_a:
+                        st.markdown(f"""
+                        <div class="piano-card">
+                            <h5>{piano["titolo"]}</h5>
+                            <div class="piano-meta">
+                                <span class="ai-badge">AI</span>
+                                &nbsp;{n_cap} capitoli · {n_par} sezioni
+                                &nbsp;·&nbsp;{piano.get("created_at", "")[:10]}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    with col_b:
+                        if st.button("Studia", key=f"open_piano_cx_{pid}", use_container_width=True):
+                            st.session_state["_piano_sel"] = pid
+                            st.session_state["_view_mode"] = "piano"
+                            st.rerun()
+            else:
+                st.caption("Nessun piano ancora per questo corso. Chiedi a Lea di generarne uno!")
 
         elif view_mode == "piano" and piano_sel_id:
             # ── VISTA PIANO — spazio studio privato dello studente ──────────
@@ -1843,7 +1776,7 @@ def mostra_homepage_studente():
                 if st.button(":material/folder_open: Visualizza materiale", key="btn_view_mat"):
                     _dialog_view_materiale(corso_sel_id, corso_sel_nome)
 
-            _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
+            _render_contenuto_piano(piano_sel_id)
 
     # -------------------------------------------------------------------------
     # COLONNA DESTRA — Chatbot Lea (con contesto completo corso + piano)
