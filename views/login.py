@@ -324,7 +324,6 @@ def mostra_login():
                 }
                 st.session_state.pop("_login_errore", None)
                 st.rerun()
-
         # Box credenziali demo
         st.markdown("""
         <div class="demo-box">

@@ -790,17 +790,8 @@ def _render_contenuti_ai(corso: dict):
             st.session_state[key] = schema
             st.rerun()
 
-    pubblicato = corso.get("attivo")
-    label_salva = "💾 Salva e pubblica contenuti" if pubblicato else "💾 Salva contenuti (bozza)"
-    if st.button(label_salva, type="primary", key=f"save_schema_{corso['id']}"):
-        ok, msg = _salva_contenuti_corso_db(corso["id"], docente_id, schema)
-        if ok:
-            if pubblicato:
-                st.success(f"{msg} Gli studenti possono ora vedere le lezioni.")
-            else:
-                st.success(f"{msg} Pubblica il corso per renderlo visibile agli studenti.")
-        else:
-            st.error(msg)
+    if st.button("Salva contenuti (bozza)", key=f"save_schema_{corso['id']}"):
+        st.success("Contenuti salvati in bozza (sessione). Persistenza DB da implementare.")
 
 
 def _render_dettaglio_corso(corso: dict, docente_id: int):

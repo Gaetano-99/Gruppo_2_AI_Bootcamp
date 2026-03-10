@@ -681,18 +681,6 @@ def _cerca_corsi(nome: str, docente_id: int | None, cfu: int | None, cdl_id: int
         return []
 
 
-def _get_piano_docente_corso(corso_id: int) -> dict | None:
-    """Restituisce il piano docente ufficiale di un corso (is_corso_docente=1), se esiste."""
-    try:
-        piani = db.trova_tutti("piani_personalizzati", {
-            "corso_universitario_id": corso_id,
-            "is_corso_docente": 1,
-        })
-        return piani[0] if piani else None
-    except Exception:
-        return None
-
-
 def _get_struttura_piano(piano_id: int) -> list[dict]:
     """
     Restituisce la struttura completa di un piano SOLO per il piano indicato:
@@ -1636,32 +1624,22 @@ def mostra_homepage_studente():
 
         elif view_mode == "corso" and corso_sel_id:
             # ── VISTA CORSO — sola lettura ─────────────────────────────────
-            col_hdr, col_disiscriviti = st.columns([5, 1])
-            with col_hdr:
-                st.markdown(f"""
-                <div class="section-header">{corso_sel_nome}</div>
-                <div class="section-sub">Corso universitario · Sola lettura</div>
-                """, unsafe_allow_html=True)
-            with col_disiscriviti:
-                if st.button("🚪 Cancella iscrizione", key="btn_disiscriviti", help="Cancella la tua iscrizione a questo corso"):
-                    _dialog_cancella_iscrizione(studente_id, corso_sel_id, corso_sel_nome)
+            st.markdown(f"""
+            <div class="section-header">{corso_sel_nome}</div>
+            <div class="section-sub">Corso universitario · Sola lettura</div>
+            """, unsafe_allow_html=True)
 
-            # — Contenuto ufficiale del docente (se pubblicato) —
-            piano_docente = _get_piano_docente_corso(corso_sel_id)
-            if piano_docente:
-                st.markdown("#### Lezioni del corso")
-                _render_contenuto_piano(piano_docente["id"])
-                st.markdown("---")
-            else:
-                st.info(
-                    "Il docente non ha ancora pubblicato il contenuto di questo corso.",
-                    icon=":material/school:",
-                )
+            st.info(
+                "Questo corso è gestito dai docenti. "
+                "Puoi studiarlo aprendo uno dei tuoi piani personalizzati, "
+                "o chiedi a Lea di generarne uno nuovo.",
+                icon=":material/school:",
+            )
 
-            # — Piani personalizzati dello studente per questo corso —
+            # Piani esistenti per questo corso → link a vista piano
             piani = _get_piani_corso(studente_id, corso_sel_id)
             if piani:
-                st.markdown("#### I miei piani di studio")
+                st.markdown("#### I miei piani per questo corso")
                 for piano in piani:
                     pid = piano["id"]
                     struttura = _get_struttura_piano(pid)
