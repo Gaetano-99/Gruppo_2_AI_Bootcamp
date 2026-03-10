@@ -35,6 +35,29 @@ from views.ospite import mostra_homepage_ospite
 # Routing
 # ---------------------------------------------------------------------------
 def main():
+    # Query params routing — dalla landing page HTML esterna
+    azione = st.query_params.get("azione", "")
+    if azione == "ospite":
+        st.session_state.is_logged_in    = True
+        st.session_state.current_user_id = "ospite_000"
+        st.session_state.user_role       = "Ospite"
+        st.session_state.chat_history    = []
+        st.session_state.user = {
+            "user_id": "ospite_000",
+            "nome":    "Ospite",
+            "cognome": "",
+            "email":   "ospite@unina.it",
+            "ruolo":   "Ospite",
+            "matricola":          None,
+            "corso_di_laurea_id": None,
+            "anno_corso":         None,
+            "dipartimento":       None,
+        }
+        st.query_params.clear()
+        st.rerun()
+    elif azione == "login":
+        st.query_params.clear()
+
     # Gatekeeper — standard STATE_MANAGEMENT.md
     if not st.session_state.get("is_logged_in"):
         mostra_login()

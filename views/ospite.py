@@ -13,16 +13,7 @@ import streamlit as st
 from src.agents.orientamento import chiedi_agente_ospite
 
 def mostra_homepage_ospite():
-    # Nascondi sidebar nativa
-    st.markdown("<style>[data-testid='stSidebarNav']{display:none}</style>", unsafe_allow_html=True)
-
-    with st.sidebar:
-        st.markdown("### Orientamento")
-        # ... tutto il resto del codice di ospite.py che avevi già,
-        # assicurandoti di indentarlo (spostarlo a destra) di 4 spazi 
-        # per farlo rientrare nella funzione mostra_homepage_ospite()
-
-    # Nascondi sidebar nativa per evitare navigazione incontrollata, ma mostriamo pulsante "Indietro"
+    # Nascondi sidebar nativa per evitare navigazione incontrollata
     st.markdown("<style>[data-testid='stSidebarNav']{display:none}</style>", unsafe_allow_html=True)
 
     with st.sidebar:
