@@ -29,7 +29,7 @@ st.set_page_config(
 from views.login import mostra_login
 from views.studente import mostra_homepage_studente
 from views.docente import mostra_homepage_docente
-
+from views.ospite import mostra_homepage_ospite
 
 # ---------------------------------------------------------------------------
 # Routing
@@ -51,6 +51,8 @@ def main():
         if st.button("Logout"):
             st.session_state.clear()
             st.rerun()
+    elif ruolo == "Ospite":
+        mostra_homepage_ospite()
     else:
         st.error("Ruolo non riconosciuto. Effettua il logout.")
         if st.button("Logout"):

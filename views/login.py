@@ -324,7 +324,32 @@ def mostra_login():
                 }
                 st.session_state.pop("_login_errore", None)
                 st.rerun()
-
+        # ==========================================
+        # INIZIO CODICE DA AGGIUNGERE: BOTTONE OSPITE
+        # ==========================================
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        
+        if st.button("Accedi come Ospite", use_container_width=True):
+            # Popoliamo il Session State simulando un utente Ospite
+            st.session_state.is_logged_in = True
+            st.session_state.current_user_id = "ospite_000"
+            st.session_state.user_role = "Ospite"
+            st.session_state.chat_history = []
+            
+            # Creiamo un profilo fittizio per evitare errori nelle altre pagine
+            st.session_state.user = {
+                "user_id": "ospite_000",
+                "nome": "Ospite",
+                "cognome": "",
+                "email": "ospite@unina.it",
+                "ruolo": "Ospite",
+                "matricola": None,
+                "corso_di_laurea_id": None,
+                "anno_corso": None,
+                "dipartimento": None,
+            }
+            # Ricarichiamo l'app per far scattare il routing di app.py
+            st.rerun()
         # Box credenziali demo
         st.markdown("""
         <div class="demo-box">
