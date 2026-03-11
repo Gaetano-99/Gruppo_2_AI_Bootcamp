@@ -1720,6 +1720,86 @@ def _dialog_cancella_iscrizione(studente_id: int, corso_id: int, corso_nome: str
             st.rerun()
 
 
+def _get_materiali_usati_piano(piano_id: int) -> list[dict]:
+    """Recupera i materiali didattici usati per generare un piano,
+    tramite il reverse-lookup piano_contenuti → chunk_ids_utilizzati → materiali_chunks."""
+    try:
+        righe = db.esegui(
+            """SELECT pc.chunk_ids_utilizzati
+               FROM piano_contenuti pc
+               JOIN piano_paragrafi pp ON pp.id = pc.paragrafo_id
+               JOIN piano_capitoli pca ON pca.id = pp.capitolo_id
+               WHERE pca.piano_id = ?""",
+            [piano_id],
+        )
+    except Exception:
+        return []
+
+    chunk_ids: set[int] = set()
+    for r in righe:
+        try:
+            ids = json.loads(r.get("chunk_ids_utilizzati") or "[]")
+            chunk_ids.update(int(i) for i in ids if i)
+        except Exception:
+            pass
+
+    if not chunk_ids:
+        return []
+
+    placeholders = ",".join("?" * len(chunk_ids))
+    try:
+        mat_rows = db.esegui(
+            f"SELECT DISTINCT materiale_id FROM materiali_chunks WHERE id IN ({placeholders})",
+            list(chunk_ids),
+        )
+    except Exception:
+        return []
+
+    materiale_ids = [r["materiale_id"] for r in mat_rows if r.get("materiale_id")]
+    if not materiale_ids:
+        return []
+
+    ph2 = ",".join("?" * len(materiale_ids))
+    try:
+        return db.esegui(
+            f"SELECT * FROM materiali_didattici WHERE id IN ({ph2}) ORDER BY caricato_il DESC",
+            materiale_ids,
+        )
+    except Exception:
+        return []
+
+
+@st.dialog("Materiale del piano")
+def _dialog_materiale_piano_libero(piano_id: int):
+    st.markdown("**Materiale usato per generare questo piano**")
+    st.caption("Questi sono i documenti da cui Lea ha creato il piano. Clicca 'Studia' per generare una nuova lezione.")
+    materiali = _get_materiali_usati_piano(piano_id)
+
+    if not materiali:
+        st.info("Nessun materiale trovato per questo piano.", icon=":material/folder_open:")
+        return
+
+    for m in materiali:
+        with st.container(border=True):
+            elaborato = bool(m.get("is_processed"))
+            c1, c2 = st.columns([4, 2])
+            with c1:
+                st.markdown(f"**{m['titolo']}**")
+                stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
+                st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
+            with c2:
+                if elaborato:
+                    if st.button("📖 Studia", key=f"studia_mat_piano_{m['id']}", use_container_width=True):
+                        st.session_state["_materiale_da_studiare"] = {
+                            "id": m["id"],
+                            "titolo": m["titolo"],
+                            "corso_id": m.get("corso_universitario_id"),
+                        }
+                        st.rerun()
+                else:
+                    st.caption("⚠️ Non elaborato")
+
+
 @st.dialog("Materiale del corso")
 def _dialog_materiale_corso(corso_id: int, corso_nome: str):
     st.markdown(f"**Materiale disponibile per {corso_nome}**")
@@ -1986,9 +2066,8 @@ def mostra_homepage_studente():
                     if st.button("📚 Materiale del corso", key="btn_mat_piano"):
                         _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
                 else:
-                    if st.button("📚 Materiale personale", key="btn_mat_piano_libero"):
-                        if "_materiali_liberi_selezionati" not in st.session_state:
-                            _dialog_view_materiale_libero(studente_id)
+                    if st.button("📚 Materiale del piano", key="btn_mat_piano_libero"):
+                        _dialog_materiale_piano_libero(piano_sel_id)
 
 
             _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
