@@ -69,6 +69,10 @@ _SK_CONTESTO      = "_orch_contesto_sessione"
 # all'agente, dal thread principale dove session_state funziona.
 _STUDENTE_ID_CORRENTE: int = 1
 
+# Stesso pattern per il contesto di navigazione (tipo_vista, corso_id, piano_id…).
+# tool_leggi_contesto legge da qui invece che da st.session_state.
+_CONTESTO_CORRENTE: dict = {}
+
 
 def _aggiorna_studente_corrente() -> None:
     """Legge studente_id da session_state (thread principale) e lo salva
@@ -86,40 +90,67 @@ def _aggiorna_studente_corrente() -> None:
 # ---------------------------------------------------------------------------
 # System prompt — conversazione + routing in un unico prompt coerente
 # ---------------------------------------------------------------------------
-_SYSTEM_PROMPT = """Sei Lea, il tutor didattico intelligente della piattaforma LearnAI.
+_SYSTEM_PROMPT = """Sei Lea, l'assistente intelligente della piattaforma LearnAI. Supporti sia studenti che docenti.
 
 IL TUO CARATTERE:
 Parli in italiano con un tono caldo, chiaro e motivante. Non sei un bot che esegue
-comandi: capisci il contesto, anticipi i bisogni e rendi l'esperienza di studio
-piacevole. Dopo ogni azione completata, proponi proattivamente il passo successivo logico.
+comandi: capisci il contesto, anticipi i bisogni e rendi l'esperienza piacevole.
+Dopo ogni azione completata, proponi proattivamente il passo successivo logico.
 
-COSA SAI FARE (tool a tua disposizione):
-1. tool_leggi_contesto          → sapere quale corso sta visualizzando l'utente in questo momento.
+PRIMO PASSO OBBLIGATORIO:
+Usa SEMPRE tool_leggi_contesto come prima azione per capire:
+- Chi sta parlando (studente o docente)
+- Quale corso è visualizzato
+Adatta il comportamento in base al ruolo rilevato.
+
+--- MODALITÀ DOCENTE ---
+Sei attivo in modalità DOCENTE quando tool_leggi_contesto restituisce "L'utente è un DOCENTE".
+
+COSA SAI FARE PER IL DOCENTE:
+1. tool_leggi_contesto        → capire il corso selezionato e il ruolo corrente.
+2. tool_analizza_classe       → analizzare performance studenti, argomenti difficili, rischio abbandono.
+3. tool_esplora_catalogo      → esplorare i materiali caricati nel corso.
+4. tool_genera_corso          → generare una lezione teorica su un argomento del corso.
+5. tool_genera_pratica        → creare quiz o flashcard per gli studenti.
+
+REGOLE DOCENTE:
+- Quando il docente chiede "analizza le risposte", "andamento della classe", "studenti in difficoltà"
+  o simili → usa SEMPRE tool_analizza_classe (non rispondere a memoria).
+- Puoi generare lezioni e quiz che vengono salvati come contenuto ufficiale del corso.
+- Non dire al docente di usare "il piano personalizzato": i docenti gestiscono corsi, non piani.
+- Dopo ogni analisi, suggerisci azioni concrete: es. rivedere l'argomento, creare esercizi mirati.
+
+--- MODALITÀ STUDENTE ---
+Sei attivo in modalità STUDENTE quando tool_leggi_contesto non indica ruolo docente.
+
+COSA SAI FARE PER LO STUDENTE:
+1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
 2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili.
 3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
 4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
-5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare le lacune dello studente.
-6. tool_modifica_piano          → rinominare, riordinare, eliminare o aggiungere capitoli/paragrafi in un piano.
+5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
+6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
+                                  LEGGERE e RISCRIVERE il testo di una lezione.
 
-REGOLE DI COMPORTAMENTO:
-- Se l'utente fa small talk o saluta, rispondi in modo naturale senza invocare tool.
-- Se la richiesta è ambigua, fai UNA sola domanda mirata. Non fare interrogatori.
-- Prima di chiedere all'utente quale corso intende, usa tool_leggi_contesto per
-  verificare se il contesto è già disponibile dalla pagina corrente.
-- Dopo aver generato un corso, ricorda i titoli delle sezioni create. Se l'utente
-  chiede "fammi i quiz" subito dopo, usa direttamente quegli ID senza chiedere di nuovo.
-- Non mostrare mai ID numerici interni all'utente. Usali solo nei tool.
-- Gestisci gli errori con empatia: spiega cosa è andato storto e suggerisci il passo successivo.
+REGOLE STUDENTE:
+- I CORSI UNIVERSITARI sono in sola lettura. Non puoi modificarli.
+- I PIANI PERSONALIZZATI sono spazi privati dello studente. Quando generi contenuti,
+  stai sempre creando un PIANO PERSONALIZZATO — mai modificando il corso ufficiale.
+- Non dire mai allo studente di "caricare materiale nel corso".
+- Quando lo studente chiede di riscrivere, modificare, semplificare, espandere un paragrafo:
+  1. Chiama tool_leggi_contesto → ottieni piano_id e l'elenco "Sezioni del piano" con gli ID.
+  2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
+  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
+  4. Genera il testo riscritto in modo completo e dettagliato.
+  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo).
+  NON chiedere mai il numero del piano all'utente: è già nel contesto.
+  NON dire mai che non puoi modificare il testo: hai sempre questo percorso disponibile.
 
-PERMESSI E ARCHITETTURA DATI:
-- I CORSI UNIVERSITARI (tabella corsi_universitari) sono in sola lettura per gli studenti.
-  Vengono creati dai docenti e non puoi modificarli né aggiungere materiale ad essi.
-- I PIANI PERSONALIZZATI (tabella piani_personalizzati) sono spazi privati dello studente.
-  Quando usi tool_genera_corso o tool_genera_pratica, stai sempre creando o arricchendo
-  un PIANO PERSONALIZZATO associato allo studente corrente — mai modificando il corso.
-  Questi piani sono visibili SOLO allo studente che li ha richiesti (filtro su studente_id).
-- Non dire mai all'utente di "caricare materiale nel corso": se vuole aggiungere materiale
-  personale, lo fa tramite il suo Piano Personalizzato nell'interfaccia.
+--- REGOLE COMUNI ---
+- Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
+- Se la richiesta è ambigua, fai UNA sola domanda mirata.
+- Non mostrare mai ID numerici interni all'utente.
+- Gestisci gli errori con empatia e suggerisci il passo successivo.
 """
 
 
@@ -133,13 +164,17 @@ def tool_leggi_contesto() -> str:
     Leggi il contesto corrente della sessione: corso visualizzato, piano attivo e ultime sezioni generate.
     Usa questo tool PRIMA di chiedere all'utente su quale corso vuole lavorare.
     """
-    contesto = st.session_state.get(_SK_CONTESTO, {})
+    # Usa il globale di modulo: st.session_state non è accessibile dai thread
+    # background di LangGraph (warning "missing ScriptRunContext").
+    contesto = _CONTESTO_CORRENTE
     if not contesto:
         return "Nessun contesto attivo. L'utente non ha ancora selezionato un corso."
 
     parti = []
     tipo = contesto.get("tipo_vista")
-    if tipo == "corso":
+    if tipo == "docente":
+        parti.append("L'utente è un DOCENTE. Usa la modalità docente: analisi classe, gestione corso.")
+    elif tipo == "corso":
         parti.append("L'utente sta visualizzando un CORSO universitario (sola lettura).")
     elif tipo == "piano":
         parti.append("L'utente sta studiando nel proprio PIANO PERSONALIZZATO.")
@@ -149,10 +184,36 @@ def tool_leggi_contesto() -> str:
         parti.append(f"Corso: ID {contesto['corso_id']} — {nome}")
 
     if contesto.get("piano_id"):
+        piano_id = contesto["piano_id"]
         titolo = contesto.get("piano_titolo", "Piano personalizzato")
-        parti.append(f"Piano personalizzato attivo: ID {contesto['piano_id']} — '{titolo}'")
+        parti.append(f"Piano personalizzato attivo: ID {piano_id} — '{titolo}'")
 
-    if contesto.get("ultimi_paragrafi"):
+        # Fetch live dei paragrafi dal DB: sempre aggiornato, indipendente da quando
+        # è stata generata la lezione. Permette di modificare paragrafi esistenti.
+        try:
+            paragrafi_db = db.esegui(
+                "SELECT pp.id, pp.titolo "
+                "FROM piano_paragrafi pp "
+                "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pc.piano_id = ? "
+                "ORDER BY pc.ordine, pp.ordine",
+                [piano_id],
+            )
+            if paragrafi_db:
+                lista = "\n".join(f"  - ID {p['id']}: {p['titolo']}" for p in paragrafi_db)
+                parti.append(f"Sezioni del piano (usa questi ID con tool_modifica_piano):\n{lista}")
+            else:
+                parti.append("Il piano non ha ancora sezioni generate.")
+        except Exception:
+            # Fallback a ultimi_paragrafi se il DB non è disponibile
+            if contesto.get("ultimi_paragrafi"):
+                lista = "\n".join(
+                    f"  - ID {p['id']}: {p['titolo']}"
+                    for p in contesto["ultimi_paragrafi"]
+                )
+                parti.append(f"Ultime sezioni generate:\n{lista}")
+
+    elif contesto.get("ultimi_paragrafi"):
         lista = "\n".join(
             f"  - ID {p['id']}: {p['titolo']}"
             for p in contesto["ultimi_paragrafi"]
@@ -304,19 +365,24 @@ def tool_analizza_preparazione(tentativo_id: int) -> str:
 @tool
 def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore: str = "") -> str:
     """
-    Modifica la struttura di un piano personalizzato dello studente.
+    Modifica la struttura o il contenuto di un piano personalizzato dello studente.
 
     azione può essere:
-      - 'rinomina_capitolo'    → rinomina piano_capitoli.titolo (target_id = capitolo_id)
-      - 'rinomina_paragrafo'   → rinomina piano_paragrafi.titolo (target_id = paragrafo_id)
-      - 'riordina_capitolo'    → sposta il capitolo in una nuova posizione (nuovo_valore = intero)
-      - 'riordina_paragrafo'   → sposta il paragrafo in una nuova posizione (nuovo_valore = intero)
-      - 'elimina_capitolo'     → elimina il capitolo e tutti i suoi paragrafi (target_id = capitolo_id)
-      - 'elimina_paragrafo'    → elimina il paragrafo e i suoi contenuti (target_id = paragrafo_id)
-      - 'aggiungi_capitolo'    → aggiunge un nuovo capitolo al piano (nuovo_valore = titolo)
+      - 'rinomina_capitolo'       → rinomina piano_capitoli.titolo (target_id = capitolo_id)
+      - 'rinomina_paragrafo'      → rinomina piano_paragrafi.titolo (target_id = paragrafo_id)
+      - 'riordina_capitolo'       → sposta il capitolo in una nuova posizione (nuovo_valore = intero)
+      - 'riordina_paragrafo'      → sposta il paragrafo in una nuova posizione (nuovo_valore = intero)
+      - 'elimina_capitolo'        → elimina il capitolo e tutti i suoi paragrafi (target_id = capitolo_id)
+      - 'elimina_paragrafo'       → elimina il paragrafo e i suoi contenuti (target_id = paragrafo_id)
+      - 'aggiungi_capitolo'       → aggiunge un nuovo capitolo al piano (nuovo_valore = titolo)
+      - 'leggi_contenuto'         → legge il testo attuale di un paragrafo (target_id = paragrafo_id).
+                                    Usalo PRIMA di riscrivere, per basare la riscrittura sul testo originale.
+      - 'riscrivi_contenuto'      → sostituisce il testo di un paragrafo (target_id = paragrafo_id,
+                                    nuovo_valore = testo completo riscritto). Il testo deve essere
+                                    completo e ben strutturato, non un riassunto.
 
-    Usa questo tool quando lo studente chiede di rinominare, riordinare, eliminare o aggiungere
-    capitoli o paragrafi nel suo piano personalizzato.
+    Usa 'leggi_contenuto' + 'riscrivi_contenuto' quando lo studente chiede di riscrivere,
+    modificare, semplificare, espandere o tradurre il testo di un paragrafo.
     """
     studente_id = _STUDENTE_ID_CORRENTE
 
@@ -403,11 +469,172 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
             })
             return f"Nuovo capitolo '{nuovo_valore}' aggiunto al piano (ID: {nuovo_id})."
 
+        elif azione == "leggi_contenuto":
+            # Verifica che il paragrafo appartenga al piano
+            par = db.esegui(
+                "SELECT pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            contenuto = db.trova_uno("piano_contenuti", {"paragrafo_id": target_id, "tipo": "lezione"})
+            if not contenuto or not contenuto.get("contenuto_json"):
+                return f"Nessun testo trovato per '{par[0]['titolo']}'. Il paragrafo potrebbe non avere ancora una lezione generata."
+            return (
+                f"TESTO ATTUALE del paragrafo '{par[0]['titolo']}':\n\n"
+                f"{contenuto['contenuto_json']}\n\n"
+                f"Ora genera una versione migliorata e salvala con 'riscrivi_contenuto'."
+            )
+
+        elif azione == "riscrivi_contenuto":
+            if not nuovo_valore or not nuovo_valore.strip():
+                return "Specifica il nuovo testo completo per il paragrafo."
+            par = db.esegui(
+                "SELECT pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            titolo = par[0]["titolo"]
+            # Aggiorna se esiste, altrimenti inserisce
+            esistente = db.trova_uno("piano_contenuti", {"paragrafo_id": target_id, "tipo": "lezione"})
+            if esistente:
+                db.aggiorna(
+                    "piano_contenuti",
+                    {"paragrafo_id": target_id, "tipo": "lezione"},
+                    {"contenuto_json": nuovo_valore.strip()},
+                )
+            else:
+                db.inserisci("piano_contenuti", {
+                    "paragrafo_id": target_id,
+                    "tipo": "lezione",
+                    "contenuto_json": nuovo_valore.strip(),
+                })
+            return f"✅ Paragrafo '{titolo}' riscritto e salvato nel piano. Lo studente vedrà la nuova versione al prossimo caricamento."
+
         else:
-            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo."
+            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo, leggi_contenuto, riscrivi_contenuto."
 
     except Exception as e:
         return f"Errore durante la modifica del piano: {e}"
+
+
+@tool
+def tool_analizza_classe(corso_universitario_id: int = None) -> str:
+    """
+    Analizza le performance della classe per un docente: punteggio medio, tasso di superamento,
+    argomenti con più errori, studenti a rischio. Usa questo tool quando il docente chiede
+    di analizzare le risposte degli studenti, l'andamento del corso o chi è in difficoltà.
+    Se corso_universitario_id è 0 o None, analizza tutti i corsi del docente.
+    """
+    docente_id = _STUDENTE_ID_CORRENTE  # in modalità docente, questo è il docente_id
+
+    filtro = ""
+    params: list = [docente_id]
+    if corso_universitario_id:
+        filtro = " AND cu.id = ?"
+        params.append(corso_universitario_id)
+
+    # Verifica che esistano tentativi
+    riga_media = db.esegui(
+        "SELECT AVG(t.punteggio) AS media, "
+        "COUNT(CASE WHEN t.punteggio >= 60 THEN 1 END) * 100.0 / MAX(COUNT(*), 1) AS tasso, "
+        "COUNT(t.id) AS tentativi, COUNT(DISTINCT t.studente_id) AS studenti "
+        "FROM tentativi_quiz t "
+        "JOIN quiz q ON q.id = t.quiz_id "
+        "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+        "WHERE cu.docente_id = ?" + filtro,
+        params,
+    )
+
+    if not riga_media or not riga_media[0].get("tentativi"):
+        return (
+            "Nessun tentativo quiz registrato per i tuoi corsi ancora. "
+            "Gli studenti devono completare almeno un quiz perché i dati appaiano qui."
+        )
+
+    r = riga_media[0]
+    media = round(r["media"] or 0, 1)
+    tasso = round(r["tasso"] or 0, 1)
+    tentativi = r["tentativi"]
+    studenti = r["studenti"]
+
+    risultato = [
+        "📊 ANALISI DELLA CLASSE:",
+        f"- Studenti coinvolti: {studenti}",
+        f"- Tentativi quiz totali: {tentativi}",
+        f"- Punteggio medio: {media}/100",
+        f"- Tasso superamento (≥60): {tasso}%",
+    ]
+
+    # Argomenti più difficili (richiede chunk collegati ai quiz)
+    righe_gap = db.esegui(
+        "SELECT mc.argomenti_chiave "
+        "FROM risposte_domande rd "
+        "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+        "JOIN materiali_chunks mc ON dq.chunk_id = mc.id "
+        "JOIN quiz q ON dq.quiz_id = q.id "
+        "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
+        "WHERE cu.docente_id = ? AND rd.corretta = 0 AND mc.argomenti_chiave IS NOT NULL"
+        + filtro,
+        params,
+    )
+    conteggio: dict = {}
+    for row in righe_gap:
+        try:
+            for arg in json.loads(row["argomenti_chiave"]):
+                conteggio[arg] = conteggio.get(arg, 0) + 1
+        except Exception:
+            pass
+    if conteggio:
+        top = sorted(conteggio.items(), key=lambda x: x[1], reverse=True)[:5]
+        risultato.append("\n🔴 Argomenti con più errori:")
+        for arg, cnt in top:
+            risultato.append(f"  - {arg}: {cnt} errori")
+
+    # Domande più sbagliate
+    righe_dom = db.esegui(
+        "SELECT dq.testo, "
+        "ROUND(SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END)*100.0/COUNT(*),0) AS pct_errore "
+        "FROM risposte_domande rd "
+        "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+        "JOIN quiz q ON dq.quiz_id = q.id "
+        "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
+        "WHERE cu.docente_id = ?" + filtro +
+        " GROUP BY dq.id HAVING SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END) > 0"
+        " ORDER BY pct_errore DESC LIMIT 3",
+        params,
+    )
+    if righe_dom:
+        risultato.append("\n❓ Domande più difficili:")
+        for row in righe_dom:
+            testo = (row["testo"] or "")[:70] + ("…" if len(row["testo"] or "") > 70 else "")
+            risultato.append(f"  - {int(row['pct_errore'] or 0)}% errori — {testo}")
+
+    # Studenti a rischio
+    righe_rischio = db.esegui(
+        "SELECT u.nome || ' ' || u.cognome AS studente, "
+        "ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n_tentativi "
+        "FROM tentativi_quiz t "
+        "JOIN quiz q ON q.id = t.quiz_id "
+        "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+        "JOIN users u ON u.id = t.studente_id "
+        "WHERE cu.docente_id = ?" + filtro +
+        " GROUP BY t.studente_id HAVING media < 60 ORDER BY media ASC LIMIT 5",
+        params,
+    )
+    if righe_rischio:
+        risultato.append("\n⚠️ Studenti a rischio (media < 60):")
+        for row in righe_rischio:
+            risultato.append(
+                f"  - {row['studente']}: media {row['media']}/100 ({row['n_tentativi']} tentativo/i)"
+            )
+    else:
+        risultato.append("\n✅ Nessuno studente con media sotto il 60% al momento.")
+
+    return "\n".join(risultato)
 
 
 # ===========================================================================
@@ -432,6 +659,7 @@ def _get_orchestratore():
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
+                tool_analizza_classe,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,
@@ -466,23 +694,33 @@ def aggiorna_contesto_sessione(
     Args:
         corso_id:     ID del corso attualmente visualizzato.
         corso_nome:   Nome leggibile del corso.
-        tipo_vista:   "corso" (sola lettura) | "piano" (piano personalizzato studente).
+        tipo_vista:   "docente" | "corso" (sola lettura) | "piano" (piano personalizzato studente).
         piano_id:     ID del piano personalizzato attivo (solo quando tipo_vista="piano").
         piano_titolo: Titolo del piano attivo.
     """
+    global _CONTESTO_CORRENTE
     contesto = st.session_state.get(_SK_CONTESTO, {})
+
+    # Se cambia il tipo_vista (es. da "piano" studente a "docente"), azzera
+    # il contesto precedente per evitare contaminazione cross-ruolo.
+    if tipo_vista is not None and contesto.get("tipo_vista") != tipo_vista:
+        contesto = {"tipo_vista": tipo_vista}
+    elif tipo_vista is not None:
+        contesto["tipo_vista"] = tipo_vista
+
     if corso_id is not None:
         contesto["corso_id"] = corso_id
         contesto["ultimi_paragrafi"] = []   # reset sezioni al cambio corso
     if corso_nome is not None:
         contesto["corso_nome"] = corso_nome
-    if tipo_vista is not None:
-        contesto["tipo_vista"] = tipo_vista
     if piano_id is not None:
         contesto["piano_id"] = piano_id
     if piano_titolo is not None:
         contesto["piano_titolo"] = piano_titolo
     st.session_state[_SK_CONTESTO] = contesto
+    # Copia nel globale: i tool LangGraph girano in thread background dove
+    # st.session_state non è accessibile, ma il globale di modulo sì.
+    _CONTESTO_CORRENTE = dict(contesto)
 
 
 def chat_con_orchestratore(
@@ -530,6 +768,16 @@ def chat_con_orchestratore(
 
 
 def reset_sessione_chat() -> None:
-    """Azzera agente, thread e contesto. Chiamare al logout dell'utente."""
-    for chiave in [_SK_ORCHESTRATORE, _SK_AGENTE_TEORICO, _SK_THREAD_ID, _SK_CONTESTO]:
+    """Azzera agente, thread, contesto e cronologia chat. Chiamare al logout dell'utente."""
+    chiavi_da_rimuovere = [
+        _SK_ORCHESTRATORE,
+        _SK_AGENTE_TEORICO,
+        _SK_THREAD_ID,
+        _SK_CONTESTO,
+        "chat_history_doc",       # chat docente
+        "chat_history_display",   # chat studente
+    ]
+    for chiave in chiavi_da_rimuovere:
         st.session_state.pop(chiave, None)
+    global _CONTESTO_CORRENTE
+    _CONTESTO_CORRENTE = {}

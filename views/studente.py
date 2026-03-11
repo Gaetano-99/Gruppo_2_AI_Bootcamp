@@ -1473,6 +1473,18 @@ def _render_chatbot(
     """Renderizza il chatbot Lea nella colonna destra."""
     chat_con_orchestratore, aggiorna_contesto, _ = _import_orchestratore()
 
+    # Aggiorna il contesto ad ogni render (non solo al primo messaggio)
+    # così Lea sa subito su quale piano/corso sta lavorando lo studente.
+    # Nota: aggiorna anche quando corso_id è None ma piano_id è impostato.
+    if aggiorna_contesto and (corso_id or piano_id or view_mode):
+        aggiorna_contesto(
+            corso_id=corso_id,
+            corso_nome=corso_nome,
+            tipo_vista=view_mode,
+            piano_id=piano_id,
+            piano_titolo=piano_titolo,
+        )
+
     # Header
     st.markdown("""
     <div class="chat-header">
@@ -1568,7 +1580,7 @@ def _render_chatbot(
 
         # Esecuzione IA
         if chat_con_orchestratore is not None and aggiorna_contesto is not None:
-            if corso_id:
+            if corso_id or piano_id or view_mode:
                 aggiorna_contesto(
                     corso_id=corso_id,
                     corso_nome=corso_nome,
