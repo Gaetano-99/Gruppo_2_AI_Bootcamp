@@ -29,58 +29,486 @@ def _import_orchestratore():
 
 _CSS = r"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
-:root { --blue:#003087; --blue-dark:#001A4D; --blue-mid:#1351A8; --red:#C8102E; --gold:#C5A028; --light:#F0F4F8; --gray:#5A6A7E; --border:#C8D5E3; --white:#FFFFFF; --green:#1A7F4B; --card:#f8fafc; --input-bg:#f8fafc; --input-text:#1f2937; --placeholder:#4b5563; }
-.stApp { background:#F0F4F8 !important; font-family:'Source Sans 3',sans-serif !important; }
-#MainMenu, footer { visibility:hidden; }
-.block-container { padding-top:0 !important; padding-bottom:0 !important; }
-.topbar { background:linear-gradient(135deg,#001A4D 0%,#003087 60%,#1351A8 100%); border-bottom:3px solid #C5A028; padding:14px 32px; display:flex; align-items:center; justify-content:space-between; margin:-1rem -1rem 24px -1rem; }
-.topbar-brand { font-family:'Playfair Display',serif; color:#fff; font-size:1.25rem; font-weight:700; }
-.topbar-brand span { color:#C5A028; }
-.topbar-user { color:rgba(255,255,255,0.85); font-size:0.88rem; display:flex; align-items:center; gap:12px; }
-.topbar-avatar { width:34px; height:34px; border-radius:50%; background:#C5A028; color:#001A4D; font-weight:700; font-size:0.85rem; display:inline-flex; align-items:center; justify-content:center; }
-.section-card { background:var(--card); border-radius:12px; padding:18px 20px; margin-bottom:18px; box-shadow:0 4px 18px rgba(0,48,135,0.08); border:1px solid #E3EAF3; }
-.section-title { font-family:'Playfair Display',serif; font-size:1.35rem; color:#001A4D; margin:0 0 8px 0; font-weight:700; }
-.section-sub { color:#5A6A7E; font-size:0.90rem; margin-bottom:12px; }
-.metric-box { background:linear-gradient(135deg,#EEF4FF 0%,#F7FAFF 100%); border:1px solid #D6E0F0; border-radius:12px; padding:14px 16px; box-shadow:inset 0 1px 0 rgba(255,255,255,0.6); }
-.metric-label { color:#5A6A7E; font-size:0.82rem; margin-bottom:4px; }
-.metric-value { color:#001A4D; font-size:1.4rem; font-weight:700; }
-.course-card { background:var(--card); border-radius:12px; padding:14px 16px; border-left:4px solid #C8D5E3; box-shadow:0 2px 10px rgba(0,48,135,0.07); margin-bottom:10px; }
-.course-card .title { font-weight:700; color:#001A4D; margin:0; }
-.course-card .meta { color:#5A6A7E; font-size:0.82rem; }
-.status-pill { display:inline-block; font-size:0.72rem; font-weight:700; padding:4px 10px; border-radius:999px; text-transform:uppercase; letter-spacing:0.4px; }
-.pill-pub { background:#E6F9F0; color:#1A7F4B; }
-.pill-bozza { background:#FFF6E0; color:#8A6800; }
-.chip { display:inline-block; background:#EEF4FF; color:#003087; padding:3px 9px; border-radius:10px; font-size:0.75rem; font-weight:700; margin-right:6px; }
-.tab-note { background:#F8FAFD; border:1px solid #E3EAF3; border-radius:10px; padding:10px 12px; color:#5A6A7E; font-size:0.85rem; }
-.upload-box { border:1.5px dashed #C8D5E3; border-radius:12px; padding:16px; background:var(--card); }
-.chat-header { background:linear-gradient(135deg,#001A4D 0%,#003087 100%); color:#fff; padding:14px 18px; border-radius:12px 12px 0 0; display:flex; align-items:center; gap:10px; margin-bottom:0; }
-.chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
-.chat-title { font-weight:700; font-size:0.95rem; }
-.chat-sub { font-size:0.75rem; opacity:0.75; }
-.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; min-height:420px; overflow:visible; padding:16px; display:flex; flex-direction:column; gap:10px; }
-.msg-user { background:#003087; color:#fff; border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:0.87rem; max-width:82%; align-self:flex-end; line-height:1.5; }
-.msg-ai { background:#F0F4F8; color:#1A2535; border-radius:4px 14px 14px 14px; padding:10px 14px; font-size:0.87rem; max-width:88%; align-self:flex-start; line-height:1.55; border:1px solid #E0E8F2; }
-.stTextInput input, .stTextArea textarea, .stSelectbox select, .stNumberInput input, .stChatInput textarea { background: var(--input-bg) !important; color: var(--input-text) !important; }
-.stTextInput input::placeholder, .stTextArea textarea::placeholder, .stChatInput textarea::placeholder { color: var(--placeholder) !important; }
-div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(--input-text) !important; }
-div[data-baseweb="select"] input { color: var(--input-text) !important; }
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
 
-/* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
+:root {
+    --ink: #0D1117;
+    --ink-2: #1C2333;
+    --ink-3: #2D3748;
+    --mist: #8892A4;
+    --silver: #C4CDD9;
+    --fog: #EDF1F7;
+    --canvas: #F7F9FC;
+    --white: #FFFFFF;
+
+    --sapphire: #1847B1;
+    --sapphire-dark: #0F2D7A;
+    --sapphire-glow: #2558D4;
+    --azure: #4F8EF7;
+    --gold: #D4A843;
+    --gold-pale: #FDF3D8;
+    --emerald: #0FAB71;
+    --emerald-pale: #E3FAF2;
+    --amber: #D97706;
+    --amber-pale: #FEF3C7;
+    --crimson: #DC2626;
+
+    --radius-sm: 8px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 16px rgba(15,30,80,0.10), 0 1px 4px rgba(15,30,80,0.06);
+    --shadow-lg: 0 12px 40px rgba(15,30,80,0.14), 0 2px 8px rgba(15,30,80,0.08);
+    --shadow-glow: 0 0 0 3px rgba(79,142,247,0.18);
+}
+
+/* ── RESET & BASE ── */
+.stApp {
+    background: var(--canvas) !important;
+    font-family: 'DM Sans', sans-serif !important;
+}
+#MainMenu, footer { visibility: hidden; }
+.block-container {
+    padding-top: 0 !important;
+    padding-bottom: 2rem !important;
+    max-width: 1400px !important;
+}
+
+/* ── TOPBAR ── */
+.topbar {
+    background: var(--ink);
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 0 32px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -1rem -1rem 28px -1rem;
+    position: relative;
+}
+.topbar::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--azure) 30%, var(--gold) 70%, transparent);
+    opacity: 0.5;
+}
+.topbar-brand {
+    font-family: 'DM Serif Display', serif;
+    color: var(--white);
+    font-size: 1.2rem;
+    letter-spacing: -0.02em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.topbar-brand .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--azure);
+    box-shadow: 0 0 8px var(--azure);
+    animation: pulse 2.5s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.85); }
+}
+.topbar-brand .accent { color: var(--azure); }
+.topbar-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: rgba(255,255,255,0.7);
+    font-size: 0.85rem;
+}
+.topbar-avatar {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--sapphire-glow), var(--azure));
+    color: var(--white);
+    font-weight: 600;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: var(--shadow-sm);
+}
+.topbar-name { color: var(--white); font-weight: 500; line-height: 1.2; }
+.topbar-role { color: var(--azure); font-size: 0.72rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ── SECTION CARD ── */
+.section-card {
+    background: var(--white);
+    border-radius: var(--radius-lg);
+    padding: 24px 28px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow-md);
+    border: 1px solid rgba(196,205,217,0.5);
+    position: relative;
+    overflow: hidden;
+}
+.section-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--sapphire), var(--azure), var(--sapphire-glow));
+}
+.section-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.4rem;
+    color: var(--ink);
+    margin: 0 0 4px 0;
+    letter-spacing: -0.02em;
+}
+.section-sub {
+    color: var(--mist);
+    font-size: 0.85rem;
+    margin-bottom: 18px;
+    font-weight: 400;
+}
+
+/* ── METRIC BOXES ── */
+.metric-box {
+    background: var(--fog);
+    border: 1px solid rgba(196,205,217,0.6);
+    border-radius: var(--radius-md);
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.metric-box:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+.metric-box::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--azure), var(--sapphire));
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.metric-box:hover::after { opacity: 1; }
+.metric-icon {
+    font-size: 1.2rem;
+    margin-bottom: 10px;
+    display: block;
+}
+.metric-label {
+    color: var(--mist);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+}
+.metric-value {
+    color: var(--ink);
+    font-size: 2rem;
+    font-weight: 300;
+    letter-spacing: -0.04em;
+    font-family: 'DM Serif Display', serif;
+    line-height: 1;
+}
+
+/* ── COURSE CARD ── */
+.course-card {
+    background: var(--white);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    border: 1px solid rgba(196,205,217,0.5);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 10px;
+    transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.course-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--azure);
+}
+.course-card .title {
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0 0 8px 0;
+    font-size: 0.95rem;
+}
+.course-card .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+}
+
+/* ── STATUS PILL ── */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.status-pill::before {
+    content: '';
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+}
+.pill-pub {
+    background: var(--emerald-pale);
+    color: var(--emerald);
+    border: 1px solid rgba(15,171,113,0.2);
+}
+.pill-bozza {
+    background: var(--amber-pale);
+    color: var(--amber);
+    border: 1px solid rgba(217,119,6,0.2);
+}
+
+/* ── CHIP ── */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    background: var(--fog);
+    color: var(--ink-3);
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid rgba(196,205,217,0.5);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── CHAT ── */
+.chat-header {
+    background: var(--ink);
+    color: var(--white);
+    padding: 16px 20px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    overflow: hidden;
+}
+.chat-header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(79,142,247,0.12) 0%, transparent 60%);
+}
+.chat-header-inner { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; width: 100%; }
+.chat-avatar {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--sapphire-glow), var(--azure));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    box-shadow: 0 0 12px rgba(79,142,247,0.4);
+}
+.chat-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.2;
+}
+.chat-sub {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.5);
+    font-weight: 400;
+}
+.chat-online {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--emerald);
+    box-shadow: 0 0 6px var(--emerald);
+    margin-left: auto;
+    animation: pulse 2.5s ease-in-out infinite;
+}
+.chat-container {
+    background: var(--white);
+    border: 1px solid rgba(196,205,217,0.5);
+    border-top: none;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+    min-height: 400px;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.msg-user {
+    background: linear-gradient(135deg, var(--sapphire), var(--sapphire-glow));
+    color: var(--white);
+    border-radius: 16px 16px 4px 16px;
+    padding: 11px 16px;
+    font-size: 0.86rem;
+    max-width: 84%;
+    align-self: flex-end;
+    line-height: 1.55;
+    box-shadow: 0 2px 8px rgba(24,71,177,0.25);
+}
+.msg-ai {
+    background: var(--fog);
+    color: var(--ink-3);
+    border-radius: 4px 16px 16px 16px;
+    padding: 11px 16px;
+    font-size: 0.86rem;
+    max-width: 90%;
+    align-self: flex-start;
+    line-height: 1.6;
+    border: 1px solid rgba(196,205,217,0.5);
+}
+
+/* ── INPUTS ── */
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input,
+.stChatInput textarea {
+    background: var(--fog) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--silver) !important;
+    border-radius: var(--radius-sm) !important;
+    font-family: 'DM Sans', sans-serif !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+.stTextInput input:focus,
+.stTextArea textarea:focus {
+    border-color: var(--azure) !important;
+    box-shadow: var(--shadow-glow) !important;
+}
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder,
+.stChatInput textarea::placeholder {
+    color: var(--mist) !important;
+}
+
+div[data-baseweb="select"] {
+    background: var(--fog) !important;
+    color: var(--ink) !important;
+    border-radius: var(--radius-sm) !important;
+}
+div[data-baseweb="select"] input { color: var(--ink) !important; }
+
+/* ── LABELS ── */
 label[data-testid="stWidgetLabel"] p,
 label[data-testid="stWidgetLabel"] div,
 div[data-testid="stWidgetLabel"] p,
 div[data-testid="stWidgetLabel"] div,
 label p {
-    color: var(--input-text) !important;
-    font-weight: 600 !important;
+    color: var(--ink-3) !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
 }
 
-/* La colonna chat segue lo scroll della pagina */
+/* ── TABS ── */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    background: var(--fog);
+    padding: 4px;
+    border-radius: var(--radius-sm);
+}
+.stTabs [data-baseweb="tab"] {
+    border-radius: 6px !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
+    color: var(--mist) !important;
+    padding: 6px 14px !important;
+}
+.stTabs [aria-selected="true"] {
+    background: var(--white) !important;
+    color: var(--ink) !important;
+    box-shadow: var(--shadow-sm) !important;
+}
+
+/* ── BUTTONS (Streamlit overrides) ── */
+div.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, var(--sapphire), var(--sapphire-glow)) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--radius-sm) !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 0.45rem 1.1rem !important;
+    box-shadow: 0 2px 8px rgba(24,71,177,0.3) !important;
+    transition: opacity 0.15s, transform 0.15s !important;
+}
+div.stButton > button[kind="primary"]:hover {
+    opacity: 0.92 !important;
+    transform: translateY(-1px) !important;
+}
+div.stButton > button[kind="secondary"] {
+    background: var(--fog) !important;
+    color: var(--ink-3) !important;
+    border: 1px solid var(--silver) !important;
+    border-radius: var(--radius-sm) !important;
+    font-weight: 500 !important;
+    font-size: 0.85rem !important;
+}
+
+/* ── TAB NOTE ── */
+.tab-note {
+    background: var(--fog);
+    border: 1px solid rgba(196,205,217,0.5);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    color: var(--ink-3);
+    font-size: 0.87rem;
+    line-height: 1.7;
+}
+.tab-note strong { color: var(--ink); font-weight: 600; }
+
+/* ── DIVIDERS ── */
+hr.styled {
+    border: none;
+    border-top: 1px solid rgba(196,205,217,0.4);
+    margin: 12px 0;
+}
+
+/* ── SUGGESTIONS ── */
+.sug-btn div.stButton > button {
+    background: var(--white) !important;
+    border: 1px solid var(--silver) !important;
+    color: var(--ink-3) !important;
+    font-size: 0.8rem !important;
+    border-radius: var(--radius-sm) !important;
+    padding: 0.35rem 0.8rem !important;
+}
+.sug-btn div.stButton > button:hover {
+    border-color: var(--azure) !important;
+    color: var(--sapphire) !important;
+    background: rgba(79,142,247,0.06) !important;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--silver); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mist); }
+
+/* ── COLUMN LAYOUT ── */
 div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-of-type {
     position: static;
     max-height: none;
     overflow: visible;
+}
+
+/* ── FORM SUBMIT ── */
+div.stFormSubmitButton > button {
+    background: linear-gradient(135deg, var(--sapphire), var(--sapphire-glow)) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: var(--radius-sm) !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 8px rgba(24,71,177,0.3) !important;
 }
 </style>
 """
@@ -186,16 +614,20 @@ def _stato_corso(corso: dict) -> tuple[str, str]:
 
 def _render_topbar(utente: dict) -> bool:
     st.markdown(_CSS, unsafe_allow_html=True)
+    initials = (utente.get('nome', '')[:1] or '?').upper()
     st.markdown(
         f"""
         <div class='topbar'>
-            <div class='topbar-brand'>LearnAI <span>Docente</span></div>
+            <div class='topbar-brand'>
+                <div class='dot'></div>
+                LearnAI <span class='accent'>Docente</span>
+            </div>
             <div class='topbar-user'>
-                <div class='topbar-avatar'>{(utente.get('nome','')[:1] or '?').upper()}</div>
                 <div>
-                    <div>{utente.get('nome','')} {utente.get('cognome','')}</div>
-                    <div style='font-size:0.78rem; opacity:0.8'>Docente</div>
+                    <div class='topbar-name'>{utente.get('nome','')} {utente.get('cognome','')}</div>
+                    <div class='topbar-role'>Docente</div>
                 </div>
+                <div class='topbar-avatar'>{initials}</div>
             </div>
         </div>
         """,
@@ -203,7 +635,7 @@ def _render_topbar(utente: dict) -> bool:
     )
     col_logout, _ = st.columns([1, 5])
     with col_logout:
-        if st.button("Logout", type="secondary"):
+        if st.button("↩ Logout", type="secondary"):
             _, _, reset_fn = _import_orchestratore()
             if reset_fn:
                 try:
@@ -227,17 +659,19 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
         corso_sel_id = label_to_id.get(scelta)
     dati = _metrics(docente_id, corso_sel_id)
 
+    icons = ["👥", "✅", "📊", "📚"]
     col_a, col_b, col_c, col_d = st.columns(4)
-    for col, label, val in [
-        (col_a, "Studenti unici", dati["studenti"]),
-        (col_b, "Quiz pubblicati", dati["quiz"]),
-        (col_c, "Tentativi quiz", dati["tentativi"]),
-        (col_d, "Corsi gestiti", dati["corsi"]),
+    for col, label, val, icon in [
+        (col_a, "Studenti unici", dati["studenti"], icons[0]),
+        (col_b, "Quiz pubblicati", dati["quiz"], icons[1]),
+        (col_c, "Tentativi quiz", dati["tentativi"], icons[2]),
+        (col_d, "Corsi gestiti", dati["corsi"], icons[3]),
     ]:
         with col:
             st.markdown(
                 f"""
                 <div class='metric-box'>
+                    <span class='metric-icon'>{icon}</span>
                     <div class='metric-label'>{label}</div>
                     <div class='metric-value'>{val}</div>
                 </div>
@@ -247,8 +681,22 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
 
     if corsi:
         serie = [{"Corso": c["nome"], "Quiz approvati": _metrics(docente_id, c["id"])['quiz']} for c in corsi]
-        fig = px.bar(serie, x="Corso", y="Quiz approvati", title="Quiz approvati per corso")
-        fig.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10))
+        fig = px.bar(
+            serie, x="Corso", y="Quiz approvati",
+            title="Quiz approvati per corso",
+            color_discrete_sequence=["#2558D4"],
+        )
+        fig.update_layout(
+            height=300,
+            margin=dict(t=44, b=16, l=8, r=8),
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="DM Sans", size=12, color="#2D3748"),
+            title_font=dict(family="DM Serif Display", size=15, color="#0D1117"),
+            xaxis=dict(showgrid=False, tickfont=dict(size=11)),
+            yaxis=dict(gridcolor="rgba(196,205,217,0.35)", tickfont=dict(size=11)),
+        )
+        fig.update_traces(marker_line_width=0, marker_cornerradius=6)
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("Carica almeno un corso per vedere le analytics.")
@@ -260,7 +708,7 @@ def _dialog_crea_corso(docente_id: int):
     with header_col:
         st.markdown("#### Nuovo corso")
     with close_col:
-        if st.button("X", key="close_create_course", help="Chiudi"):
+        if st.button("✕", key="close_create_course", help="Chiudi"):
             st.session_state["_doc_show_create"] = False
             st.rerun()
 
@@ -318,15 +766,11 @@ def _dialog_elimina_corso(corso_id: int):
 
 
 def _elimina_materiale(materiale_id: int, s3_key: str | None) -> None:
-    """Elimina un materiale didattico, i suoi chunk e il file fisico dal disco."""
-    # 1. Elimina i chunk associati
     try:
         db.elimina("materiali_chunks", {"materiale_id": materiale_id})
     except Exception:
         pass
-    # 2. Elimina il record dal DB
     db.elimina("materiali_didattici", {"id": materiale_id})
-    # 3. Elimina il file fisico (se presente)
     if s3_key:
         try:
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -386,11 +830,10 @@ def _render_materiali(corso: dict, docente_id: int):
         ok = 0
         errori = []
         for f in files:
-            # Salva il file fisico sul disco
             disk_path = os.path.join(upload_dir, f.name)
             with open(disk_path, "wb") as out:
                 out.write(f.getbuffer())
-            f.seek(0)  # reset per la lettura successiva
+            f.seek(0)
 
             if _elabora:
                 try:
@@ -400,7 +843,6 @@ def _render_materiali(corso: dict, docente_id: int):
                         titolo=f.name,
                         tipo=tipo_scelto,
                     )
-                    # Aggiorna s3_key con il percorso reale sul disco
                     db.aggiorna(
                         "materiali_didattici",
                         {"id": mat_id},
@@ -410,7 +852,6 @@ def _render_materiali(corso: dict, docente_id: int):
                 except Exception as e:
                     errori.append(f"{f.name}: {e}")
             else:
-                # Fallback senza elaborazione testo
                 db.inserisci(
                     "materiali_didattici",
                     {
@@ -432,7 +873,6 @@ def _render_materiali(corso: dict, docente_id: int):
 
 
 def _cancella_contenuto_piano_corso(corso_id: int) -> None:
-    """Elimina il piano docente esistente (is_corso_docente=1) e tutto il suo contenuto."""
     piani = db.trova_tutti("piani_personalizzati", {"corso_universitario_id": corso_id, "is_corso_docente": 1})
     if not piani:
         return
@@ -459,7 +899,6 @@ def _cancella_contenuto_piano_corso(corso_id: int) -> None:
 
 
 def _salva_contenuti_corso_db(corso_id: int, docente_id: int, schema: List[dict]) -> tuple[bool, str]:
-    """Salva lo schema (capitoli + test) nel DB come contenuto ufficiale del corso."""
     try:
         _cancella_contenuto_piano_corso(corso_id)
 
@@ -544,7 +983,6 @@ def _init_schema_state(corso_id: int):
 
 
 def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
-    """Recupera l'ID del primo paragrafo DB per un capitolo appena salvato da content_gen."""
     try:
         piani = db.trova_tutti(
             "piani_personalizzati",
@@ -568,7 +1006,6 @@ def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
 
 
 def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str) -> None:
-    """Invoca agente teorico e agente pratico in sequenza, poi aggiorna lo stato UI."""
     try:
         from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
         from src.agents.practice_gen import esegui_generazione_pratica
@@ -576,7 +1013,6 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
         st.error(f"Impossibile importare gli agenti AI: {e}")
         return
 
-    # — Fase 1: Teoria —
     with st.spinner("Fase 1/2 — Generazione contenuti teorici…"):
         agente = crea_agente_content_gen()
         argomento = f"{corso['nome']}. {prompt}".strip(". ") if prompt else corso["nome"]
@@ -597,7 +1033,6 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
         st.error("L'agente non ha prodotto una struttura valida. Verifica che siano presenti materiali RAG.")
         return
 
-    # — Fase 2: Quiz per ogni capitolo —
     nuovo_schema: list[dict] = []
     chunk_ids = stato_t.get("chunk_ids_utilizzati", [])
     with st.spinner("Fase 2/2 — Generazione quiz di verifica…"):
@@ -639,7 +1074,6 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
                     ],
                 })
 
-    # — Fase 3: Aggiornamento UI —
     st.session_state[key] = nuovo_schema
     st.success("Contenuto corso generato con successo!")
     st.rerun()
@@ -655,24 +1089,21 @@ def _render_contenuti_ai(corso: dict):
     key = _init_schema_state(corso["id"])
     schema = st.session_state[key]
 
-    # Version counter: incrementato ad ogni cancellazione per forzare il refresh dei widget
     ver_key = f"_schema_ver_{corso['id']}"
     if ver_key not in st.session_state:
         st.session_state[ver_key] = 0
     ver = st.session_state[ver_key]
 
-    # — Prompt centrale —
     prompt = st.text_area(
         "Istruzioni per generare la lezione",
         placeholder="Es: Focalizzati su esempi pratici. Usa un linguaggio accessibile agli studenti del primo anno.",
         key=f"prompt_{corso['id']}",
     )
-    if st.button("Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
+    if st.button("✨ Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
         _genera_contenuto_corso(corso, docente_id, prompt, key)
 
     st.markdown("---")
 
-    # — Rendering schema misto —
     idx_to_delete = None
     cap_num = 0
     test_num = 0
@@ -686,11 +1117,7 @@ def _render_contenuti_ai(corso: dict):
             with col_header:
                 st.markdown(f"#### Capitolo {cap_num}")
             with col_del:
-                if st.button(
-                    "🗑️",
-                    key=f"del_cap_{corso['id']}_{idx}_{ver}",
-                    help="Elimina capitolo e i suoi paragrafi",
-                ):
+                if st.button("🗑️", key=f"del_cap_{corso['id']}_{idx}_{ver}", help="Elimina capitolo"):
                     idx_to_delete = idx
 
             blocco["titolo"] = st.text_input(
@@ -717,11 +1144,7 @@ def _render_contenuti_ai(corso: dict):
             with col_header:
                 st.markdown(f"#### Test {test_num}")
             with col_del:
-                if st.button(
-                    "🗑️",
-                    key=f"del_test_{corso['id']}_{idx}_{ver}",
-                    help="Elimina set di domande",
-                ):
+                if st.button("🗑️", key=f"del_test_{corso['id']}_{idx}_{ver}", help="Elimina set di domande"):
                     idx_to_delete = idx
 
             blocco["titolo"] = st.text_input(
@@ -754,7 +1177,6 @@ def _render_contenuti_ai(corso: dict):
                 )
                 st.markdown("---")
 
-    # — Gestione cancellazione —
     if idx_to_delete is not None:
         schema.pop(idx_to_delete)
         st.session_state[key] = schema
@@ -763,7 +1185,6 @@ def _render_contenuti_ai(corso: dict):
 
     st.markdown("---")
 
-    # — Bottoni di aggiunta manuale —
     col_add1, col_add2 = st.columns(2)
     with col_add1:
         if st.button("➕ Aggiungi Capitolo", key=f"add_cap_{corso['id']}"):
@@ -808,26 +1229,32 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
     title_col, close_col = st.columns([10, 1])
     with title_col:
         st.markdown(
-            f"<div style='font-family:Playfair Display,serif; font-size:1.2rem; font-weight:700; color:#001A4D; "
-            f"margin:12px 0 4px 0;'>✏️ {corso['nome']} "
-            f"<span class='status-pill {stato_class}' style='font-size:0.72rem; vertical-align:middle;'>{stato_lbl}</span></div>",
+            f"""
+            <div style='font-family:"DM Serif Display",serif; font-size:1.2rem; font-weight:400;
+                        color:#0D1117; margin:12px 0 4px 0; letter-spacing:-0.02em;'>
+                {corso['nome']}
+                <span class='status-pill {stato_class}' style='font-size:0.7rem; vertical-align:middle; margin-left:8px;'>{stato_lbl}</span>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
     with close_col:
-        if st.button("X", key=f"close_course_detail_{corso['id']}", help="Chiudi"):
+        if st.button("✕", key=f"close_course_detail_{corso['id']}", help="Chiudi"):
             st.session_state["_corso_doc_sel"] = None
             st.rerun()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics"])
 
     with tab1:
         st.markdown(
             f"""
             <div class='tab-note'>
-            <strong>Descrizione:</strong> {corso.get('descrizione') or '—'}<br>
-            <strong>CFU:</strong> {corso.get('cfu') or '—'}<br>
-            <strong>Anno:</strong> {corso.get('anno_di_corso') or '—'} · Livello: {corso.get('livello') or '—'} · Semestre: {corso.get('semestre') or '—'}<br>
-            <strong>Studenti iscritti:</strong> {_conta_studenti_corso(corso['id'])}
+                <strong>Descrizione:</strong> {corso.get('descrizione') or '—'}<br>
+                <strong>CFU:</strong> {corso.get('cfu') or '—'} &nbsp;·&nbsp;
+                <strong>Anno:</strong> {corso.get('anno_di_corso') or '—'} &nbsp;·&nbsp;
+                <strong>Livello:</strong> {corso.get('livello') or '—'} &nbsp;·&nbsp;
+                <strong>Semestre:</strong> {corso.get('semestre') or '—'}<br>
+                <strong>Studenti iscritti:</strong> {_conta_studenti_corso(corso['id'])}
             </div>
             """,
             unsafe_allow_html=True,
@@ -846,7 +1273,8 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
                     "Anno di corso (1-5)", min_value=1, max_value=5, step=1, value=int(corso.get("anno_di_corso") or 1)
                 )
                 livello = st.selectbox(
-                    "Livello", ["base", "intermedio", "avanzato"], index=["base", "intermedio", "avanzato"].index(corso.get("livello") or "base")
+                    "Livello", ["base", "intermedio", "avanzato"],
+                    index=["base", "intermedio", "avanzato"].index(corso.get("livello") or "base")
                 )
                 semestre = st.selectbox("Semestre", [1, 2], index=[1, 2].index(corso.get("semestre") or 1))
                 cdl_sel = st.multiselect("Corsi di Laurea", cdl_nomi_tutti, default=cdl_correnti_nomi)
@@ -854,7 +1282,8 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
                     db.aggiorna(
                         "corsi_universitari",
                         {"id": corso["id"]},
-                        {"nome": nome, "descrizione": descrizione, "cfu": cfu, "anno_di_corso": anno, "livello": livello, "semestre": semestre},
+                        {"nome": nome, "descrizione": descrizione, "cfu": cfu,
+                         "anno_di_corso": anno, "livello": livello, "semestre": semestre},
                     )
                     cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
                     _salva_cdl_corso(corso["id"], cdl_sel_ids)
@@ -870,22 +1299,33 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
     with tab4:
         dati = _metrics(docente_id, corso["id"])
         col1, col2, col3 = st.columns(3)
-        col1.metric("Studenti unici", dati["studenti"])
-        col2.metric("Quiz pubblicati", dati["quiz"])
-        col3.metric("Tentativi quiz", dati["tentativi"])
+        for col, label, val, icon in [
+            (col1, "Studenti unici", dati["studenti"], "👥"),
+            (col2, "Quiz pubblicati", dati["quiz"], "✅"),
+            (col3, "Tentativi quiz", dati["tentativi"], "📊"),
+        ]:
+            with col:
+                st.markdown(
+                    f"""<div class='metric-box'>
+                        <span class='metric-icon'>{icon}</span>
+                        <div class='metric-label'>{label}</div>
+                        <div class='metric-value'>{val}</div>
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
         st.caption("Drill-down per capitolo/argomento verrà aggiunto dopo la raccolta dati.")
 
 
 def _render_corsi(docente_id: int):
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">I tuoi corsi</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-sub">Gestisci bozze, pubblicazioni e materiali.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-sub">Gestisci bozze, pubblicazioni e materiali didattici.</div>', unsafe_allow_html=True)
 
     feedback = st.session_state.pop("_doc_create_feedback", None)
     if feedback:
         st.success(feedback)
 
-    if st.button("Crea nuovo corso", type="primary"):
+    if st.button("＋ Crea nuovo corso", type="primary"):
         st.session_state["_doc_show_create"] = True
     if st.session_state.get("_doc_show_create"):
         _dialog_crea_corso(docente_id)
@@ -933,7 +1373,7 @@ def _render_corsi(docente_id: int):
             with c_c:
                 if st.button("Elimina", key=f"del_{corso['id']}"):
                     st.session_state["_doc_delete_confirm"] = corso["id"]
-        st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:6px 0'>", unsafe_allow_html=True)
+        st.markdown("<hr style='border:none;border-top:1px solid rgba(196,205,217,0.4);margin:4px 0'>", unsafe_allow_html=True)
 
     if st.session_state.get("_doc_delete_confirm"):
         _dialog_elimina_corso(st.session_state["_doc_delete_confirm"])
@@ -954,10 +1394,13 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
     st.markdown(
         """
         <div class="chat-header">
-            <div class="chat-online"></div>
-            <div>
-                <div class="chat-title">Lea — Tutor AI</div>
-                <div class="chat-sub">Supporto ai docenti</div>
+            <div class="chat-header-inner">
+                <div class="chat-avatar">🤖</div>
+                <div>
+                    <div class="chat-title">Lea — Tutor AI</div>
+                    <div class="chat-sub">Supporto ai docenti</div>
+                </div>
+                <div class="chat-online"></div>
             </div>
         </div>
         """,
@@ -981,26 +1424,28 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
     chat_html += "</div>"
     st.markdown(chat_html, unsafe_allow_html=True)
 
-    suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz approvato"), ("🧠", "Crea flashcard")]
+    suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz"), ("🧠", "Crea flashcard")]
     messaggio_da_suggerimento = None
     cols = st.columns(len(suggerimenti))
     for idx, (icona, testo) in enumerate(suggerimenti):
         with cols[idx]:
+            st.markdown('<div class="sug-btn">', unsafe_allow_html=True)
             if st.button(f"{icona} {testo}", key=f"sug_doc_{idx}"):
                 target = corso_nome or "il tuo corso"
                 messaggio_da_suggerimento = f"{testo} per {target}"
+            st.markdown("</div>", unsafe_allow_html=True)
 
     with st.form("lea_doc_form", clear_on_submit=True):
         input_col, send_col = st.columns([5, 1], vertical_alignment="bottom")
         with input_col:
             user_input = st.text_input(
-                "Chiedi a Lea (docente)...",
+                "Chiedi a Lea...",
                 key="lea_doc_input_text",
-                placeholder="Chiedi a Lea (docente)...",
+                placeholder="Scrivi un messaggio a Lea…",
                 label_visibility="collapsed",
             )
         with send_col:
-            invia = st.form_submit_button("Invia", type="primary", use_container_width=True)
+            invia = st.form_submit_button("→", type="primary", use_container_width=True)
 
     messaggio_finale = messaggio_da_suggerimento or ((user_input or "").strip() if invia else None)
     if messaggio_finale:
@@ -1046,7 +1491,3 @@ def mostra_homepage_docente():
 
 if __name__ == "__main__":
     mostra_homepage_docente()
-
-
-
-

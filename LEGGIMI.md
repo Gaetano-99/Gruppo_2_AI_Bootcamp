@@ -134,6 +134,7 @@ Tutti i moduli condividono lo stesso database e lo stesso SDK.
 - Analisi automatica del gap tramite AI
 - Visualizzazione radar chart delle competenze vs. obiettivo
 - Raccomandazioni AI su priorità di sviluppo
+- Raccomandazioni AI su priorità di sviluppo
 
 **Tabelle principali:** `users`, `user_skills`, `skills`, `skill_gap_analyses`
 

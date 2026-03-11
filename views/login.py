@@ -1,22 +1,19 @@
 # ============================================================================
-# LearnAI Platform — Pagina di Login
+# Federico360 — Pagina di Login
 # Università Federico II di Napoli
-#
-# Funzionalità:
-#   - Autenticazione via email + password (hash SHA-256)
-#   - Routing automatico per ruolo dopo login riuscito
-#   - Palette colori ufficiale Federico II
 # ============================================================================
 
 import sys
 import os
+import base64
 from datetime import datetime, timezone
+from pathlib import Path
 
 import streamlit as st
 from werkzeug.security import check_password_hash
 
 # ---------------------------------------------------------------------------
-# Path setup — permette import dalla root del progetto
+# Path setup
 # ---------------------------------------------------------------------------
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _ROOT not in sys.path:
@@ -26,267 +23,292 @@ from platform_sdk.database import db
 
 
 # ---------------------------------------------------------------------------
-# Costanti
+# *** PERCORSI IMMAGINI ***
 # ---------------------------------------------------------------------------
+_ASSETS_DIR   = Path(__file__).parent / "assets"
+LOGO_PATH     = _ASSETS_DIR / "Gruppo_2_AI_Bootcamp\views\logo\LOGO_FEDERICO.png"   # <- CAMBIA QUI se necessario
+SIGILLO_PATH  = _ASSETS_DIR / "Gruppo_2_AI_Bootcamp\views\logo\LOGO_FEDERICO.png"            # <- CAMBIA QUI se necessario
+
+_LOGO_B64_EMBEDDED    = ""   # fallback: lascia vuoto o incolla il base64
+_SIGILLO_B64_EMBEDDED = ""
+
+def _img_to_b64(path: Path, fallback_b64: str) -> str:
+    try:
+        if path.exists():
+            with open(path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+    except Exception:
+        pass
+    return fallback_b64
 
 
 # ---------------------------------------------------------------------------
-# CSS — Palette Federico II
+# CSS
 # ---------------------------------------------------------------------------
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&display=swap');
 
 :root {
-    --blue:       #003087;
-    --blue-dark:  #001A4D;
-    --blue-mid:   #1351A8;
-    --red:        #C8102E;
-    --gold:       #C5A028;
-    --light:      #F0F4F8;
-    --gray:       #5A6A7E;
-    --border:     #C8D5E3;
-    --white:      #FFFFFF;
+    --bg:        #eaecf3;
+    --navy:      #1a2340;
+    --navy-mid:  #2c3a5e;
+    --gold:      #f0a500;
+    --white:     #ffffff;
+    --muted:     #7a849a;
+    --border:    #d4d9e5;
+    --input-bg:  #f5f6fa;
 }
 
-/* App background */
+/* Reset Streamlit */
+#MainMenu, footer, header        { visibility: hidden; }
+[data-testid="stDecoration"]     { display: none !important; }
+[data-testid="stToolbar"]        { display: none !important; }
+.block-container {
+    padding: 0 !important;
+    max-width: 100% !important;
+}
+[data-testid="stVerticalBlock"]  { gap: 0 !important; }
+[data-testid="column"]           { padding: 0 !important; }
+
+/* App shell */
 .stApp {
-    background: linear-gradient(160deg, #EEF2F8 0%, #F6F8FC 100%) !important;
-    font-family: 'Source Sans 3', sans-serif !important;
+    background: var(--bg) !important;
+    font-family: 'DM Sans', sans-serif !important;
+    min-height: 100vh;
 }
 
-/* Nascondi elementi Streamlit non necessari */
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding-top: 0 !important; }
-
-/* ---- HERO STRIP ---- */
-.hero-strip {
-    background: linear-gradient(135deg, #001A4D 0%, #003087 55%, #1351A8 100%);
-    padding: 20px 40px;
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    border-bottom: 3px solid #C5A028;
-    margin: -1rem -1rem 0 -1rem;
-}
-.hero-strip .logo-text {
-    color: #fff;
-    font-family: 'Playfair Display', serif;
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-    line-height: 1.1;
-}
-.hero-strip .logo-sub {
-    color: rgba(255,255,255,0.7);
-    font-size: 0.75rem;
-    font-weight: 300;
-    letter-spacing: 0.5px;
-    margin-top: 2px;
-}
-.hero-strip .badge {
-    background: #C5A028;
-    color: #001A4D;
-    font-size: 0.65rem;
-    font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 20px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    margin-left: auto;
+/* Particelle */
+#net {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 0;
+    pointer-events: none;
 }
 
-/* ---- CARD LOGIN ---- */
-.login-card {
-    background: #FFFFFF;
-    border-radius: 16px;
-    padding: 44px 48px 40px;
-    box-shadow: 0 8px 40px rgba(0,48,135,0.13);
-    border-top: 5px solid #003087;
-    max-width: 420px;
-    margin: 48px auto 0;
-}
-.login-card-title {
-    font-family: 'Playfair Display', serif;
-    font-size: 1.65rem;
-    color: #001A4D;
-    margin: 0 0 4px 0;
-    font-weight: 700;
-}
-.login-card-sub {
-    color: #5A6A7E;
-    font-size: 0.9rem;
-    font-weight: 300;
-    margin-bottom: 28px;
-}
-.login-divider {
-    height: 1px;
-    background: #C8D5E3;
-    margin: 24px 0;
+/* Card */
+.f360-card {
+    position: relative;
+    background: var(--white);
+    border-radius: 18px;
+    box-shadow: 0 8px 48px rgba(26,35,64,.13);
+    border-top: 5px solid #1a2340;
+    padding: 80px 44px 36px;
+    z-index: 10;
+    margin-bottom: 32px;
 }
 
-/* ---- INPUT OVERRIDES ---- */
+/* Input labels */
 .stTextInput label {
+    font-size: .78rem !important;
     font-weight: 600 !important;
-    color: #001A4D !important;
-    font-size: 0.88rem !important;
-    letter-spacing: 0.2px;
+    letter-spacing: .06em !important;
+    color: var(--muted) !important;
+    text-transform: uppercase !important;
 }
 .stTextInput input {
-    border: 1.5px solid #C8D5E3 !important;
-    border-radius: 8px !important;
-    padding: 10px 14px !important;
-    font-family: 'Source Sans 3', sans-serif !important;
-    font-size: 0.95rem !important;
-    background: #EBEBEB !important;
-    color: #1a2535 !important;
-    color: #1a2535 !important;
-    transition: border-color 0.18s, box-shadow 0.18s;
+    background: var(--input-bg) !important;
+    border: 1.5px solid var(--border) !important;
+    border-radius: 10px !important;
+    padding: 11px 14px !important;
+    font-family: 'DM Sans', sans-serif !important;
+    font-size: .95rem !important;
+    color: var(--navy) !important;
+    transition: border-color .18s, box-shadow .18s;
 }
 .stTextInput input:focus {
-    border-color: #003087 !important;
-    box-shadow: 0 0 0 3px rgba(0,48,135,0.1) !important;
+    border-color: var(--navy-mid) !important;
+    box-shadow: 0 0 0 3px rgba(44,58,94,.12) !important;
+    background: var(--white) !important;
 }
 
-/* ---- BOTTONE ---- */
+/* Bottone */
 .stButton > button {
-    background: linear-gradient(135deg, #003087 0%, #1351A8 100%) !important;
-    color: #f1a1a1a ff !important;
+    background: var(--navy) !important;
+    color: #ffffff !important;
     border: none !important;
-    border-radius: 8px !important;
-    padding: 11px 0 !important;
-    font-family: 'Source Sans 3', sans-serif !important;
+    border-radius: 10px !important;
+    padding: 13px 0 !important;
+    font-family: 'DM Sans', sans-serif !important;
     font-weight: 600 !important;
-    font-size: 0.95rem !important;
-    letter-spacing: 0.3px !important;
+    font-size: 1rem !important;
     width: 100% !important;
-    transition: opacity 0.2s, transform 0.15s !important;
+    transition: background .2s, transform .15s !important;
 }
 .stButton > button:hover {
-    opacity: 0.91 !important;
+    background: var(--navy-mid) !important;
     transform: translateY(-1px) !important;
 }
 
-/* ---- ALERT BOX ---- */
-.alert-error {
-    background: #FFF0F2;
-    border: 1px solid #F5C6CE;
-    border-left: 4px solid #C8102E;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: #7D1A2A;
-    font-size: 0.88rem;
-    margin-bottom: 16px;
-}
-.alert-info {
-    background: #EEF4FF;
-    border: 1px solid #BFCFE8;
-    border-left: 4px solid #003087;
-    border-radius: 8px;
-    padding: 12px 16px;
-    color: #002266;
-    font-size: 0.88rem;
-    margin-bottom: 16px;
-}
-
-/* ---- CREDENZIALI DEMO ---- */
+/* Demo box */
 .demo-box {
-    background: #F8FAFC;
-    border: 1px dashed #C8D5E3;
-    border-radius: 8px;
-    padding: 12px 16px;
-    font-size: 0.82rem;
-    color: #5A6A7E;
-    margin-top: 20px;
+    background: #f8fafc;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 13px 16px;
+    font-size: .82rem;
+    color: var(--muted);
+    margin-top: 18px;
+    line-height: 1.75;
 }
-.demo-box strong { color: #003087; }
+.demo-box strong { color: var(--navy); }
+.demo-box code   { color: #2e7d32; background: #e8f5e9; border-radius: 4px; padding: 1px 5px; }
+
+/* Footer */
+.f360-footer {
+    background: rgba(26,35,64,0.97);
+    padding: 16px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    position: relative;
+    z-index: 10;
+}
 </style>
 """
-
+#st.image("views\logo\LOGO_FEDERICO.png",width=420)             #png da qui
 
 # ---------------------------------------------------------------------------
-# Utility auth
+# Auth
 # ---------------------------------------------------------------------------
-
-
-
-def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
-    """
-    Esegue il login completo con controllo blocco, verifica password e aggiornamento DB.
-
-    Returns:
-        (utente_dict, errore_str) — uno dei due è sempre None.
-    """
+def _esegui_login(email: str, password: str) -> tuple:
     if not email or not password:
         return None, "Inserisci email e password."
 
-    # Cerca utente per email
     risultati = db.trova_tutti("users", {"email": email.strip().lower()})
     if not risultati:
         return None, "Credenziali non corrette."
 
     utente = risultati[0]
 
-    # Controlla se account è sospeso
     if utente.get("stato") == "sospeso":
         return None, "Account sospeso. Contatta l'amministratore."
 
-    # Verifica password (Werkzeug PBKDF2 — generato con generate_password_hash)
     if not check_password_hash(utente["password_hash"], password):
         return None, "Password errata."
 
-    # Login riuscito — aggiorna last_login e reset tentativi
     db.aggiorna(
         "users",
         {"id": utente["id"]},
-        {
-            "last_login": datetime.now(timezone.utc).isoformat(),
-        },
+        {"last_login": datetime.now(timezone.utc).isoformat()},
     )
-
     return utente, None
 
 
 # ---------------------------------------------------------------------------
-# UI principale
+# UI
 # ---------------------------------------------------------------------------
-
 def mostra_login():
-    """Renderizza la pagina di login completa."""
     st.markdown(_CSS, unsafe_allow_html=True)
 
-    # Hero strip istituzionale
-    st.markdown("""
-    <div class="hero-strip">
-        <div>
-            <div class="logo-text">🎓 LearnAI</div>
-            <div class="logo-sub">Università degli Studi di Napoli Federico II</div>
-        </div>
-        <span class="badge">AI Platform</span>
-    </div>
-    """, unsafe_allow_html=True)
+    logo_b64    = _img_to_b64(LOGO_PATH,    _LOGO_B64_EMBEDDED)
+    sigillo_b64 = _img_to_b64(SIGILLO_PATH, _SIGILLO_B64_EMBEDDED)
+    logo_src    = f"data:image/png;base64,{LOGO_PATH }"    if logo_b64    else ""
+    sigillo_src = f"data:image/png;base64,{sigillo_b64}" if sigillo_b64 else ""
 
-    # Card centrale
+    # ── Canvas particelle (sfondo fisso) ──────────────────────────────────
+    st.markdown(f"""
+<canvas id="net"></canvas>
+<script>
+(function(){{
+  const cv=document.getElementById('net');
+  if(!cv)return;
+  const ctx=cv.getContext('2d');
+  let W,H,pts=[];
+  const N=70,MAX_D=140,NAVY='rgba(26,35,64,';
+  function resize(){{W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}}
+  resize();window.addEventListener('resize',resize);
+  for(let i=0;i<N;i++)pts.push({{
+    x:Math.random()*W,y:Math.random()*H,
+    vx:(Math.random()-.5)*.45,vy:(Math.random()-.5)*.45,r:Math.random()*2+1.5
+  }});
+  function draw(){{
+    ctx.clearRect(0,0,W,H);
+    pts.forEach(p=>{{
+      p.x+=p.vx;p.y+=p.vy;
+      if(p.x<0||p.x>W)p.vx*=-1;
+      if(p.y<0||p.y>H)p.vy*=-1;
+      ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle=NAVY+'0.35)';ctx.fill();
+    }});
+    for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){{
+      const dx=pts[i].x-pts[j].x,dy=pts[i].y-pts[j].y;
+      const d=Math.sqrt(dx*dx+dy*dy);
+      if(d<MAX_D){{ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);
+        ctx.lineTo(pts[j].x,pts[j].y);
+        ctx.strokeStyle=NAVY+(1-d/MAX_D)*0.15+')';ctx.lineWidth=.7;ctx.stroke();}}
+    }}
+    requestAnimationFrame(draw);
+  }}
+  draw();
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+
+    # ── Colonne: tutto centrato ───────────────────────────────────────────
     _, col, _ = st.columns([1, 1.4, 1])
     with col:
-        st.markdown("""
-        <div class="login-card">
-            <div class="login-card-title">Benvenuto</div>
-            <div class="login-card-sub">Accedi con le credenziali istituzionali</div>
-        </div>
-        """, unsafe_allow_html=True)
 
-        # Messaggi di feedback
+
+        # Sigillo animato centrato — galleggia a metà sul bordo superiore della card
+        st.markdown(f"""
+<div style="display:flex;justify-content:center;margin-bottom:-65px;
+            position:relative;z-index:20;">
+  <canvas id="sigCanvas" width="130" height="130"
+          style="filter:drop-shadow(0 4px 14px rgba(26,35,64,.25));"></canvas>
+</div>
+<script>
+(function(){{
+  const img=new Image();
+  const cv=document.getElementById('sigCanvas');
+  if(!cv)return;
+  const ctx=cv.getContext('2d');
+  const W=130,H=130;
+  let startT=null;
+  const DUR=2400,DELAY=400;
+  function easeOut(t){{return 1-Math.pow(1-t,3);}}
+  function draw(ts){{
+    if(!startT)startT=ts;
+    const elapsed=ts-startT;
+    if(elapsed<DELAY){{ctx.clearRect(0,0,W,H);ctx.drawImage(img,0,0,W,H);requestAnimationFrame(draw);return;}}
+    const raw=Math.min((elapsed-DELAY)/DUR,1);
+    const eased=easeOut(raw);
+    const angle=eased*Math.PI*4;
+    const scaleX=Math.cos(angle);
+    ctx.clearRect(0,0,W,H);
+    ctx.save();ctx.translate(W/2,H/2);ctx.scale(scaleX,1);
+    ctx.drawImage(img,-W/2,-H/2,W,H);
+    ctx.restore();
+    if(raw<1)requestAnimationFrame(draw);
+  }}
+  img.onload=function(){{requestAnimationFrame(draw);}};
+  img.src="{sigillo_src}";
+}})();
+</script>
+""", unsafe_allow_html=True)
+
+        # ── Card (contiene i widget Streamlit) ────────────────────────────
+        col1,col2,col3 = st.columns([1,4,1])
+        with col2:
+            st.image("views\logo\LOGO_FEDERICO.png",width=1200)            #png da qui
+        
+        # Errore login
         if st.session_state.get("_login_errore"):
             st.markdown(
-                f'<div class="alert-error">⚠️ {st.session_state["_login_errore"]}</div>',
+                f'<div style="background:#fff0f2;border-left:4px solid #c0392b;'
+                f'border-radius:8px;padding:11px 15px;color:#7d1a2a;font-size:.88rem;'
+                f'margin-bottom:14px;">⚠️ {st.session_state["_login_errore"]}</div>',
                 unsafe_allow_html=True,
             )
 
-        # Form
         email = st.text_input(
             "Email istituzionale",
-            placeholder="nome.cognome@studenti.unina.it",
+            placeholder="Inserisci la mail",
             key="login_email",
         )
         password = st.text_input(
@@ -296,41 +318,63 @@ def mostra_login():
             key="login_password",
         )
 
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
 
         if st.button("Accedi", use_container_width=True):
             utente, errore = _esegui_login(email, password)
-
             if errore:
                 st.session_state["_login_errore"] = errore
                 st.rerun()
             else:
-                # Popola session_state secondo lo standard STATE_MANAGEMENT.md
                 st.session_state.is_logged_in    = True
                 st.session_state.current_user_id = utente["id"]
-                st.session_state.user_role       = utente["ruolo"].capitalize()  # 'Studente' | 'Docente' | 'Admin'
+                st.session_state.user_role       = utente["ruolo"].capitalize()
                 st.session_state.chat_history    = []
-                # Dati estesi per la UI (nome, email, campi ruolo-specifici)
                 st.session_state.user = {
-                    "user_id":             utente["id"],
-                    "nome":                utente["nome"],
-                    "cognome":             utente["cognome"],
-                    "email":               utente["email"],
-                    "ruolo":               utente["ruolo"],
-                    "matricola":           utente.get("matricola_studente") or utente.get("matricola_docente"),
-                    "corso_di_laurea_id":  utente.get("corso_di_laurea_id"),
-                    "anno_corso":          utente.get("anno_corso"),
-                    "dipartimento":        utente.get("dipartimento"),
+                    "user_id":            utente["id"],
+                    "nome":               utente["nome"],
+                    "cognome":            utente["cognome"],
+                    "email":              utente["email"],
+                    "ruolo":              utente["ruolo"],
+                    "matricola":          utente.get("matricola_studente") or utente.get("matricola_docente"),
+                    "corso_di_laurea_id": utente.get("corso_di_laurea_id"),
+                    "anno_corso":         utente.get("anno_corso"),
+                    "dipartimento":       utente.get("dipartimento"),
                 }
                 st.session_state.pop("_login_errore", None)
                 st.rerun()
-        # Box credenziali demo
+
         st.markdown("""
-        <div class="demo-box">
-            <strong>Account demo disponibili:</strong><br>
-            👩‍🎓 Studente: <code>studente@studenti.unina.it</code><br>
-            👩‍🎓 Studente: <code>g.bianchi@studenti.unina.it</code><br>
-            👨‍🏫 Docente: &nbsp;<code>docente@unina.it</code><br>
-            🔑 Password: <code>test1234</code>
-        </div>
-        """, unsafe_allow_html=True)
+<div style="text-align:center;margin-top:14px;">
+  <a href="#" style="font-size:.85rem;color:#7a849a;text-decoration:none;">← Torna indietro</a>
+</div>
+<div class="demo-box">
+  <strong>Account demo disponibili:</strong><br>
+  👩‍🎓 Studente: <code>studente@studenti.unina.it</code><br>
+  👩‍🎓 Studente: <code>g.bianchi@studenti.unina.it</code><br>
+  👨‍🏫 Docente: &nbsp;<code>docente@unina.it</code><br>
+  🔑 Password: <code>test1234</code>
+</div>
+""", unsafe_allow_html=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)  # chiude f360-card
+
+    # ── Spazio prima del footer ───────────────────────────────────────────
+    st.markdown("<div style='height:40px'></div>", unsafe_allow_html=True)
+
+    # ── Footer ────────────────────────────────────────────────────────────
+    st.markdown("""
+<div class="f360-footer">
+  <div style="font-size:.77rem;color:rgba(255,255,255,.35);">
+    &copy; 2026 <strong style="color:#ffffff;">Federico<span style="color:#f0a500;">360</span></strong>
+    &mdash; Università degli Studi di Napoli Federico II
+  </div>
+  <div style="display:flex;gap:22px;flex-wrap:wrap;">
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Aiuto</a>
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Contatti</a>
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Accessibilità</a>
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">FAQ</a>
+  </div>
+</div>
+""", unsafe_allow_html=True)
