@@ -11,6 +11,8 @@ if _ROOT not in sys.path:
 
 import streamlit as st
 from src.agents.orientamento import chiedi_agente_ospite
+from views.catalogo_corsi import mostra_catalogo_ospite
+from views.questionario_orientamento import mostra_questionario_ospite
 
 def mostra_homepage_ospite():
     # Nascondi sidebar nativa per evitare navigazione incontrollata
@@ -24,7 +26,35 @@ def mostra_homepage_ospite():
             st.session_state.clear() 
             # 2. Riavvia l'app (app.py vedrà che non sei loggato e caricherà login.py)
             st.rerun()
+            
+    if "vista_ospite" not in st.session_state:
+        st.session_state["vista_ospite"] = "home"
+
+    if st.session_state["vista_ospite"] == "catalogo":
+        mostra_catalogo_ospite()
+        return
+    elif st.session_state["vista_ospite"] == "questionario":
+        mostra_questionario_ospite()
+        return
+
+    # Se siamo qui, mostra la home (chatbot + buttons)
     st.title("Esplora i Corsi di Laurea 🎓")
+    st.markdown("Fai una domanda per scoprire quale corso di laurea è più adatto a te!")
+    st.markdown("Vuoi esplorare l'offerta formativa da solo, o preferisci parlare con l'Assistente AI?")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📚 Esplora Corsi", use_container_width=True):
+            st.session_state["vista_ospite"] = "catalogo"
+            st.rerun()
+    with col2:
+        if st.button("🧭 Questionario Orientamento", use_container_width=True):
+            st.session_state["vista_ospite"] = "questionario"
+            st.rerun()
+
+    st.divider()
+
+    st.markdown("### Assistente AI di Orientamento")
     st.markdown("Fai una domanda per scoprire quale corso di laurea è più adatto a te!")
 
     # Inizializza cronologia specifica per ospite se non esiste

@@ -221,7 +221,11 @@ def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
         return None, "Inserisci email e password."
 
     # Cerca utente per email
+    with open("tmp/login_debug.log", "a") as f:
+        f.write(f"DEBUG: Trovando email {email.strip().lower()}\n")
     risultati = db.trova_tutti("users", {"email": email.strip().lower()})
+    with open("tmp/login_debug.log", "a") as f:
+        f.write(f"DEBUG: Risultati query DB: {risultati}\n")
     if not risultati:
         return None, "Credenziali non corrette."
 
@@ -233,8 +237,12 @@ def _esegui_login(email: str, password: str) -> tuple[dict | None, str | None]:
 
     # Verifica password (Werkzeug PBKDF2 — generato con generate_password_hash)
     if not check_password_hash(utente["password_hash"], password):
+        with open("tmp/login_debug.log", "a") as f:
+            f.write("DEBUG: Password mismatch!\n")
         return None, "Password errata."
 
+    with open("tmp/login_debug.log", "a") as f:
+        f.write("DEBUG: Login ok!\n")
     # Login riuscito — aggiorna last_login e reset tentativi
     db.aggiorna(
         "users",

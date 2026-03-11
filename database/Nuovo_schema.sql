@@ -16,6 +16,7 @@
 --   ADMIN  → ruolo nella tabella users, record inseriti manualmente
 -- ============================================================================
 
+
 PRAGMA foreign_keys = ON;
 
 
@@ -28,6 +29,12 @@ CREATE TABLE IF NOT EXISTS corsi_di_laurea (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nome        TEXT    NOT NULL,               -- es. "Ingegneria Informatica"
     facolta     TEXT    NOT NULL,               -- es. "Ingegneria"
+    tipo        TEXT,                           -- es. "Triennale (L-8)"
+    descrizione TEXT,
+    materie_principali_json TEXT,               -- JSON array
+    sbocchi_lavorativi_json TEXT,               -- JSON array
+    durata      TEXT,
+    codice_corso TEXT UNIQUE,                   -- es. "ingegneria_informatica"
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
