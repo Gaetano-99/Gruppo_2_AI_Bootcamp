@@ -371,10 +371,9 @@ def mostra_login():
   </div>
   <div style="display:flex;gap:22px;flex-wrap:wrap;">
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Aiuto</a>
-    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Contatti</a>
-    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
+    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Termini e Condizioni</a>
+        <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Accessibilità</a>
-    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">FAQ</a>
-  </div>
+      </div>
 </div>
 """, unsafe_allow_html=True)
