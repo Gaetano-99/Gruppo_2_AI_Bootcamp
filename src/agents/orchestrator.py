@@ -188,20 +188,23 @@ def tool_leggi_contesto() -> str:
         titolo = contesto.get("piano_titolo", "Piano personalizzato")
         parti.append(f"Piano personalizzato attivo: ID {piano_id} — '{titolo}'")
 
-        # Fetch live dei paragrafi dal DB: sempre aggiornato, indipendente da quando
-        # è stata generata la lezione. Permette di modificare paragrafi esistenti.
+        # Fetch live struttura capitoli+paragrafi dal DB (con capitolo_id per spostamenti).
         try:
-            paragrafi_db = db.esegui(
-                "SELECT pp.id, pp.titolo "
-                "FROM piano_paragrafi pp "
-                "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
-                "WHERE pc.piano_id = ? "
-                "ORDER BY pc.ordine, pp.ordine",
+            capitoli_db = db.esegui(
+                "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
                 [piano_id],
             )
-            if paragrafi_db:
-                lista = "\n".join(f"  - ID {p['id']}: {p['titolo']}" for p in paragrafi_db)
-                parti.append(f"Sezioni del piano (usa questi ID con tool_modifica_piano):\n{lista}")
+            if capitoli_db:
+                righe = ["Struttura del piano (capitoli e paragrafi):"]
+                for cap in capitoli_db:
+                    righe.append(f"  Capitolo ID {cap['id']}: {cap['titolo']}")
+                    pp = db.esegui(
+                        "SELECT id, titolo FROM piano_paragrafi WHERE capitolo_id = ? ORDER BY ordine",
+                        [cap["id"]],
+                    )
+                    for p in pp:
+                        righe.append(f"    - Paragrafo ID {p['id']}: {p['titolo']}")
+                parti.append("\n".join(righe))
             else:
                 parti.append("Il piano non ha ancora sezioni generate.")
         except Exception:
@@ -375,6 +378,9 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
       - 'elimina_capitolo'        → elimina il capitolo e tutti i suoi paragrafi (target_id = capitolo_id)
       - 'elimina_paragrafo'       → elimina il paragrafo e i suoi contenuti (target_id = paragrafo_id)
       - 'aggiungi_capitolo'       → aggiunge un nuovo capitolo al piano (nuovo_valore = titolo)
+      - 'sposta_paragrafo'        → sposta il paragrafo in un altro capitolo (target_id = paragrafo_id,
+                                    nuovo_valore = capitolo_id di destinazione come stringa intera).
+                                    Usalo per riorganizzare paragrafi tra capitoli diversi.
       - 'leggi_contenuto'         → legge il testo attuale di un paragrafo (target_id = paragrafo_id).
                                     Usalo PRIMA di riscrivere, per basare la riscrittura sul testo originale.
       - 'riscrivi_contenuto'      → sostituisce il testo di un paragrafo (target_id = paragrafo_id,
@@ -411,6 +417,26 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
                 return f"Paragrafo ID {target_id} non trovato in questo piano."
             db.aggiorna("piano_paragrafi", {"id": target_id}, {"titolo": nuovo_valore})
             return f"Paragrafo rinominato in '{nuovo_valore}'."
+
+        elif azione == "sposta_paragrafo":
+            try:
+                capitolo_dest_id = int(nuovo_valore)
+            except (ValueError, TypeError):
+                return "Specifica il capitolo_id di destinazione come numero intero."
+            # Verifica che il paragrafo appartenga al piano
+            par = db.esegui(
+                "SELECT pp.id, pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+                "WHERE pp.id = ? AND pc.piano_id = ?",
+                [target_id, piano_id],
+            )
+            if not par:
+                return f"Paragrafo ID {target_id} non trovato in questo piano."
+            # Verifica che il capitolo di destinazione appartenga al piano
+            cap_dest = db.trova_uno("piano_capitoli", {"id": capitolo_dest_id, "piano_id": piano_id})
+            if not cap_dest:
+                return f"Capitolo ID {capitolo_dest_id} non trovato in questo piano."
+            db.aggiorna("piano_paragrafi", {"id": target_id}, {"capitolo_id": capitolo_dest_id})
+            return f"Paragrafo '{par[0]['titolo']}' spostato nel capitolo '{cap_dest['titolo']}'."
 
         elif azione == "riordina_capitolo":
             try:
@@ -515,7 +541,7 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
             return f"✅ Paragrafo '{titolo}' riscritto e salvato nel piano. Lo studente vedrà la nuova versione al prossimo caricamento."
 
         else:
-            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo, leggi_contenuto, riscrivi_contenuto."
+            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo, sposta_paragrafo, leggi_contenuto, riscrivi_contenuto."
 
     except Exception as e:
         return f"Errore durante la modifica del piano: {e}"
