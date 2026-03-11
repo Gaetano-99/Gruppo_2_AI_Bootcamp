@@ -302,6 +302,47 @@ _CSS = """
 }
 .msg-ai strong { color: #003087; }
 
+/* ---- TYPING INDICATOR ---- */
+.typing-bubble {
+    background: #F0F4F8;
+    border: 1px solid #E0E8F2;
+    border-radius: 4px 14px 14px 14px;
+    padding: 12px 16px;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    align-self: flex-start;
+    margin-bottom: 10px;
+    max-width: 80px;
+}
+.dot {
+    width: 6px; height: 6px;
+    background: #5A6A7E;
+    border-radius: 50%;
+    animation: typing 1.4s infinite ease-in-out;
+}
+.dot:nth-child(2) { animation-delay: 0.2s; }
+.dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+    30% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* ---- STICKY CHAT COLUMN ---- */
+/* Target specifico per l'ultima colonna del layout principale */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
+    position: -webkit-sticky; /* Supporto Safari */
+    position: sticky;
+    top: 2rem;
+    align-self: start;
+    z-index: 99;
+}
+
+/* Fix per assicurarsi che i contenitori genitori non blocchino lo sticky */
+div[data-testid="stVerticalBlock"] {
+    overflow: visible !important;
+}
+
 /* ---- RACCOMANDAZIONI ---- */
 .raccomandazione-card {
     background: #fff;
@@ -1457,21 +1498,34 @@ def _render_chatbot(
             }
         ]
 
-    # Render messaggi
-    chat_html = '<div class="chat-container" id="chat-box">'
-    for msg in st.session_state["chat_history_display"]:
-        if msg["role"] == "user":
-            testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-            chat_html += f'<div class="msg-user">{testo_safe}</div>'
-        else:
-            # Converti markdown minimo: **testo** → <strong>testo</strong>, \n → <br>
-            import re as _re
-            contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-            contenuto = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', contenuto)
-            contenuto = contenuto.replace("\n", "<br>")
-            chat_html += f'<div class="msg-ai">{contenuto}</div>'
-    chat_html += "</div>"
-    st.markdown(chat_html, unsafe_allow_html=True)
+    # Funzione helper per generare l'HTML della chat
+    def get_chat_html(is_typing=False):
+        html = '<div class="chat-container" id="chat-box">'
+        for m in st.session_state["chat_history_display"]:
+            if m["role"] == "user":
+                testo_safe = m["content"].replace("<", "&lt;").replace(">", "&gt;")
+                html += f'<div class="msg-user">{testo_safe}</div>'
+            else:
+                import re as _re
+                contenuto = m["content"].replace("<", "&lt;").replace(">", "&gt;")
+                contenuto = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', contenuto)
+                contenuto = contenuto.replace("\n", "<br>")
+                html += f'<div class="msg-ai">{contenuto}</div>'
+        
+        if is_typing:
+            html += """
+            <div class="typing-bubble">
+                <div class="dot"></div>
+                <div class="dot"></div>
+                <div class="dot"></div>
+            </div>
+            """
+        html += "</div>"
+        return html
+
+    # Render messaggi tramite segnaposto (per aggiornamento immediato)
+    chat_placeholder = st.empty()
+    chat_placeholder.markdown(get_chat_html(), unsafe_allow_html=True)
 
     # ---- Suggerimenti rapidi — compatti, sopra l'input ----
     suggerimenti = [
@@ -1498,6 +1552,8 @@ def _render_chatbot(
         st.session_state["chat_history_display"].append(
             {"role": "user", "content": messaggio_finale}
         )
+        # Mostra subito la domanda + l'animazione "sta scrivendo..."
+        chat_placeholder.markdown(get_chat_html(is_typing=True), unsafe_allow_html=True)
 
         # Snapshot piani esistenti PRIMA della chiamata all'agente
         _piani_prima: set[int] = set()
@@ -1510,6 +1566,7 @@ def _render_chatbot(
                 )
             }
 
+        # Esecuzione IA
         if chat_con_orchestratore is not None and aggiorna_contesto is not None:
             if corso_id:
                 aggiorna_contesto(
