@@ -63,20 +63,25 @@ _STOPWORDS: frozenset[str] = frozenset({
 # ===========================================================================
 
 def cerca_chunk_rilevanti(
-    corso_id: int,
+    corso_id: int | None,
     query: str,
     top_k: int = _TOP_K_DEFAULT,
+    materiale_id: int | None = None,
 ) -> list[dict]:
-    """Recupera i chunk più rilevanti per una query, filtrati per corso.
+    """Recupera i chunk più rilevanti per una query, filtrati per corso o materiale.
 
     Implementa una pipeline in due fasi:
         1. **Retrieval SQL**: query LIKE multi-parola-chiave su tre campi.
         2. **Ranking Python**: scoring basato su frequenza e campo di match.
 
+    Quando ``corso_id`` è None, la ricerca avviene direttamente per ``materiale_id``
+    (materiali personali senza corso associato).
+
     Args:
-        corso_id: ID del corso universitario (filtro obbligatorio).
+        corso_id: ID del corso universitario. None per materiali senza corso.
         query: Argomento o domanda dell'utente.
         top_k: Numero massimo di chunk da restituire (default 8).
+        materiale_id: Se specificato, limita i chunk al singolo materiale.
 
     Returns:
         Lista di dizionari rappresentanti i chunk, ciascuno arricchito
@@ -90,16 +95,32 @@ def cerca_chunk_rilevanti(
     """
     parole_chiave: list[str] = _estrai_parole_chiave(query)
 
+    # Quando corso_id è None, cerca direttamente per materiale_id
+    if corso_id is None:
+        if not materiale_id:
+            return []
+        return _query_sql_like_materiale(materiale_id, parole_chiave, top_k)
+
     if not parole_chiave:
         # Argomento generico: restituisce i primi Top-K del corso
-        return _recupera_chunk_generici(corso_id, top_k)
+        candidati = _recupera_chunk_generici(corso_id, top_k * 3 if materiale_id else top_k)
+        if materiale_id:
+            candidati = [c for c in candidati if c.get("materiale_id") == materiale_id][:top_k]
+        return candidati
 
     # Fase 1: retrieval SQL con LIKE
     candidati: list[dict] = _query_sql_like(corso_id, parole_chiave)
 
     if not candidati:
         # Fallback: nessun match → chunk generici del corso
-        return _recupera_chunk_generici(corso_id, top_k)
+        candidati = _recupera_chunk_generici(corso_id, top_k * 3 if materiale_id else top_k)
+        if materiale_id:
+            candidati = [c for c in candidati if c.get("materiale_id") == materiale_id][:top_k]
+        return candidati
+
+    # Filtra per materiale specifico se richiesto
+    if materiale_id:
+        candidati = [c for c in candidati if c.get("materiale_id") == materiale_id]
 
     # Fase 2: scoring e ranking
     candidati_con_score: list[dict] = _calcola_score(candidati, parole_chiave)
@@ -154,15 +175,20 @@ def formatta_contesto_rag(chunks: list[dict]) -> str:
     return "\n\n---\n\n".join(blocchi)
 
 
-def conta_chunk_corso(corso_id: int) -> int:
-    """Conta il numero totale di chunk disponibili per un corso.
+def conta_chunk_corso(corso_id: int | None, materiale_id: int | None = None) -> int:
+    """Conta il numero totale di chunk disponibili per un corso o materiale.
 
     Args:
-        corso_id: ID del corso universitario.
+        corso_id: ID del corso universitario. None per materiali senza corso.
+        materiale_id: Se specificato e corso_id è None, conta per materiale.
 
     Returns:
-        Numero totale di chunk in ``materiali_chunks`` per il corso.
+        Numero totale di chunk in ``materiali_chunks``.
     """
+    if corso_id is None:
+        if materiale_id:
+            return db.conta("materiali_chunks", {"materiale_id": materiale_id})
+        return 0
     return db.conta("materiali_chunks", {"corso_universitario_id": corso_id})
 
 
@@ -208,6 +234,67 @@ def _estrai_parole_chiave(testo: str) -> list[str]:
     # Ordina per lunghezza decrescente (parole più specifiche prima)
     parole_uniche.sort(key=len, reverse=True)
     return parole_uniche
+
+
+def _query_sql_like_materiale(
+    materiale_id: int,
+    parole_chiave: list[str],
+    top_k: int = _TOP_K_DEFAULT,
+) -> list[dict]:
+    """Cerca chunk filtrati per materiale_id (usato quando corso_id è None).
+
+    Args:
+        materiale_id: ID del materiale didattico.
+        parole_chiave: Parole chiave da cercare.
+        top_k: Numero massimo di chunk da restituire.
+
+    Returns:
+        Lista di chunk con score di rilevanza.
+    """
+    if not parole_chiave:
+        chunks = db.trova_tutti(
+            "materiali_chunks",
+            {"materiale_id": materiale_id},
+            ordine="indice_chunk ASC",
+            limite=top_k,
+        )
+        for c in chunks:
+            c["score_rilevanza"] = 0
+            c["parole_trovate"] = []
+        return chunks
+
+    condizioni: list[str] = []
+    parametri: list = [materiale_id]
+    for parola in parole_chiave:
+        condizioni.append(
+            "(LOWER(testo) LIKE ? OR LOWER(sommario) LIKE ? OR LOWER(argomenti_chiave) LIKE ?)"
+        )
+        parametri.extend([f"%{parola}%", f"%{parola}%", f"%{parola}%"])
+
+    clausola_where = " OR ".join(condizioni)
+    query = (
+        "SELECT id, materiale_id, corso_universitario_id, indice_chunk, "
+        "titolo_sezione, testo, sommario, argomenti_chiave, n_token "
+        f"FROM materiali_chunks "
+        f"WHERE materiale_id = ? AND ({clausola_where}) "
+        f"ORDER BY indice_chunk ASC"
+    )
+    candidati = db.esegui(query, parametri)
+
+    if not candidati:
+        # Fallback: tutti i chunk del materiale
+        candidati = db.trova_tutti(
+            "materiali_chunks",
+            {"materiale_id": materiale_id},
+            ordine="indice_chunk ASC",
+            limite=top_k,
+        )
+        for c in candidati:
+            c["score_rilevanza"] = 0
+            c["parole_trovate"] = []
+        return candidati
+
+    return _calcola_score(candidati, parole_chiave)[:top_k]
 
 
 def _query_sql_like(

@@ -74,7 +74,7 @@ _STUDENTE_ID_CORRENTE: int = 1
 _CONTESTO_CORRENTE: dict = {}
 
 
-def _aggiorna_studente_corrente() -> None:
+def _aggiorna_studente_corrente() -> None: 
     """Legge studente_id da session_state (thread principale) e lo salva
     nella variabile globale, rendendolo disponibile ai thread background."""
     global _STUDENTE_ID_CORRENTE
@@ -125,8 +125,10 @@ Sei attivo in modalità STUDENTE quando tool_leggi_contesto non indica ruolo doc
 
 COSA SAI FARE PER LO STUDENTE:
 1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
-2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili.
+2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili (con ID materiale).
 3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+                                  Accetta un parametro opzionale materiale_id per generare
+                                  la lezione SOLO dal contenuto di quel materiale specifico.
 4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
 5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
 6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
@@ -136,7 +138,12 @@ REGOLE STUDENTE:
 - I CORSI UNIVERSITARI sono in sola lettura. Non puoi modificarli.
 - I PIANI PERSONALIZZATI sono spazi privati dello studente. Quando generi contenuti,
   stai sempre creando un PIANO PERSONALIZZATO — mai modificando il corso ufficiale.
-- Non dire mai allo studente di "caricare materiale nel corso".
+- MATERIALE SELEZIONATO: se tool_leggi_contesto riporta "Materiale selezionato", lo studente
+  vuole una lezione su quel materiale specifico. Usa SUBITO tool_genera_corso passando
+  il materiale_id indicato nel contesto. Se non c'è un corso associato, usa corso_universitario_id=0.
+  Non chiedere conferme.
+- MATERIALE SENZA CORSO: se lo studente vuole una lezione da materiali personali non legati
+  a nessun corso, usa tool_genera_corso con corso_universitario_id=0 e il materiale_id appropriato.
 - Quando lo studente chiede di riscrivere, modificare, semplificare, espandere un paragrafo:
   1. Chiama tool_leggi_contesto → ottieni piano_id e l'elenco "Sezioni del piano" con gli ID.
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
@@ -223,6 +230,17 @@ def tool_leggi_contesto() -> str:
         )
         parti.append(f"Ultime sezioni generate:\n{lista}")
 
+    # Materiale selezionato dallo studente tramite il pannello "Visualizza materiale"
+    mat = contesto.get("materiale_selezionato")
+    if mat:
+        corso_id_mat = mat.get("corso_id") or 0  # 0 = nessun corso associato
+        parti.append(
+            f"Materiale selezionato dallo studente: '{mat['titolo']}' "
+            f"(materiale_id={mat['id']}, corso_id={corso_id_mat}). "
+            f"Genera una lezione su questo materiale chiamando tool_genera_corso "
+            f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
+        )
+
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
 
@@ -251,28 +269,42 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None)
             return f"Nessun materiale caricato per il corso ID {corso_universitario_id}."
         return (
             f"Materiali del corso ID {corso_universitario_id}:\n"
-            + "\n".join(f"- {m['titolo']} ({m['tipo']})" for m in materiali)
-            + "\nScegli un argomento per generare una lezione."
+            + "\n".join(
+                f"- materiale_id={m['id']}: {m['titolo']} ({m['tipo']})"
+                + (" ✅ elaborato" if m.get("is_processed") else " ⏳ in attesa")
+                for m in materiali
+            )
+            + "\nPer generare una lezione da un materiale specifico, usa tool_genera_corso "
+            + "con materiale_id=<id del materiale>."
         )
 
     return "Errore: tipo_ricerca deve essere 'corsi' o 'argomenti'."
 
 
 @tool
-def tool_genera_corso(corso_universitario_id: int, argomento: str) -> str:
+def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0) -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
+
+    Parametro corso_universitario_id: usa 0 se non c'è un corso associato (es. materiale personale).
+    Parametro opzionale materiale_id: se > 0, la lezione viene generata usando SOLO
+    i contenuti di quel materiale specifico (utile quando lo studente ha selezionato
+    un documento dal pannello "Visualizza materiale").
     """
     # Usa la variabile globale aggiornata dal thread principale prima dell'invocazione
     studente_id = _STUDENTE_ID_CORRENTE
 
+    # corso_id=0 è il sentinella per "nessun corso": passa None al motore
+    corso_id_eff = corso_universitario_id if corso_universitario_id and corso_universitario_id > 0 else None
+
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
-        corso_id=corso_universitario_id,
+        corso_id=corso_id_eff,
         argomento_richiesto=argomento,
         docente_id=studente_id,
         is_corso_docente=False,
+        materiale_id=materiale_id if materiale_id and materiale_id > 0 else None,
     )
 
     if stato_finale.get("errore"):
@@ -676,6 +708,12 @@ def _get_agente_teorico():
 
 def _get_orchestratore():
     """Orchestratore: singleton in session_state con memoria LangGraph intatta."""
+
+    #if _USER_ROLE = "docente":
+    #     system_pompt = DOCENTE_SYSTEM_PROMPT
+    # else:
+    #     system_pompt = _SYSTEM_PROMPT
+
     if _SK_ORCHESTRATORE not in st.session_state:
         st.session_state[_SK_ORCHESTRATORE] = crea_agente(
             tools=[
@@ -711,6 +749,9 @@ def aggiorna_contesto_sessione(
     tipo_vista: str | None = None,
     piano_id: int | None = None,
     piano_titolo: str | None = None,
+    materiale_selezionato: dict | None = None,
+    clear_materiale: bool = False,
+    clear_corso: bool = False,
 ) -> None:
     """Aggiorna il contesto della sessione quando l'utente naviga tra le pagine.
 
@@ -718,11 +759,14 @@ def aggiorna_contesto_sessione(
     L'agente leggerà questo contesto tramite tool_leggi_contesto.
 
     Args:
-        corso_id:     ID del corso attualmente visualizzato.
-        corso_nome:   Nome leggibile del corso.
-        tipo_vista:   "docente" | "corso" (sola lettura) | "piano" (piano personalizzato studente).
-        piano_id:     ID del piano personalizzato attivo (solo quando tipo_vista="piano").
-        piano_titolo: Titolo del piano attivo.
+        corso_id:              ID del corso attualmente visualizzato.
+        corso_nome:            Nome leggibile del corso.
+        tipo_vista:            "docente" | "corso" (sola lettura) | "piano" (piano personalizzato studente).
+        piano_id:              ID del piano personalizzato attivo (solo quando tipo_vista="piano").
+        piano_titolo:          Titolo del piano attivo.
+        materiale_selezionato: Dict {"id", "titolo", "corso_id"} del materiale scelto dallo studente.
+        clear_materiale:       Se True, rimuove materiale_selezionato dal contesto.
+        clear_corso:           Se True, rimuove corso_id e corso_nome dal contesto (es. materiale senza corso).
     """
     global _CONTESTO_CORRENTE
     contesto = st.session_state.get(_SK_CONTESTO, {})
@@ -734,7 +778,11 @@ def aggiorna_contesto_sessione(
     elif tipo_vista is not None:
         contesto["tipo_vista"] = tipo_vista
 
-    if corso_id is not None:
+    if clear_corso:
+        contesto.pop("corso_id", None)
+        contesto.pop("corso_nome", None)
+        contesto["ultimi_paragrafi"] = []
+    elif corso_id is not None:
         contesto["corso_id"] = corso_id
         contesto["ultimi_paragrafi"] = []   # reset sezioni al cambio corso
     if corso_nome is not None:
@@ -743,6 +791,10 @@ def aggiorna_contesto_sessione(
         contesto["piano_id"] = piano_id
     if piano_titolo is not None:
         contesto["piano_titolo"] = piano_titolo
+    if materiale_selezionato is not None:
+        contesto["materiale_selezionato"] = materiale_selezionato
+    if clear_materiale:
+        contesto.pop("materiale_selezionato", None)
     st.session_state[_SK_CONTESTO] = contesto
     # Copia nel globale: i tool LangGraph girano in thread background dove
     # st.session_state non è accessibile, ma il globale di modulo sì.

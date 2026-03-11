@@ -45,7 +45,7 @@ _DOCENTE_ID_MOCK: int = 10   # Mario Rossi (docente, seed data)
 
 def elabora_e_salva_documento(
     uploaded_file,
-    corso_universitario_id: int,
+    corso_universitario_id: int | None,
     titolo: str,
     tipo: str = "dispensa",
 ) -> int:

@@ -132,16 +132,18 @@ class ContentGenState(TypedDict):
         argomento_richiesto: Descrizione dell'argomento da trattare.
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
+        materiale_id: Se specificato, limita il RAG ai chunk di quel singolo materiale.
         chunks_recuperati: Lista di dizionari con i chunk RAG (id, testo, ...).
         n_chunk_totali_corso: Conteggio totale chunk del corso (per display).
         struttura_corso_generata: Dizionario JSON con la StrutturaCorso prodotta.
         chunk_ids_utilizzati: Lista degli ID dei chunk usati nella generazione.
         errore: Messaggio di errore, se presente (None in caso di successo).
     """
-    corso_id: int
+    corso_id: int | None
     argomento_richiesto: str
     docente_id: int
     is_corso_docente: bool
+    materiale_id: int | None
     chunks_recuperati: list[dict]
     n_chunk_totali_corso: int
     struttura_corso_generata: dict
@@ -166,18 +168,19 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
         Aggiornamento parziale dello stato con ``chunks_recuperati``,
         ``n_chunk_totali_corso`` ed eventuale ``errore``.
     """
-    corso_id: int = stato["corso_id"]
+    corso_id: int | None = stato["corso_id"]
     argomento: str = stato["argomento_richiesto"]
+    materiale_id: int | None = stato.get("materiale_id")
 
-    n_totali: int = conta_chunk_corso(corso_id)
+    n_totali: int = conta_chunk_corso(corso_id, materiale_id=materiale_id)
 
     if n_totali == 0:
         return {
             "chunks_recuperati": [],
             "n_chunk_totali_corso": 0,
             "errore": (
-                "Nessun materiale didattico disponibile per questo corso. "
-                "Carica prima un documento nella sezione Upload."
+                "Nessun materiale didattico disponibile. "
+                "Carica prima un documento tramite 'Carica materiale'."
             ),
         }
 
@@ -185,6 +188,7 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
         corso_id=corso_id,
         query=argomento,
         top_k=_MAX_CHUNK_IN_CONTESTO,
+        materiale_id=materiale_id,
     )
 
     return {
@@ -385,10 +389,11 @@ def crea_agente_content_gen():
 
 def esegui_generazione(
     agente,
-    corso_id: int,
+    corso_id: int | None,
     argomento_richiesto: str,
     docente_id: int = 1,
     is_corso_docente: bool = True,
+    materiale_id: int | None = None,
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
@@ -398,6 +403,7 @@ def esegui_generazione(
         argomento_richiesto: Argomento su cui generare i contenuti.
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, salva come corso docente; se False, come piano studente.
+        materiale_id: Se specificato, limita il RAG ai chunk di quel materiale.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -407,6 +413,7 @@ def esegui_generazione(
         "docente_id": docente_id,
         "is_corso_docente": is_corso_docente,
         "argomento_richiesto": argomento_richiesto,
+        "materiale_id": materiale_id,
         "chunks_recuperati": [],
         "n_chunk_totali_corso": 0,
         "struttura_corso_generata": {},
