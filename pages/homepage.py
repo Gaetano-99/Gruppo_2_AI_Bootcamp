@@ -562,8 +562,8 @@ img{{display:block;max-width:100%;}}
             Università degli Studi di Napoli Federico II per studenti e professionisti.
         </p>
         <div class="hero-btns">
-            <a class="btn-gold" href="/1_Login">Accedi alla piattaforma</a>
-            <a class="btn-outline-w" href="/ospite">Continua come ospite</a>
+            <a class="btn-gold" href="/?azione=login" target="_top">Accedi alla piattaforma</a>
+            <a class="btn-outline-w" href="/?azione=ospite" target="_top">Continua come ospite</a>
         </div>
 
     </div>
@@ -920,7 +920,7 @@ img{{display:block;max-width:100%;}}
                 <div class="target-panel-label">Per gli studenti</div>
                 <h3 class="target-panel-title">Studia meglio,<br>cresci più velocemente.</h3>
                 <p class="target-panel-text">Uno spazio digitale per studiare in modo più efficace, organizzare materiali, ricevere supporto intelligente e monitorare il proprio percorso.</p>
-                <a class="target-panel-btn" href="/1_Login">Accedi come studente →</a>
+                <a class="target-panel-btn" href="/?azione=login" target="_top">Accedi come studente →</a>
             </div>
             <div class="target-panel-right">
                 <ul class="target-panel-list">
@@ -938,7 +938,7 @@ img{{display:block;max-width:100%;}}
                 <div class="target-panel-label">Per i docenti</div>
                 <h3 class="target-panel-title">Insegna con più impatto,<br>con meno sforzo.</h3>
                 <p class="target-panel-text">Un ambiente intuitivo per gestire contenuti, semplificare la didattica e offrire un'esperienza formativa più fluida, dinamica e supportata dalla tecnologia.</p>
-                <a class="target-panel-btn" href="/1_Login">Accedi come docente →</a>
+                <a class="target-panel-btn" href="/?azione=login" target="_top">Accedi come docente →</a>
             </div>
             <div class="target-panel-right">
                 <ul class="target-panel-list">
