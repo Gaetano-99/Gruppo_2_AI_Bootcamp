@@ -14,8 +14,13 @@
 import atexit
 import os
 import shutil
+import sys
 
 import streamlit as st
+
+# DEBUG — rimuovere dopo aver risolto il problema di import
+st.sidebar.caption(f"Python: {sys.executable}")
+st.sidebar.caption(f"Version: {sys.version_info[:3]}")
 
 # ---------------------------------------------------------------------------
 # Pulizia file temporanei alla chiusura del server

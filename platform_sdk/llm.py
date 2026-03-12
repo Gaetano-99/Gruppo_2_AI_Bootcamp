@@ -335,42 +335,68 @@ def _ocr_pdf_con_claude(dati: bytes) -> str:
         dati: Contenuto grezzo del file PDF in byte.
 
     Ritorna:
-        Testo estratto via OCR, oppure stringa vuota se l'operazione fallisce.
+        Testo estratto via OCR.
+
+    Raises:
+        RuntimeError: Se l'OCR fallisce su tutte le pagine.
     """
-    import fitz  # PyMuPDF
+    import pymupdf  # PyMuPDF (il pacchetto si chiama pymupdf, non fitz)
     import base64
 
-    doc = fitz.open(stream=dati, filetype="pdf")
+    doc = pymupdf.open(stream=dati, filetype="pdf")
     llm = _get_llm_veloce()
 
     pagine_testo: list[str] = []
+    errori_ocr: list[str] = []
     for i, page in enumerate(doc, start=1):
-        # Zoom 2x ≈ 144 DPI — buona qualità OCR con immagini < 1 MB
-        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
-        img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+        try:
+            # Zoom 2x ≈ 144 DPI — buona qualità OCR con immagini < 1 MB
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
+            img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
 
-        messaggio = HumanMessage(content=[
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-            },
-            {
-                "type": "text",
-                "text": (
-                    "Estrai tutto il testo presente in questa immagine. "
-                    "Mantieni la struttura originale (titoli, paragrafi, elenchi). "
-                    "Rispondi solo con il testo estratto, senza commenti aggiuntivi."
-                ),
-            },
-        ])
+            messaggio = HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Estrai tutto il testo presente in questa immagine. "
+                        "Mantieni la struttura originale (titoli, paragrafi, elenchi). "
+                        "Rispondi solo con il testo estratto, senza commenti aggiuntivi."
+                    ),
+                },
+            ])
 
-        risposta = llm.invoke([messaggio])
-        testo_pagina = risposta.content.strip() if risposta.content else ""
-        if testo_pagina:
-            pagine_testo.append(f"[Pagina {i}]\n{testo_pagina}")
+            risposta = llm.invoke([messaggio])
+
+            # risposta.content può essere str o list[dict] a seconda della
+            # versione di langchain-aws
+            raw = risposta.content
+            if isinstance(raw, list):
+                testo_pagina = " ".join(
+                    (block.get("text", "") if isinstance(block, dict) else str(block))
+                    for block in raw
+                ).strip()
+            else:
+                testo_pagina = (raw or "").strip()
+
+            if testo_pagina:
+                pagine_testo.append(f"[Pagina {i}]\n{testo_pagina}")
+        except Exception as e:
+            errori_ocr.append(f"Pagina {i}: {type(e).__name__}: {e}")
 
     doc.close()
-    return "\n\n".join(pagine_testo).strip()
+
+    risultato = "\n\n".join(pagine_testo).strip()
+    if not risultato:
+        dettaglio = "; ".join(errori_ocr) if errori_ocr else "Il modello non ha restituito testo"
+        raise RuntimeError(
+            f"OCR tramite Claude Vision non è riuscito ad estrarre testo dal PDF. "
+            f"Dettaglio: {dettaglio}"
+        )
+    return risultato
 
 
 def estrai_testo_da_upload(uploaded_file) -> str:
@@ -438,9 +464,15 @@ def estrai_testo_da_upload(uploaded_file) -> str:
             from PyPDF2 import PdfReader
             reader = PdfReader(io.BytesIO(dati))
             pagine = [p.extract_text() or "" for p in reader.pages]
-            return "\n\n".join(pagine).strip()
-        except Exception as e:
-            return f"[Errore lettura PDF: {e}]"
+            testo_pypdf2 = "\n\n".join(pagine).strip()
+            if testo_pypdf2:
+                return testo_pypdf2
+        except Exception:
+            pass
+
+        # Ultimo tentativo: OCR via Claude Vision (pdfplumber e PyPDF2 non
+        # hanno estratto testo — probabilmente il PDF è una scansione)
+        return _ocr_pdf_con_claude(dati)
 
     # --- DOCX ---
     if nome.endswith(".docx"):
