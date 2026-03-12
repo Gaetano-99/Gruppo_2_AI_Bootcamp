@@ -475,52 +475,53 @@ def estrai_testo_da_upload(uploaded_file) -> str:
         return _ocr_pdf_con_claude(dati)
 
     # --- DOCX ---
+    # DOCX è un archivio ZIP contenente word/document.xml.
+    # Usiamo zipfile + xml.etree (stdlib) per evitare dipendenze esterne.
     if nome.endswith(".docx"):
         try:
-            from docx import Document
-            doc = Document(io.BytesIO(dati))
+            import zipfile
+            import xml.etree.ElementTree as ET
+            _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            with zipfile.ZipFile(io.BytesIO(dati)) as zf:
+                xml_content = zf.read("word/document.xml")
+            root = ET.fromstring(xml_content)
             parti: list[str] = []
-
-            # Paragrafi del corpo principale
-            for para in doc.paragraphs:
-                testo_para = para.text.strip()
+            for para in root.iter(f"{{{_W}}}p"):
+                testo_para = "".join(
+                    t.text or "" for t in para.iter(f"{{{_W}}}t")
+                ).strip()
                 if testo_para:
                     parti.append(testo_para)
-
-            # Testo nelle tabelle
-            for tabella in doc.tables:
-                for riga in tabella.rows:
-                    testo_riga = " | ".join(
-                        cella.text.strip() for cella in riga.cells if cella.text.strip()
-                    )
-                    if testo_riga:
-                        parti.append(testo_riga)
-
             return "\n\n".join(parti).strip()
         except Exception as e:
-            return f"[Errore lettura DOCX: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file DOCX: {e}") from e
 
     # --- PPTX ---
+    # PPTX è un archivio ZIP contenente ppt/slides/slideN.xml.
+    # Usiamo zipfile + xml.etree (stdlib) per evitare dipendenze esterne.
     if nome.endswith(".pptx"):
         try:
-            from pptx import Presentation
-            prs = Presentation(io.BytesIO(dati))
+            import zipfile
+            import xml.etree.ElementTree as ET
+            _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
             slide_testi: list[str] = []
-
-            for idx, slide in enumerate(prs.slides, start=1):
-                testi_slide: list[str] = []
-                for shape in slide.shapes:
-                    if shape.has_text_frame:
-                        for para in shape.text_frame.paragraphs:
-                            testo_para = "".join(run.text for run in para.runs).strip()
-                            if testo_para:
-                                testi_slide.append(testo_para)
-                if testi_slide:
-                    slide_testi.append(f"[Slide {idx}]\n" + "\n".join(testi_slide))
-
+            with zipfile.ZipFile(io.BytesIO(dati)) as zf:
+                nomi_slide = sorted(
+                    n for n in zf.namelist()
+                    if n.startswith("ppt/slides/slide") and n.endswith(".xml")
+                )
+                for idx, nome_slide in enumerate(nomi_slide, start=1):
+                    root = ET.fromstring(zf.read(nome_slide))
+                    testi_slide = [
+                        t.text.strip()
+                        for t in root.iter(f"{{{_A}}}t")
+                        if t.text and t.text.strip()
+                    ]
+                    if testi_slide:
+                        slide_testi.append(f"[Slide {idx}]\n" + "\n".join(testi_slide))
             return "\n\n".join(slide_testi).strip()
         except Exception as e:
-            return f"[Errore lettura PPTX: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file PPTX: {e}") from e
 
     # --- CSV ---
     if nome.endswith(".csv"):
@@ -529,7 +530,7 @@ def estrai_testo_da_upload(uploaded_file) -> str:
             df = pd.read_csv(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
-            return f"[Errore lettura CSV: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file CSV: {e}") from e
 
     # --- Excel (.xls, .xlsx) ---
     if nome.endswith((".xls", ".xlsx")):
@@ -538,7 +539,7 @@ def estrai_testo_da_upload(uploaded_file) -> str:
             df = pd.read_excel(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
-            return f"[Errore lettura Excel: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file Excel: {e}") from e
 
     # --- File di testo (.txt, .md, e altri) ---
     if isinstance(dati, bytes):
