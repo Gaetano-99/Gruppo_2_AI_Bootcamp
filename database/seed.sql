@@ -38,6 +38,19 @@ INSERT INTO corsi_di_laurea (id, nome, facolta) VALUES
     (3, 'Ingegneria Elettronica',          'Ingegneria');
 
 
+
+-- ============================================================================
+-- STEP 2 — USERS
+-- ============================================================================
+INSERT INTO users (id, nome, cognome, email, password_hash, ruolo, stato, matricola_studente, corso_di_laurea_id, anno_corso, matricola_docente, dipartimento) VALUES
+(1, 'Giulia', 'Bianchi', 'g.bianchi@studenti.unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'studente', 'active', 'N86001234', 1, 2, NULL, NULL),
+(2, 'Francesco', 'Esposito', 'f.esposito@studenti.unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'studente', 'active', 'N86001235', 1, 2, NULL, NULL),
+(3, 'Chiara', 'Romano', 'c.romano@studenti.unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'studente', 'active', 'N86001236', 1, 2, NULL, NULL),
+(4, 'Studente', 'Demo', 'studente@studenti.unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'studente', 'active', 'N86009999', 1, 2, NULL, NULL),
+(10, 'Mario', 'Rossi', 'docente@unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'docente', 'active', NULL, NULL, NULL, 'DOC-2021-042', 'Ingegneria Informatica'),
+(11, 'Laura', 'Ferrari', 'l.ferrari@unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'docente', 'active', NULL, NULL, NULL, 'DOC-2021-043', 'Matematica'),
+(99, 'Anna', 'Verdi', 'admin@unina.it', 'scrypt:32768:8:1$F1YiDKbEUS6xCx7l$479dad4ae0b6057c8333c7df90bf392e62ec27d52736442b4eee065dc55ae3c6c90579e8e4b70dbcce44dc30eefdbffdec6f030f83bbdc4c6a78f6e804f91404', 'admin', 'active', NULL, NULL, NULL, NULL, NULL);
+
 -- ============================================================================
 -- STEP 3 — CORSI UNIVERSITARI
 -- ============================================================================
