@@ -58,71 +58,29 @@ _CSS = r"""
 .chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
 .chat-title { font-weight:700; font-size:0.95rem; }
 .chat-sub { font-size:0.75rem; opacity:0.75; }
-.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; height:420px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; min-height:420px; overflow:visible; padding:16px; display:flex; flex-direction:column; gap:10px; }
 .msg-user { background:#003087; color:#fff; border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:0.87rem; max-width:82%; align-self:flex-end; line-height:1.5; }
 .msg-ai { background:#F0F4F8; color:#1A2535; border-radius:4px 14px 14px 14px; padding:10px 14px; font-size:0.87rem; max-width:88%; align-self:flex-start; line-height:1.55; border:1px solid #E0E8F2; }
+.stTextInput input, .stTextArea textarea, .stSelectbox select, .stNumberInput input, .stChatInput textarea { background: var(--input-bg) !important; color: var(--input-text) !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder, .stChatInput textarea::placeholder { color: var(--placeholder) !important; }
+div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(--input-text) !important; }
+div[data-baseweb="select"] input { color: var(--input-text) !important; }
 
-/* ---- TYPING INDICATOR ---- */
-.typing-bubble {
-    background: #F0F4F8;
-    border: 1px solid #E0E8F2;
-    border-radius: 4px 14px 14px 14px;
-    padding: 12px 16px;
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    align-self: flex-start;
-    margin-bottom: 10px;
-    max-width: 80px;
-}
-.dot {
-    width: 6px; height: 6px;
-    background: #5A6A7E;
-    border-radius: 50%;
-    animation: typing 1.4s infinite ease-in-out;
-}
-.dot:nth-child(2) { animation-delay: 0.2s; }
-.dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-4px); opacity: 1; }
-}
-
-/* ---- STICKY CHAT COLUMN ---- */
-div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
-    position: -webkit-sticky;
-    position: sticky;
-    top: 2rem;
-    align-self: start;
-    z-index: 99;
-}
-div[data-testid="stVerticalBlock"] {
-    overflow: visible !important;
-}
-
-/* ---- CHAT INPUT NATIVO ---- */
-.stChatInput {
-    border-top: 1px solid #C8D5E3 !important;
-    padding-top: 6px !important;
-    margin-top: 0 !important;
-}
-.stChatInput textarea {
-    border-radius: 8px !important;
-    border: 1.5px solid #C8D5E3 !important;
-    font-family: 'Source Sans 3', sans-serif !important;
-    font-size: 0.88rem !important;
-}
-
-/* ---- SUGGERIMENTI COMPATTI ---- */
-div[data-testid="column"] .stButton > button[kind="secondary"] {
-    background: #F0F4F8 !important;
-    color: #003087 !important;
-    border: 1px solid #C8D5E3 !important;
-    border-radius: 20px !important;
-    font-size: 0.78rem !important;
-    padding: 5px 8px !important;
+/* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
+label[data-testid="stWidgetLabel"] p,
+label[data-testid="stWidgetLabel"] div,
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] div,
+label p {
+    color: var(--input-text) !important;
     font-weight: 600 !important;
-    white-space: nowrap;
+}
+
+/* La colonna chat segue lo scroll della pagina */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-of-type {
+    position: static;
+    max-height: none;
+    overflow: visible;
 }
 </style>
 """
@@ -207,7 +165,7 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
         SELECT COUNT(*) AS n
         FROM quiz q
         JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
-        WHERE cu.docente_id = ?""" + filtri
+        WHERE cu.docente_id = ? AND q.approvato = 1""" + filtri
     )
     tentativi = one(
         """
@@ -215,7 +173,7 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
         FROM tentativi_quiz t
         JOIN quiz q ON q.id = t.quiz_id
         JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
-        WHERE cu.docente_id = ?""" + filtri
+        WHERE cu.docente_id = ? AND q.approvato = 1""" + filtri
     )
     corsi = one("SELECT COUNT(*) AS n FROM corsi_universitari cu WHERE cu.docente_id = ?" + filtri)
 
@@ -259,203 +217,41 @@ def _render_topbar(utente: dict) -> bool:
 
 
 def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
-    import json as _json
-
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Analytics</div>', unsafe_allow_html=True)
-
-    if not corsi:
-        st.info("Carica almeno un corso per vedere le analytics.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
-
     scope_options = ["Generale"] + [f"Corso: {c['nome']} (ID {c['id']})" for c in corsi]
     scelta = st.selectbox("Ambito analytics", scope_options, key="analytics_scope")
     corso_sel_id = None
     if scelta.startswith("Corso:"):
         label_to_id = {f"Corso: {c['nome']} (ID {c['id']})": c["id"] for c in corsi}
         corso_sel_id = label_to_id.get(scelta)
-
-    filtro = " AND cu.id = ?" if corso_sel_id else ""
-    p = [docente_id] + ([corso_sel_id] if corso_sel_id else [])
-
     dati = _metrics(docente_id, corso_sel_id)
 
-    # --- Calcola metriche aggiuntive ---
-    riga_media = db.esegui(
-        "SELECT AVG(t.punteggio) AS media, "
-        "COUNT(CASE WHEN t.punteggio >= 60 THEN 1 END) * 100.0 / MAX(COUNT(*), 1) AS tasso "
-        "FROM tentativi_quiz t "
-        "JOIN quiz q ON q.id = t.quiz_id "
-        "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-        "WHERE cu.docente_id = ?" + filtro, p
-    )
-    media_globale = round(riga_media[0]["media"] or 0, 1) if riga_media else 0
-    tasso_sup = round(riga_media[0]["tasso"] or 0, 1) if riga_media else 0
-
-    colore_media = "#1A7F4B" if media_globale >= 70 else ("#C5A028" if media_globale >= 50 else "#C8102E")
-    colore_tasso = "#1A7F4B" if tasso_sup >= 70 else ("#C5A028" if tasso_sup >= 50 else "#C8102E")
-
-    # --- KPI cards ---
     col_a, col_b, col_c, col_d = st.columns(4)
-    for col, label, val, color in [
-        (col_a, "Studenti unici", dati["studenti"], "#001A4D"),
-        (col_b, "Punteggio medio", f"{media_globale}/100", colore_media),
-        (col_c, "Tasso superamento", f"{tasso_sup}%", colore_tasso),
-        (col_d, "Tentativi quiz", dati["tentativi"], "#001A4D"),
+    for col, label, val in [
+        (col_a, "Studenti unici", dati["studenti"]),
+        (col_b, "Quiz pubblicati", dati["quiz"]),
+        (col_c, "Tentativi quiz", dati["tentativi"]),
+        (col_d, "Corsi gestiti", dati["corsi"]),
     ]:
         with col:
             st.markdown(
-                f"""<div class='metric-box'>
+                f"""
+                <div class='metric-box'>
                     <div class='metric-label'>{label}</div>
-                    <div class='metric-value' style='color:{color}'>{val}</div>
-                </div>""",
+                    <div class='metric-value'>{val}</div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
 
-    if not dati["tentativi"]:
-        st.info("Nessuna risposta ai quiz registrata ancora.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        return
-
-    st.markdown("---")
-
-    # --- Riga 1: Punteggio medio per corso + Distribuzione punteggi ---
-    col1, col2 = st.columns([3, 2])
-
-    with col1:
-        righe_media_corso = db.esegui(
-            "SELECT cu.nome AS corso, ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n "
-            "FROM tentativi_quiz t "
-            "JOIN quiz q ON q.id = t.quiz_id "
-            "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-            "WHERE cu.docente_id = ?" + filtro +
-            " GROUP BY cu.id, cu.nome ORDER BY media DESC", p
-        )
-        if righe_media_corso:
-            serie_mc = [{"Corso": r["corso"], "Punteggio medio": r["media"], "Tentativi": r["n"]}
-                        for r in righe_media_corso]
-            fig_mc = px.bar(
-                serie_mc, x="Corso", y="Punteggio medio",
-                title="Punteggio medio per corso",
-                color="Punteggio medio",
-                color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
-                range_color=[0, 100],
-                text="Punteggio medio",
-            )
-            fig_mc.update_traces(texttemplate="%{text:.0f}", textposition="outside")
-            fig_mc.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
-                                 yaxis=dict(range=[0, 110]), showlegend=False)
-            st.plotly_chart(fig_mc, use_container_width=True)
-
-    with col2:
-        righe_dist = db.esegui(
-            "SELECT t.punteggio FROM tentativi_quiz t "
-            "JOIN quiz q ON q.id = t.quiz_id "
-            "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-            "WHERE cu.docente_id = ?" + filtro, p
-        )
-        if righe_dist:
-            punteggi = [r["punteggio"] for r in righe_dist if r["punteggio"] is not None]
-            fig_dist = px.histogram(
-                punteggi, nbins=10, range_x=[0, 100],
-                title="Distribuzione punteggi",
-                labels={"value": "Punteggio", "count": "Tentativi"},
-                color_discrete_sequence=["#003087"],
-            )
-            fig_dist.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
-                                   showlegend=False, bargap=0.05)
-            st.plotly_chart(fig_dist, use_container_width=True)
-
-    # --- Riga 2: Argomenti difficili + Domande più sbagliate ---
-    col3, col4 = st.columns(2)
-
-    with col3:
-        righe_gap = db.esegui(
-            "SELECT mc.argomenti_chiave "
-            "FROM risposte_domande rd "
-            "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
-            "JOIN materiali_chunks mc ON dq.chunk_id = mc.id "
-            "JOIN quiz q ON dq.quiz_id = q.id "
-            "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
-            "WHERE cu.docente_id = ? AND rd.corretta = 0 AND mc.argomenti_chiave IS NOT NULL"
-            + filtro, p
-        )
-        conteggio: dict[str, int] = {}
-        for r in righe_gap:
-            try:
-                for a in _json.loads(r["argomenti_chiave"]):
-                    conteggio[a] = conteggio.get(a, 0) + 1
-            except Exception:
-                pass
-        if conteggio:
-            serie_gap = sorted(
-                [{"Argomento": k, "Errori": v} for k, v in conteggio.items()],
-                key=lambda x: x["Errori"], reverse=True,
-            )[:12]
-            fig_gap = px.bar(
-                serie_gap, x="Errori", y="Argomento", orientation="h",
-                title="Argomenti con più errori",
-                color="Errori", color_continuous_scale="Reds",
-            )
-            fig_gap.update_layout(height=400, margin=dict(t=50, b=20, l=10, r=10), showlegend=False)
-            st.plotly_chart(fig_gap, use_container_width=True)
-        else:
-            st.info("Nessun dato sugli argomenti (i quiz potrebbero non avere chunk collegati).")
-
-    with col4:
-        righe_dom = db.esegui(
-            "SELECT dq.testo, "
-            "COUNT(*) AS tot, "
-            "SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END) AS errate, "
-            "ROUND(SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END)*100.0/COUNT(*),0) AS pct_errore "
-            "FROM risposte_domande rd "
-            "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
-            "JOIN quiz q ON dq.quiz_id = q.id "
-            "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
-            "WHERE cu.docente_id = ?" + filtro +
-            " GROUP BY dq.id HAVING errate > 0 ORDER BY pct_errore DESC LIMIT 10", p
-        )
-        if righe_dom:
-            st.markdown("**Domande più difficili (% errori)**")
-            for r in righe_dom:
-                testo = (r["testo"] or "")[:80] + ("…" if len(r["testo"] or "") > 80 else "")
-                pct = int(r["pct_errore"] or 0)
-                color = "#C8102E" if pct >= 70 else ("#C5A028" if pct >= 40 else "#1A7F4B")
-                st.markdown(
-                    f'<div style="border-left:3px solid {color};padding:6px 10px;margin-bottom:6px;'
-                    f'background:#fafafa;border-radius:4px;font-size:0.82rem;">'
-                    f'<span style="color:{color};font-weight:700">{pct}% errori</span> — {testo}</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("Nessuna domanda con errori registrata.")
-
-    # --- Riga 3: Studenti a rischio ---
-    righe_rischio = db.esegui(
-        "SELECT u.nome || ' ' || u.cognome AS studente, "
-        "ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS tentativi "
-        "FROM tentativi_quiz t "
-        "JOIN quiz q ON q.id = t.quiz_id "
-        "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-        "JOIN users u ON u.id = t.studente_id "
-        "WHERE cu.docente_id = ?" + filtro +
-        " GROUP BY t.studente_id HAVING media < 60 ORDER BY media ASC LIMIT 10", p
-    )
-    if righe_rischio:
-        st.markdown("---")
-        st.markdown("**⚠️ Studenti a rischio** *(punteggio medio < 60)*")
-        for r in righe_rischio:
-            media_s = r["media"] or 0
-            colore_s = "#C8102E" if media_s < 40 else "#C5A028"
-            st.markdown(
-                f'<div style="border-left:3px solid {colore_s};padding:6px 10px;margin-bottom:6px;'
-                f'background:#fafafa;border-radius:4px;font-size:0.85rem;">'
-                f'<b>{r["studente"]}</b> — media <span style="color:{colore_s};font-weight:700">'
-                f'{media_s}/100</span> su {r["tentativi"]} tentativo/i</div>',
-                unsafe_allow_html=True,
-            )
-
+    if corsi:
+        serie = [{"Corso": c["nome"], "Quiz approvati": _metrics(docente_id, c["id"])['quiz']} for c in corsi]
+        fig = px.bar(serie, x="Corso", y="Quiz approvati", title="Quiz approvati per corso")
+        fig.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Carica almeno un corso per vedere le analytics.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
@@ -994,17 +790,8 @@ def _render_contenuti_ai(corso: dict):
             st.session_state[key] = schema
             st.rerun()
 
-    pubblicato = corso.get("attivo")
-    label_salva = "💾 Salva e pubblica contenuti" if pubblicato else "💾 Salva contenuti (bozza)"
-    if st.button(label_salva, type="primary", key=f"save_schema_{corso['id']}"):
-        ok, msg = _salva_contenuti_corso_db(corso["id"], docente_id, schema)
-        if ok:
-            if pubblicato:
-                st.success(f"{msg} Gli studenti possono ora vedere le lezioni.")
-            else:
-                st.success(f"{msg} Pubblica il corso per renderlo visibile agli studenti.")
-        else:
-            st.error(msg)
+    if st.button("Salva contenuti (bozza)", key=f"save_schema_{corso['id']}"):
+        st.success("Contenuti salvati in bozza (sessione). Persistenza DB da implementare.")
 
 
 def _render_dettaglio_corso(corso: dict, docente_id: int):
@@ -1155,8 +942,6 @@ def _render_corsi(docente_id: int):
 
 def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str | None):
     chat_con_orchestratore, aggiorna_contesto, _ = _import_orchestratore()
-    
-    # Header
     st.markdown(
         """
         <div class="chat-header">
@@ -1169,42 +954,24 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         """,
         unsafe_allow_html=True,
     )
-
     if "chat_history_doc" not in st.session_state:
         st.session_state["chat_history_doc"] = [
             {"role": "assistant", "content": f"Ciao {utente.get('nome','')}! Sono Lea. Posso aiutarti a creare materiali, quiz e monitorare i corsi."}
         ]
+    chat_html = '<div class="chat-container" id="chat-box">'
+    for msg in st.session_state["chat_history_doc"]:
+        if msg["role"] == "user":
+            testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            chat_html += f'<div class="msg-user">{testo_safe}</div>'
+        else:
+            import re as _re
+            contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            contenuto = _re.sub(r"\*\*(.*?)\*\*", r"<strong>\\1</strong>", contenuto)
+            contenuto = contenuto.replace("\n", "<br>")
+            chat_html += f'<div class="msg-ai">{contenuto}</div>'
+    chat_html += "</div>"
+    st.markdown(chat_html, unsafe_allow_html=True)
 
-    # Funzione helper per l'HTML della chat (allineata a studente.py)
-    def get_chat_html(is_typing=False):
-        html = '<div class="chat-container" id="chat-box">'
-        for msg in st.session_state["chat_history_doc"]:
-            if msg["role"] == "user":
-                testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-                html += f'<div class="msg-user">{testo_safe}</div>'
-            else:
-                import re as _re
-                contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-                contenuto = _re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", contenuto)
-                contenuto = contenuto.replace("\n", "<br>")
-                html += f'<div class="msg-ai">{contenuto}</div>'
-        
-        if is_typing:
-            html += """
-            <div class="typing-bubble">
-                <div class="dot"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-            </div>
-            """
-        html += "</div>"
-        return html
-
-    # Placeholder per la chat
-    chat_placeholder = st.empty()
-    chat_placeholder.markdown(get_chat_html(), unsafe_allow_html=True)
-
-    # Suggerimenti rapidi
     suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz approvato"), ("🧠", "Crea flashcard")]
     messaggio_da_suggerimento = None
     cols = st.columns(len(suggerimenti))
@@ -1214,21 +981,26 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
                 target = corso_nome or "il tuo corso"
                 messaggio_da_suggerimento = f"{testo} per {target}"
 
-    # Input chat nativo
-    user_input = st.chat_input("Chiedi a Lea (docente)...", key="lea_doc_chat_input")
+    with st.form("lea_doc_form", clear_on_submit=True):
+        input_col, send_col = st.columns([5, 1], vertical_alignment="bottom")
+        with input_col:
+            user_input = st.text_input(
+                "Chiedi a Lea (docente)...",
+                key="lea_doc_input_text",
+                placeholder="Chiedi a Lea (docente)...",
+                label_visibility="collapsed",
+            )
+        with send_col:
+            invia = st.form_submit_button("Invia", type="primary", use_container_width=True)
 
-    messaggio_finale = user_input or messaggio_da_suggerimento
+    messaggio_finale = messaggio_da_suggerimento or ((user_input or "").strip() if invia else None)
     if messaggio_finale:
         st.session_state["chat_history_doc"].append({"role": "user", "content": messaggio_finale})
-        
-        # Mostra subito l'animazione di caricamento
-        chat_placeholder.markdown(get_chat_html(is_typing=True), unsafe_allow_html=True)
-
         risposta = "Lea non è configurata (AWS Bedrock non attivo)."
         if chat_con_orchestratore and aggiorna_contesto:
             try:
-                # Imposta sempre il contesto docente, indipendentemente dal corso selezionato
-                aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
+                if corso_id:
+                    aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
                 risposta = chat_con_orchestratore(
                     messaggio_utente=messaggio_finale,
                     corso_contestuale_id=corso_id,
@@ -1236,7 +1008,6 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
                 )
             except Exception as e:
                 risposta = f"Errore: {str(e)[:120]}"
-        
         st.session_state["chat_history_doc"].append({"role": "assistant", "content": risposta})
         st.rerun()
 

@@ -663,7 +663,7 @@ def _get_tutti_piani_studente(studente_id: int) -> list[dict]:
         SELECT pp.id, pp.titolo, pp.created_at, pp.corso_universitario_id,
                cu.nome AS corso_nome
         FROM piani_personalizzati pp
-        LEFT JOIN corsi_universitari cu ON cu.id = pp.corso_universitario_id
+        JOIN corsi_universitari cu ON cu.id = pp.corso_universitario_id
         WHERE pp.studente_id = ?
         ORDER BY pp.created_at DESC
     """, [studente_id])
@@ -1427,16 +1427,6 @@ def _render_chatbot(
             piano_titolo=piano_titolo,
         )
 
-    # ---- Bottone "Torna alla home" sopra la chat ----
-    if view_mode:
-        if st.button("🏠 Torna alla home", key="btn_home_chat", use_container_width=True):
-            st.session_state["_view_mode"] = None
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_corso_nome"] = ""
-            st.session_state["_search_results"] = None
-            st.rerun()
-
     # Header
     st.markdown("""
     <div class="chat-header">
@@ -1502,19 +1492,6 @@ def _render_chatbot(
         )
         messaggio_da_materiale = f"Crea una lezione dal materiale '{mat_scelto['titolo']}'"
 
-    # ---- Materiali liberi selezionati (senza corso) → auto-messaggio ----
-    materiali_liberi = st.session_state.pop("_materiali_liberi_selezionati", None)
-    if materiali_liberi and not messaggio_da_materiale:
-        titoli_str = ", ".join(f"'{m['titolo']}'" for m in materiali_liberi)
-        primo_id = materiali_liberi[0]["id"]
-        if aggiorna_contesto is not None:
-            # clear_corso=True azzera l'eventuale corso precedente nel contesto
-            aggiorna_contesto(
-                clear_corso=True,
-                materiale_selezionato={"id": primo_id, "titolo": titoli_str, "corso_id": None},
-            )
-        messaggio_da_materiale = f"Genera una lezione basata sui seguenti documenti: {titoli_str}"
-
     # ---- Suggerimenti rapidi — compatti, sopra l'input ----
     suggerimenti = [
         ("📚", "Genera un piano"),
@@ -1533,6 +1510,14 @@ def _render_chatbot(
     # ---- Input chat nativo (pulizia automatica dopo invio) ----
     user_input = st.chat_input("Chiedi a Lea...", key="lea_chat_input")
 
+    # ---- Bottoni materiale didattico sotto la chat ----
+    if corso_id:
+        with st.container(horizontal=True):
+            if st.button(":material/upload_file: Carica materiale", key="lea_btn_upload"):
+                _dialog_upload_materiale(corso_id, corso_nome or "")
+            if st.button(":material/folder_open: Visualizza materiale", key="lea_btn_view"):
+                _dialog_view_materiale(corso_id, corso_nome or "")
+
     # Unifica input da campo libero, da suggerimento e da selezione materiale
     messaggio_finale: str | None = user_input or messaggio_da_suggerimento or messaggio_da_materiale
 
@@ -1544,22 +1529,14 @@ def _render_chatbot(
         chat_placeholder.markdown(get_chat_html(is_typing=True), unsafe_allow_html=True)
 
         # Snapshot piani esistenti PRIMA della chiamata all'agente
-        _mat_libero_corso = (materiali_liberi[0].get("corso_universitario_id") if materiali_liberi else None)
-        _corso_id_eff = (mat_scelto["corso_id"] if mat_scelto else None) or _mat_libero_corso or corso_id
-        _studente_id_chat = st.session_state.get("current_user_id")
+        _corso_id_eff = (mat_scelto["corso_id"] if mat_scelto else None) or corso_id
         _piani_prima: set[int] = set()
         if _corso_id_eff:
+            _studente_id_chat = st.session_state.get("current_user_id")
             _piani_prima = {
                 p["id"] for p in db.trova_tutti(
                     "piani_personalizzati",
                     {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
-                )
-            }
-        elif materiali_liberi:
-            _piani_prima = {
-                p["id"] for p in db.esegui(
-                    "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
-                    [_studente_id_chat],
                 )
             }
 
@@ -1597,33 +1574,19 @@ def _render_chatbot(
         )
 
         # Controlla se l'agente ha creato un nuovo piano → auto-naviga in vista piano
-        _studente_id_chat = st.session_state.get("current_user_id")
-        if _corso_id_eff:
+        if corso_id:
+            _studente_id_chat = st.session_state.get("current_user_id")
             _piani_dopo = {
                 p["id"] for p in db.trova_tutti(
                     "piani_personalizzati",
-                    {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
+                    {"studente_id": _studente_id_chat, "corso_universitario_id": corso_id},
                 )
             }
             nuovi = _piani_dopo - _piani_prima
             if nuovi:
                 nuovo_piano_id = max(nuovi)
                 st.session_state["_piano_sel"]  = nuovo_piano_id
-                st.session_state["_corso_sel"]  = _corso_id_eff
-                st.session_state["_view_mode"]  = "piano"
-        elif materiali_liberi:
-            # Piano creato senza corso: cerca i nuovi piani senza corso_universitario_id
-            _tutti_piani_dopo = {
-                p["id"] for p in db.esegui(
-                    "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
-                    [_studente_id_chat],
-                )
-            }
-            nuovi = _tutti_piani_dopo - _piani_prima
-            if nuovi:
-                nuovo_piano_id = max(nuovi)
-                st.session_state["_piano_sel"]  = nuovo_piano_id
-                st.session_state["_corso_sel"]  = None
+                st.session_state["_corso_sel"]  = corso_id
                 st.session_state["_view_mode"]  = "piano"
 
         st.rerun()
@@ -1720,132 +1683,14 @@ def _dialog_cancella_iscrizione(studente_id: int, corso_id: int, corso_nome: str
             st.rerun()
 
 
-def _get_materiali_usati_piano(piano_id: int) -> list[dict]:
-    """Recupera i materiali didattici usati per generare un piano,
-    tramite il reverse-lookup piano_contenuti → chunk_ids_utilizzati → materiali_chunks."""
-    try:
-        righe = db.esegui(
-            """SELECT pc.chunk_ids_utilizzati
-               FROM piano_contenuti pc
-               JOIN piano_paragrafi pp ON pp.id = pc.paragrafo_id
-               JOIN piano_capitoli pca ON pca.id = pp.capitolo_id
-               WHERE pca.piano_id = ?""",
-            [piano_id],
-        )
-    except Exception:
-        return []
-
-    chunk_ids: set[int] = set()
-    for r in righe:
-        try:
-            ids = json.loads(r.get("chunk_ids_utilizzati") or "[]")
-            chunk_ids.update(int(i) for i in ids if i)
-        except Exception:
-            pass
-
-    if not chunk_ids:
-        return []
-
-    placeholders = ",".join("?" * len(chunk_ids))
-    try:
-        mat_rows = db.esegui(
-            f"SELECT DISTINCT materiale_id FROM materiali_chunks WHERE id IN ({placeholders})",
-            list(chunk_ids),
-        )
-    except Exception:
-        return []
-
-    materiale_ids = [r["materiale_id"] for r in mat_rows if r.get("materiale_id")]
-    if not materiale_ids:
-        return []
-
-    ph2 = ",".join("?" * len(materiale_ids))
-    try:
-        return db.esegui(
-            f"SELECT * FROM materiali_didattici WHERE id IN ({ph2}) ORDER BY caricato_il DESC",
-            materiale_ids,
-        )
-    except Exception:
-        return []
-
-
-@st.dialog("Materiale del piano")
-def _dialog_materiale_piano_libero(piano_id: int):
-    st.markdown("**Materiale usato per generare questo piano**")
-    st.caption("Questi sono i documenti da cui Lea ha creato il piano. Clicca 'Studia' per generare una nuova lezione.")
-    materiali = _get_materiali_usati_piano(piano_id)
-
-    if not materiali:
-        st.info("Nessun materiale trovato per questo piano.", icon=":material/folder_open:")
-        return
-
-    for m in materiali:
-        with st.container(border=True):
-            elaborato = bool(m.get("is_processed"))
-            c1, c2 = st.columns([4, 2])
-            with c1:
-                st.markdown(f"**{m['titolo']}**")
-                stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
-                st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
-            with c2:
-                if elaborato:
-                    if st.button("📖 Studia", key=f"studia_mat_piano_{m['id']}", use_container_width=True):
-                        st.session_state["_materiale_da_studiare"] = {
-                            "id": m["id"],
-                            "titolo": m["titolo"],
-                            "corso_id": m.get("corso_universitario_id"),
-                        }
-                        st.rerun()
-                else:
-                    st.caption("⚠️ Non elaborato")
-
-
-@st.dialog("Materiale del corso")
-def _dialog_materiale_corso(corso_id: int, corso_nome: str):
-    st.markdown(f"**Materiale disponibile per {corso_nome}**")
-    st.caption("Clicca su un documento per chiedere a Lea di creare una lezione da quel materiale.")
-    try:
-        materiali = db.trova_tutti("materiali_didattici", {"corso_universitario_id": corso_id})
-    except Exception:
-        materiali = []
-
-    if not materiali:
-        st.info("Nessun materiale caricato per questo corso.", icon=":material/folder_open:")
-        return
-
-    for m in materiali:
-        with st.container(border=True):
-            elaborato = bool(m.get("is_processed"))
-            c1, c2 = st.columns([4, 2])
-            with c1:
-                st.markdown(f"**{m['titolo']}**")
-                stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
-                st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
-            with c2:
-                if elaborato:
-                    if st.button(
-                        "📖 Studia",
-                        key=f"studia_mat_corso_{m['id']}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["_materiale_da_studiare"] = {
-                            "id": m["id"],
-                            "titolo": m["titolo"],
-                            "corso_id": corso_id,
-                        }
-                        st.rerun()
-                else:
-                    st.caption("⚠️ Non ancora elaborato")
-
-
 @st.dialog("Carica materiale didattico")
-def _dialog_upload_materiale_libero():
-    st.markdown("Carica materiale per creare una lezione personalizzata")
-    st.caption("Il file verrà elaborato così Lea potrà generare una lezione dal tuo materiale.")
+def _dialog_upload_materiale(corso_id: int, corso_nome: str):
+    st.markdown(f"Carica materiale per **{corso_nome}**")
+    st.caption("Il file verrà elaborato automaticamente così Lea potrà generare lezioni dal tuo materiale.")
     uploaded = st.file_uploader(
         "Seleziona un file",
         type=["pdf", "docx", "txt", "pptx", "xlsx"],
-        key="upload_file_libero_dialog",
+        key="upload_file_dialog",
     )
     if uploaded:
         titolo = st.text_input("Titolo", value=uploaded.name.rsplit(".", 1)[0])
@@ -1855,7 +1700,7 @@ def _dialog_upload_materiale_libero():
                 with st.spinner("Elaborazione in corso..."):
                     elabora_e_salva_documento(
                         uploaded_file=uploaded,
-                        corso_universitario_id=None,
+                        corso_universitario_id=corso_id,
                         titolo=titolo,
                         tipo=uploaded.name.rsplit(".", 1)[-1].lower() or "dispensa",
                     )
@@ -1866,55 +1711,40 @@ def _dialog_upload_materiale_libero():
 
 
 @st.dialog("Materiale didattico")
-def _dialog_view_materiale_libero(user_id: int):
-    st.markdown("**Materiale disponibile per generare la lezione**")
-    st.caption("Seleziona uno o più documenti e clicca il pulsante per generare la lezione.")
+def _dialog_view_materiale(corso_id: int, corso_nome: str):
+    st.markdown(f"Materiale disponibile per **{corso_nome}**")
+    st.caption("Clicca su un materiale per chiedere a Lea di creare una lezione da quel documento.")
     try:
-        materiali = db.esegui(
-            "SELECT * FROM materiali_didattici WHERE docente_id = ? ORDER BY caricato_il DESC",
-            [user_id],
-        )
+        materiali = db.trova_tutti("materiali_didattici", {"corso_universitario_id": corso_id})
     except Exception:
         materiali = []
 
     if not materiali:
-        st.caption("Nessun materiale caricato.")
+        st.caption("Nessun materiale caricato per questo corso.")
         return
 
     for m in materiali:
         with st.container(border=True):
-            col1, col2 = st.columns([5, 1])
-            with col1:
-                elaborato = bool(m.get("is_processed"))
-                st.checkbox(
-                    f"**{m['titolo']}**",
-                    key=f"mat_libero_check_{m['id']}",
-                    disabled=not elaborato,
-                )
-                stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
-                st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
-            with col2:
-                if st.button("🗑", key=f"del_mat_libero_{m['id']}", help="Elimina"):
-                    db.esegui("DELETE FROM materiali_chunks WHERE materiale_id = ?", [m["id"]])
-                    db.esegui("DELETE FROM materiali_didattici WHERE id = ?", [m["id"]])
+            c1, c2, c3 = st.columns([4, 1, 2])
+            c1.markdown(f"**{m['titolo']}**")
+            c2.caption(m.get("tipo", "").upper())
+            elaborato = bool(m.get("is_processed"))
+            c3.caption("✅ Elaborato" if elaborato else "⏳ Non elaborato")
+            st.caption(f"Caricato il: {(m.get('caricato_il') or '')[:10] or '—'}")
+            if elaborato:
+                if st.button(
+                    f"📖 Studia '{m['titolo']}'",
+                    key=f"studia_mat_{m['id']}",
+                    use_container_width=True,
+                ):
+                    st.session_state["_materiale_da_studiare"] = {
+                        "id": m["id"],
+                        "titolo": m["titolo"],
+                        "corso_id": corso_id,
+                    }
                     st.rerun()
-
-    selezionati = [
-        m for m in materiali
-        if st.session_state.get(f"mat_libero_check_{m['id']}", False)
-    ]
-
-    if st.button(
-        "📖 Genera lezione sui documenti selezionati",
-        type="primary",
-        use_container_width=True,
-        disabled=not selezionati,
-    ):
-        # Salva i materiali selezionati e pulisce i checkbox
-        st.session_state["_materiali_liberi_selezionati"] = selezionati
-        for m in materiali:
-            st.session_state.pop(f"mat_libero_check_{m['id']}", None)
-        st.rerun()
+            else:
+                st.caption("⚠️ Elabora il materiale prima con 'Carica materiale' per usarlo con Lea.")
 
 
 # ---------------------------------------------------------------------------
@@ -1963,16 +1793,6 @@ def mostra_homepage_studente():
             st.session_state["_piano_sel"] = None
             st.session_state["_search_results"] = None
             st.rerun()
-
-        # Bottoni materiale personale (sempre visibili, sempre dialog liberi)
-        _sidebar_user_id = utente.get("user_id", utente.get("id", 0))
-        with st.container(horizontal=True):
-            if st.button(":material/upload_file: Carica il tuo materiale", key="sb_btn_upload", use_container_width=True):
-                _dialog_upload_materiale_libero()
-            if st.button(":material/folder_open: Visualizza il tuo materiale", key="sb_btn_view", use_container_width=True):
-                if "_materiali_liberi_selezionati" not in st.session_state:
-                    _dialog_view_materiale_libero(_sidebar_user_id)
-
         # Sezione 1: Corsi universitari (sola lettura)
         _render_sidebar_corsi(corsi)
         # Sezione 2: Piani personalizzati dello studente
@@ -2021,9 +1841,6 @@ def mostra_homepage_studente():
                 if st.button("🚪 Cancella iscrizione", key="btn_disiscriviti", help="Cancella la tua iscrizione a questo corso"):
                     _dialog_cancella_iscrizione(studente_id, corso_sel_id, corso_sel_nome)
 
-            if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=False):
-                _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-
             # — Contenuto ufficiale del docente (se pubblicato) —
             piano_docente = _get_piano_docente_corso(corso_sel_id)
             if piano_docente:
@@ -2042,33 +1859,27 @@ def mostra_homepage_studente():
             piano_info = db.trova_tutti("piani_personalizzati", {"id": piano_sel_id})
             titolo_piano = piano_info[0]["titolo"] if piano_info else "Piano di studio"
 
-            sub_label = f"{corso_sel_nome} · Piano personalizzato" if corso_sel_nome else "Piano personalizzato"
             st.markdown(f"""
             <div class="section-header">{titolo_piano}</div>
-            <div class="section-sub">{sub_label}</div>
+            <div class="section-sub">{corso_sel_nome} · Piano personalizzato</div>
             """, unsafe_allow_html=True)
 
-            col_back, col_del_piano, col_mat_piano, _ = st.columns([1, 1, 1.5, 2.5])
+            col_back, col_del_piano, _ = st.columns([1, 1, 4])
             with col_back:
-                back_label = "← Corso" if corso_sel_id else "← Home"
-                if st.button(back_label):
-                    if corso_sel_id:
-                        st.session_state["_view_mode"] = "corso"
-                    else:
-                        st.session_state["_view_mode"] = None
+                if st.button("← Corso"):
+                    st.session_state["_view_mode"] = "corso"
                     st.session_state["_piano_sel"] = None
                     st.rerun()
             with col_del_piano:
                 if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
                     _dialog_elimina_piano(piano_sel_id, titolo_piano)
-            with col_mat_piano:
-                if corso_sel_id:
-                    if st.button("📚 Materiale del corso", key="btn_mat_piano"):
-                        _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-                else:
-                    if st.button("📚 Materiale del piano", key="btn_mat_piano_libero"):
-                        _dialog_materiale_piano_libero(piano_sel_id)
 
+            # Materiale didattico (caricabile solo nel contesto del piano)
+            with st.container(horizontal=True):
+                if st.button(":material/upload_file: Carica materiale", key="btn_upload_mat"):
+                    _dialog_upload_materiale(corso_sel_id, corso_sel_nome)
+                if st.button(":material/folder_open: Visualizza materiale", key="btn_view_mat"):
+                    _dialog_view_materiale(corso_sel_id, corso_sel_nome)
 
             _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
 

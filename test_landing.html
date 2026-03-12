@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Landing — LearnAI</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background: #EEF2F8;
+        }
+        h1 { color: #003087; margin-bottom: 8px; }
+        p  { color: #5A6A7E; margin-bottom: 32px; }
+        .btn-group { display: flex; gap: 16px; }
+        a {
+            display: inline-block;
+            padding: 12px 28px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+        a:hover { opacity: 0.85; }
+        .btn-login  { background: #003087; color: #fff; }
+        .btn-ospite { background: #fff; color: #003087; border: 2px solid #003087; }
+        .note {
+            margin-top: 40px;
+            font-size: 0.8rem;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎓 LearnAI – Test Landing</h1>
+    <p>Pagina temporanea per testare il routing via query parameters</p>
+
+<div class="btn-group">
+    <a class="btn-login"  href="http://localhost:8501/?azione=login">Accedi</a>
+    <a class="btn-ospite" href="http://localhost:8501/?azione=ospite">Continua come Ospite</a>
+    </div>
+
+    <div class="note">
+        → <b>Accedi</b> invia <code>?azione=login</code> (pulisce l'URL e mostra il form)<br>
+        → <b>Ospite</b> invia <code>?azione=ospite</code> (entra direttamente nella home ospite)
+    </div>
+</body>
+</html>

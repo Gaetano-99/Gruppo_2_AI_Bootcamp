@@ -58,71 +58,29 @@ _CSS = r"""
 .chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
 .chat-title { font-weight:700; font-size:0.95rem; }
 .chat-sub { font-size:0.75rem; opacity:0.75; }
-.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; height:420px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
+.chat-container { background:#fff; border:1px solid #C8D5E3; border-top:none; border-radius:0 0 12px 12px; min-height:420px; overflow:visible; padding:16px; display:flex; flex-direction:column; gap:10px; }
 .msg-user { background:#003087; color:#fff; border-radius:14px 14px 4px 14px; padding:10px 14px; font-size:0.87rem; max-width:82%; align-self:flex-end; line-height:1.5; }
 .msg-ai { background:#F0F4F8; color:#1A2535; border-radius:4px 14px 14px 14px; padding:10px 14px; font-size:0.87rem; max-width:88%; align-self:flex-start; line-height:1.55; border:1px solid #E0E8F2; }
+.stTextInput input, .stTextArea textarea, .stSelectbox select, .stNumberInput input, .stChatInput textarea { background: var(--input-bg) !important; color: var(--input-text) !important; }
+.stTextInput input::placeholder, .stTextArea textarea::placeholder, .stChatInput textarea::placeholder { color: var(--placeholder) !important; }
+div[data-baseweb="select"] { background: var(--input-bg) !important; color: var(--input-text) !important; }
+div[data-baseweb="select"] input { color: var(--input-text) !important; }
 
-/* ---- TYPING INDICATOR ---- */
-.typing-bubble {
-    background: #F0F4F8;
-    border: 1px solid #E0E8F2;
-    border-radius: 4px 14px 14px 14px;
-    padding: 12px 16px;
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    align-self: flex-start;
-    margin-bottom: 10px;
-    max-width: 80px;
-}
-.dot {
-    width: 6px; height: 6px;
-    background: #5A6A7E;
-    border-radius: 50%;
-    animation: typing 1.4s infinite ease-in-out;
-}
-.dot:nth-child(2) { animation-delay: 0.2s; }
-.dot:nth-child(3) { animation-delay: 0.4s; }
-@keyframes typing {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-4px); opacity: 1; }
-}
-
-/* ---- STICKY CHAT COLUMN ---- */
-div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child {
-    position: -webkit-sticky;
-    position: sticky;
-    top: 2rem;
-    align-self: start;
-    z-index: 99;
-}
-div[data-testid="stVerticalBlock"] {
-    overflow: visible !important;
-}
-
-/* ---- CHAT INPUT NATIVO ---- */
-.stChatInput {
-    border-top: 1px solid #C8D5E3 !important;
-    padding-top: 6px !important;
-    margin-top: 0 !important;
-}
-.stChatInput textarea {
-    border-radius: 8px !important;
-    border: 1.5px solid #C8D5E3 !important;
-    font-family: 'Source Sans 3', sans-serif !important;
-    font-size: 0.88rem !important;
-}
-
-/* ---- SUGGERIMENTI COMPATTI ---- */
-div[data-testid="column"] .stButton > button[kind="secondary"] {
-    background: #F0F4F8 !important;
-    color: #003087 !important;
-    border: 1px solid #C8D5E3 !important;
-    border-radius: 20px !important;
-    font-size: 0.78rem !important;
-    padding: 5px 8px !important;
+/* FIX GLOBALE PER TUTTE LE ETICHETTE STREAMLIT */
+label[data-testid="stWidgetLabel"] p,
+label[data-testid="stWidgetLabel"] div,
+div[data-testid="stWidgetLabel"] p,
+div[data-testid="stWidgetLabel"] div,
+label p {
+    color: var(--input-text) !important;
     font-weight: 600 !important;
-    white-space: nowrap;
+}
+
+/* La colonna chat segue lo scroll della pagina */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-of-type {
+    position: static;
+    max-height: none;
+    overflow: visible;
 }
 </style>
 """
@@ -1155,8 +1113,6 @@ def _render_corsi(docente_id: int):
 
 def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str | None):
     chat_con_orchestratore, aggiorna_contesto, _ = _import_orchestratore()
-    
-    # Header
     st.markdown(
         """
         <div class="chat-header">
@@ -1169,42 +1125,24 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         """,
         unsafe_allow_html=True,
     )
-
     if "chat_history_doc" not in st.session_state:
         st.session_state["chat_history_doc"] = [
             {"role": "assistant", "content": f"Ciao {utente.get('nome','')}! Sono Lea. Posso aiutarti a creare materiali, quiz e monitorare i corsi."}
         ]
+    chat_html = '<div class="chat-container" id="chat-box">'
+    for msg in st.session_state["chat_history_doc"]:
+        if msg["role"] == "user":
+            testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            chat_html += f'<div class="msg-user">{testo_safe}</div>'
+        else:
+            import re as _re
+            contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
+            contenuto = _re.sub(r"\*\*(.*?)\*\*", r"<strong>\\1</strong>", contenuto)
+            contenuto = contenuto.replace("\n", "<br>")
+            chat_html += f'<div class="msg-ai">{contenuto}</div>'
+    chat_html += "</div>"
+    st.markdown(chat_html, unsafe_allow_html=True)
 
-    # Funzione helper per l'HTML della chat (allineata a studente.py)
-    def get_chat_html(is_typing=False):
-        html = '<div class="chat-container" id="chat-box">'
-        for msg in st.session_state["chat_history_doc"]:
-            if msg["role"] == "user":
-                testo_safe = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-                html += f'<div class="msg-user">{testo_safe}</div>'
-            else:
-                import re as _re
-                contenuto = msg["content"].replace("<", "&lt;").replace(">", "&gt;")
-                contenuto = _re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", contenuto)
-                contenuto = contenuto.replace("\n", "<br>")
-                html += f'<div class="msg-ai">{contenuto}</div>'
-        
-        if is_typing:
-            html += """
-            <div class="typing-bubble">
-                <div class="dot"></div>
-                <div class="dot"></div>
-                <div class="dot"></div>
-            </div>
-            """
-        html += "</div>"
-        return html
-
-    # Placeholder per la chat
-    chat_placeholder = st.empty()
-    chat_placeholder.markdown(get_chat_html(), unsafe_allow_html=True)
-
-    # Suggerimenti rapidi
     suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz approvato"), ("🧠", "Crea flashcard")]
     messaggio_da_suggerimento = None
     cols = st.columns(len(suggerimenti))
@@ -1214,21 +1152,26 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
                 target = corso_nome or "il tuo corso"
                 messaggio_da_suggerimento = f"{testo} per {target}"
 
-    # Input chat nativo
-    user_input = st.chat_input("Chiedi a Lea (docente)...", key="lea_doc_chat_input")
+    with st.form("lea_doc_form", clear_on_submit=True):
+        input_col, send_col = st.columns([5, 1], vertical_alignment="bottom")
+        with input_col:
+            user_input = st.text_input(
+                "Chiedi a Lea (docente)...",
+                key="lea_doc_input_text",
+                placeholder="Chiedi a Lea (docente)...",
+                label_visibility="collapsed",
+            )
+        with send_col:
+            invia = st.form_submit_button("Invia", type="primary", use_container_width=True)
 
-    messaggio_finale = user_input or messaggio_da_suggerimento
+    messaggio_finale = messaggio_da_suggerimento or ((user_input or "").strip() if invia else None)
     if messaggio_finale:
         st.session_state["chat_history_doc"].append({"role": "user", "content": messaggio_finale})
-        
-        # Mostra subito l'animazione di caricamento
-        chat_placeholder.markdown(get_chat_html(is_typing=True), unsafe_allow_html=True)
-
         risposta = "Lea non è configurata (AWS Bedrock non attivo)."
         if chat_con_orchestratore and aggiorna_contesto:
             try:
-                # Imposta sempre il contesto docente, indipendentemente dal corso selezionato
-                aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
+                if corso_id:
+                    aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
                 risposta = chat_con_orchestratore(
                     messaggio_utente=messaggio_finale,
                     corso_contestuale_id=corso_id,
@@ -1236,7 +1179,6 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
                 )
             except Exception as e:
                 risposta = f"Errore: {str(e)[:120]}"
-        
         st.session_state["chat_history_doc"].append({"role": "assistant", "content": risposta})
         st.rerun()
 
