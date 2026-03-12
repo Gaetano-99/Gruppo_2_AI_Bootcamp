@@ -49,10 +49,11 @@ from src.agents.gap_analysis import analizza_gap
 # ---------------------------------------------------------------------------
 # Chiavi session_state
 # ---------------------------------------------------------------------------
-_SK_ORCHESTRATORE = "_orch_agente_compilato"
-_SK_AGENTE_TEORICO = "_orch_agente_teorico"
-_SK_THREAD_ID     = "_orch_thread_id"
-_SK_CONTESTO      = "_orch_contesto_sessione"
+_SK_ORCHESTRATORE         = "_orch_agente_compilato"       # studente
+_SK_ORCHESTRATORE_DOCENTE = "_orch_agente_docente"         # docente
+_SK_AGENTE_TEORICO        = "_orch_agente_teorico"
+_SK_THREAD_ID             = "_orch_thread_id"
+_SK_CONTESTO              = "_orch_contesto_sessione"
 
 # ---------------------------------------------------------------------------
 # Variabile globale thread-safe per studente_id
@@ -88,42 +89,48 @@ def _aggiorna_studente_corrente() -> None:
 
 
 # ---------------------------------------------------------------------------
-# System prompt — conversazione + routing in un unico prompt coerente
+# System prompt — prompt separati per ruolo (studente / docente)
 # ---------------------------------------------------------------------------
-_SYSTEM_PROMPT = """Sei Lea, l'assistente intelligente della piattaforma LearnAI. Supporti sia studenti che docenti.
+_SYSTEM_PROMPT_DOCENTE = """Sei Lea, l'assistente virtuale dei docenti della piattaforma LearnAI.
+
+IL TUO CARATTERE:
+Parli in italiano con un tono professionale, diretto e propositivo.
+Supporti i docenti nella gestione didattica e nel monitoraggio della classe.
+Dopo ogni analisi, proponi sempre azioni concrete di intervento.
+
+COSA SAI FARE (tool a tua disposizione):
+1. tool_leggi_contesto       → sapere quale corso è attualmente visualizzato.
+2. tool_analizza_classe      → analizzare performance studenti, argomenti più difficili, rischio abbandono.
+3. tool_esplora_catalogo     → esplorare i materiali didattici caricati nel corso.
+4. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
+
+REGOLE DI COMPORTAMENTO:
+- Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
+- Se tool_leggi_contesto riporta "ANALYTICS del corso: ...", il docente sta guardando le statistiche
+  di quel corso. Qualsiasi domanda vaga (andamento, risultati, studenti, quiz, difficoltà) va
+  interpretata come riferita a quel corso → chiama tool_analizza_classe con quel corso_id IMMEDIATAMENTE.
+- Non chiedere mai "di quale corso parli?" se il contesto già indica un corso nelle analytics.
+- Quando il docente chiede "andamento della classe", "studenti in difficoltà", "argomenti ostici",
+  "chi è a rischio", "nessuno ha fatto quiz", "risultati" o simili → usa SEMPRE tool_analizza_classe.
+- I contenuti generati (lezioni, quiz) sono associati al corso ufficiale.
+- Non parlare mai di "piano personalizzato": i docenti gestiscono corsi, non piani.
+- Dopo ogni analisi, suggerisci azioni concrete: es. rivedere un argomento, creare esercizi mirati.
+- Se il docente non ha ancora studenti o quiz, comunicalo chiaramente e suggerisci come procedere.
+- Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
+- Se la richiesta è davvero ambigua E il contesto non indica nessun corso, fai UNA sola domanda mirata.
+- Non mostrare mai ID numerici interni all'utente.
+- Gestisci gli errori con empatia e suggerisci il passo successivo.
+"""
+
+_SYSTEM_PROMPT = """Sei Lea, il tutor didattico intelligente della piattaforma LearnAI.
 
 IL TUO CARATTERE:
 Parli in italiano con un tono caldo, chiaro e motivante. Non sei un bot che esegue
-comandi: capisci il contesto, anticipi i bisogni e rendi l'esperienza piacevole.
-Dopo ogni azione completata, proponi proattivamente il passo successivo logico.
+comandi: capisci il contesto, anticipi i bisogni e rendi l'esperienza di studio
+piacevole. Dopo ogni azione completata, proponi proattivamente il passo successivo logico.
 
-PRIMO PASSO OBBLIGATORIO:
-Usa SEMPRE tool_leggi_contesto come prima azione per capire:
-- Chi sta parlando (studente o docente)
-- Quale corso è visualizzato
-Adatta il comportamento in base al ruolo rilevato.
-
---- MODALITÀ DOCENTE ---
-Sei attivo in modalità DOCENTE quando tool_leggi_contesto restituisce "L'utente è un DOCENTE".
-
-COSA SAI FARE PER IL DOCENTE:
-1. tool_leggi_contesto        → capire il corso selezionato e il ruolo corrente.
-2. tool_analizza_classe       → analizzare performance studenti, argomenti difficili, rischio abbandono.
-3. tool_esplora_catalogo      → esplorare i materiali caricati nel corso.
-4. tool_genera_corso          → generare una lezione teorica su un argomento del corso.
-5. tool_genera_pratica        → creare quiz o flashcard per gli studenti.
-
-REGOLE DOCENTE:
-- Quando il docente chiede "analizza le risposte", "andamento della classe", "studenti in difficoltà"
-  o simili → usa SEMPRE tool_analizza_classe (non rispondere a memoria).
-- Puoi generare lezioni e quiz che vengono salvati come contenuto ufficiale del corso.
-- Non dire al docente di usare "il piano personalizzato": i docenti gestiscono corsi, non piani.
-- Dopo ogni analisi, suggerisci azioni concrete: es. rivedere l'argomento, creare esercizi mirati.
-
---- MODALITÀ STUDENTE ---
-Sei attivo in modalità STUDENTE quando tool_leggi_contesto non indica ruolo docente.
-
-COSA SAI FARE PER LO STUDENTE:
+COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
 2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili (con ID materiale).
 3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
@@ -134,7 +141,8 @@ COSA SAI FARE PER LO STUDENTE:
 6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
                                   LEGGERE e RISCRIVERE il testo di una lezione.
 
-REGOLE STUDENTE:
+REGOLE DI COMPORTAMENTO:
+- Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
 - I CORSI UNIVERSITARI sono in sola lettura. Non puoi modificarli.
 - I PIANI PERSONALIZZATI sono spazi privati dello studente. Quando generi contenuti,
   stai sempre creando un PIANO PERSONALIZZATO — mai modificando il corso ufficiale.
@@ -152,8 +160,6 @@ REGOLE STUDENTE:
   5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo).
   NON chiedere mai il numero del piano all'utente: è già nel contesto.
   NON dire mai che non puoi modificare il testo: hai sempre questo percorso disponibile.
-
---- REGOLE COMUNI ---
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
 - Se la richiesta è ambigua, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
@@ -189,6 +195,16 @@ def tool_leggi_contesto() -> str:
     if contesto.get("corso_id"):
         nome = contesto.get("corso_nome", "nome non disponibile")
         parti.append(f"Corso: ID {contesto['corso_id']} — {nome}")
+
+    # Analytics filter: il docente sta guardando le statistiche di un corso specifico
+    analytics_id = contesto.get("analytics_corso_id")
+    analytics_nome = contesto.get("analytics_corso_nome")
+    if analytics_id:
+        parti.append(
+            f"Il docente sta visualizzando le ANALYTICS del corso: ID {analytics_id} — {analytics_nome or 'nome non disponibile'}. "
+            f"Se chiede informazioni sull'andamento, i risultati, gli studenti o simili, "
+            f"usa tool_analizza_classe con corso_id={analytics_id} SENZA chiedere conferme."
+        )
 
     if contesto.get("piano_id"):
         piano_id = contesto["piano_id"]
@@ -707,13 +723,30 @@ def _get_agente_teorico():
 
 
 def _get_orchestratore():
-    """Orchestratore: singleton in session_state con memoria LangGraph intatta."""
+    """Orchestratore: singleton per ruolo in session_state con memoria LangGraph intatta.
 
-    #if _USER_ROLE = "docente":
-    #     system_pompt = DOCENTE_SYSTEM_PROMPT
-    # else:
-    #     system_pompt = _SYSTEM_PROMPT
+    Crea e mantiene due istanze separate — una per studente, una per docente —
+    ognuna con prompt e tool set specifici per il ruolo. Il ruolo viene letto da
+    session_state.user_role (valorizzato in app.py al login).
+    """
+    ruolo = (st.session_state.get("user_role") or "").lower()
 
+    if ruolo == "docente":
+        if _SK_ORCHESTRATORE_DOCENTE not in st.session_state:
+            st.session_state[_SK_ORCHESTRATORE_DOCENTE] = crea_agente(
+                tools=[
+                    tool_leggi_contesto,
+                    tool_esplora_catalogo,
+                    tool_genera_corso,
+                    tool_genera_pratica,
+                    tool_analizza_classe,
+                ],
+                system_prompt=_SYSTEM_PROMPT_DOCENTE,
+                memoria=True,
+            )
+        return st.session_state[_SK_ORCHESTRATORE_DOCENTE]
+
+    # Default: studente
     if _SK_ORCHESTRATORE not in st.session_state:
         st.session_state[_SK_ORCHESTRATORE] = crea_agente(
             tools=[
@@ -723,7 +756,6 @@ def _get_orchestratore():
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
-                tool_analizza_classe,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,
@@ -732,10 +764,15 @@ def _get_orchestratore():
 
 
 def _get_thread_id() -> str:
-    """Thread ID stabile per sessione utente, usato dal checkpointer di LangGraph."""
+    """Thread ID stabile per sessione utente, usato dal checkpointer di LangGraph.
+
+    Il thread ID include il ruolo per garantire memoria conversazionale separata
+    tra le due istanze (studente e docente) dello stesso utente.
+    """
     if _SK_THREAD_ID not in st.session_state:
         user_id = st.session_state.get("user", {}).get("user_id", "anonimo")
-        st.session_state[_SK_THREAD_ID] = f"lea_sessione_{user_id}"
+        ruolo = (st.session_state.get("user_role") or "studente").lower()
+        st.session_state[_SK_THREAD_ID] = f"lea_sessione_{ruolo}_{user_id}"
     return st.session_state[_SK_THREAD_ID]
 
 
@@ -752,6 +789,7 @@ def aggiorna_contesto_sessione(
     materiale_selezionato: dict | None = None,
     clear_materiale: bool = False,
     clear_corso: bool = False,
+    extra: dict | None = None,
 ) -> None:
     """Aggiorna il contesto della sessione quando l'utente naviga tra le pagine.
 
@@ -795,6 +833,8 @@ def aggiorna_contesto_sessione(
         contesto["materiale_selezionato"] = materiale_selezionato
     if clear_materiale:
         contesto.pop("materiale_selezionato", None)
+    if extra:
+        contesto.update(extra)
     st.session_state[_SK_CONTESTO] = contesto
     # Copia nel globale: i tool LangGraph girano in thread background dove
     # st.session_state non è accessibile, ma il globale di modulo sì.
@@ -849,6 +889,7 @@ def reset_sessione_chat() -> None:
     """Azzera agente, thread, contesto e cronologia chat. Chiamare al logout dell'utente."""
     chiavi_da_rimuovere = [
         _SK_ORCHESTRATORE,
+        _SK_ORCHESTRATORE_DOCENTE,
         _SK_AGENTE_TEORICO,
         _SK_THREAD_ID,
         _SK_CONTESTO,

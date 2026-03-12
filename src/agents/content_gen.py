@@ -25,7 +25,7 @@ import re
 from functools import lru_cache
 from typing import TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 
@@ -117,7 +117,7 @@ class StrutturaCorso(BaseModel):
     titolo_corso: str = Field(description="Titolo del corso")
     descrizione_breve: str = Field(description="Descrizione sintetica del corso")
     durata_stimata_minuti: int = Field(description="Durata stimata in minuti")
-    capitoli: list[Capitolo] = Field(description="Lista dei capitoli del corso")
+    capitoli: list[Capitolo] = Field(default_factory=list, description="Lista dei capitoli del corso")
 
 
 # ---------------------------------------------------------------------------
@@ -129,7 +129,8 @@ class ContentGenState(TypedDict):
 
     Attributes:
         corso_id: ID del corso universitario da cui recuperare i materiali.
-        argomento_richiesto: Descrizione dell'argomento da trattare.
+        argomento_richiesto: Argomento/topic principale (usato per la query RAG).
+        istruzioni_utente: Istruzioni aggiuntive dell'utente su come strutturare la lezione.
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
         materiale_id: Se specificato, limita il RAG ai chunk di quel singolo materiale.
@@ -141,6 +142,7 @@ class ContentGenState(TypedDict):
     """
     corso_id: int | None
     argomento_richiesto: str
+    istruzioni_utente: str
     docente_id: int
     is_corso_docente: bool
     materiale_id: int | None
@@ -216,12 +218,18 @@ def _nodo_genera_struttura_corso(stato: ContentGenState) -> dict:
 
     chunks: list[dict] = stato["chunks_recuperati"]
     argomento: str = stato["argomento_richiesto"]
+    istruzioni: str = stato.get("istruzioni_utente", "").strip()
 
     contesto_rag: str = formatta_contesto_rag(chunks)
     chunk_ids: list[int] = [c["id"] for c in chunks]
 
-    prompt_struttura = f"""Genera la struttura completa di un corso didattico sull'argomento: "{argomento}".
+    sezione_istruzioni = (
+        f"\nISTRUZIONI AGGIUNTIVE DEL DOCENTE (rispettale rigorosamente):\n{istruzioni}\n"
+        if istruzioni else ""
+    )
 
+    prompt_struttura = f"""Genera la struttura completa di un corso didattico sull'argomento: "{argomento}".
+{sezione_istruzioni}
 CONTESTO DIDATTICO (usa SOLO queste informazioni):
 {contesto_rag}
 
@@ -245,7 +253,25 @@ Lingua: Italiano."""
         SystemMessage(content=_SYSTEM_PROMPT_AGENTE),
         HumanMessage(content=prompt_struttura),
     ]
-    output: StrutturaCorso = llm_strutturato.invoke(messaggi)
+
+    try:
+        output: StrutturaCorso = llm_strutturato.invoke(messaggi)
+    except (ValidationError, Exception) as exc:
+        return {
+            "struttura_corso_generata": {},
+            "chunk_ids_utilizzati": [],
+            "errore": f"Il modello non ha generato una struttura valida: {exc}",
+        }
+
+    if not output.capitoli:
+        return {
+            "struttura_corso_generata": {},
+            "chunk_ids_utilizzati": [],
+            "errore": (
+                "Il modello ha restituito una struttura senza capitoli. "
+                "Prova a riformulare la richiesta con un argomento più specifico."
+            ),
+        }
 
     return {
         "struttura_corso_generata": output.model_dump(),
@@ -394,16 +420,18 @@ def esegui_generazione(
     docente_id: int = 1,
     is_corso_docente: bool = True,
     materiale_id: int | None = None,
+    istruzioni_utente: str = "",
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
     Args:
         agente: Grafo compilato creato con ``crea_agente_content_gen()``.
         corso_id: ID del corso universitario.
-        argomento_richiesto: Argomento su cui generare i contenuti.
+        argomento_richiesto: Topic/argomento principale (usato per la query RAG).
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, salva come corso docente; se False, come piano studente.
         materiale_id: Se specificato, limita il RAG ai chunk di quel materiale.
+        istruzioni_utente: Istruzioni aggiuntive su come strutturare la lezione.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -413,6 +441,7 @@ def esegui_generazione(
         "docente_id": docente_id,
         "is_corso_docente": is_corso_docente,
         "argomento_richiesto": argomento_richiesto,
+        "istruzioni_utente": istruzioni_utente,
         "materiale_id": materiale_id,
         "chunks_recuperati": [],
         "n_chunk_totali_corso": 0,

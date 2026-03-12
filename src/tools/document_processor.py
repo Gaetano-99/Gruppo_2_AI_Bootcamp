@@ -20,6 +20,9 @@ import re
 import sys
 import os
 import streamlit as st
+from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage, HumanMessage
+
 # ---------------------------------------------------------------------------
 # Path setup — permette l'import del progetto dalla root in qualunque contesto
 # ---------------------------------------------------------------------------
@@ -28,14 +31,24 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
-from platform_sdk.llm import estrai_testo_da_upload
+from platform_sdk.llm import estrai_testo_da_upload, get_llm
 
 # ---------------------------------------------------------------------------
 # Costanti di chunking
 # ---------------------------------------------------------------------------
 _DIMENSIONE_MIN_CHUNK_CARATTERI: int = 150   # chunk più corti vengono uniti
 _DIMENSIONE_MAX_CHUNK_CARATTERI: int = 2000  # chunk più lunghi vengono divisi
-_DOCENTE_ID_MOCK: int = 10   # Mario Rossi (docente, seed data)
+
+
+# ---------------------------------------------------------------------------
+# Modello Pydantic per l'arricchimento LLM dei chunk
+# ---------------------------------------------------------------------------
+
+class MetadatiChunk(BaseModel):
+    """Metadati semantici generati dall'LLM per un singolo chunk didattico."""
+    titolo_sezione: str = Field(description="Titolo breve e descrittivo della sezione (max 10 parole)")
+    sommario: str = Field(description="Riassunto del contenuto in 2-3 frasi")
+    argomenti_chiave: list[str] = Field(description="Lista di 3-7 parole/frasi chiave che identificano i concetti principali")
 
 
 # ---------------------------------------------------------------------------
@@ -97,11 +110,14 @@ def elabora_e_salva_documento(
     )
 
     # 3-4. Chunking e salvataggio
-    _crea_e_salva_chunks(
+    chunk_ids: list[int] = _crea_e_salva_chunks(
         testo=testo_estratto,
         materiale_id=materiale_id,
         corso_universitario_id=corso_universitario_id,
     )
+
+    # 4b. Arricchimento semantico: genera titolo_sezione, sommario, argomenti_chiave
+    _arricchisci_chunks_con_llm(chunk_ids)
 
     # 5. Marca il materiale come processato
     db.aggiorna(
@@ -158,6 +174,62 @@ def _crea_e_salva_chunks(
         ids_inseriti.append(chunk_id)
 
     return ids_inseriti
+
+
+_SYSTEM_PROMPT_ARRICCHIMENTO = """Sei un assistente specializzato nell'analisi di testi didattici universitari.
+Dato un frammento di testo, estrai i metadati semantici richiesti in italiano.
+Sii conciso e preciso. Usa solo le informazioni presenti nel testo fornito."""
+
+
+def _arricchisci_chunks_con_llm(chunk_ids: list[int]) -> None:
+    """Arricchisce ogni chunk con metadati semantici generati dall'LLM.
+
+    Per ogni chunk recupera il testo dal DB, chiama l'LLM con structured output
+    per generare ``titolo_sezione``, ``sommario`` e ``argomenti_chiave``,
+    poi aggiorna il record nel DB.
+
+    Args:
+        chunk_ids: Lista degli ID dei chunk da arricchire.
+    """
+    if not chunk_ids:
+        return
+
+    import json as _json
+    llm = get_llm()
+    llm_strutturato = llm.with_structured_output(MetadatiChunk)
+
+    for chunk_id in chunk_ids:
+        righe = db.esegui(
+            "SELECT testo FROM materiali_chunks WHERE id = ?", [chunk_id]
+        )
+        if not righe or not righe[0].get("testo"):
+            continue
+
+        testo_chunk: str = righe[0]["testo"]
+
+        try:
+            messaggi = [
+                SystemMessage(content=_SYSTEM_PROMPT_ARRICCHIMENTO),
+                HumanMessage(content=(
+                    f"Analizza questo frammento di materiale didattico e genera i metadati:\n\n"
+                    f"{testo_chunk}"
+                )),
+            ]
+            metadati: MetadatiChunk = llm_strutturato.invoke(messaggi)
+
+            db.aggiorna(
+                "materiali_chunks",
+                {"id": chunk_id},
+                {
+                    "titolo_sezione": metadati.titolo_sezione,
+                    "sommario": metadati.sommario,
+                    "argomenti_chiave": _json.dumps(metadati.argomenti_chiave, ensure_ascii=False),
+                },
+            )
+        except Exception:
+            # Se l'arricchimento fallisce per un chunk, si continua con il successivo.
+            # Il chunk rimane nel DB con i campi NULL — il RAG userà solo il campo testo.
+            continue
 
 
 def _aggrega_chunk_brevi(paragrafi: list[str]) -> list[str]:

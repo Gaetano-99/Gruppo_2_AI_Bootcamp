@@ -272,9 +272,15 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
     scope_options = ["Generale"] + [f"Corso: {c['nome']} (ID {c['id']})" for c in corsi]
     scelta = st.selectbox("Ambito analytics", scope_options, key="analytics_scope")
     corso_sel_id = None
+    corso_sel_nome = None
     if scelta.startswith("Corso:"):
         label_to_id = {f"Corso: {c['nome']} (ID {c['id']})": c["id"] for c in corsi}
+        label_to_nome = {f"Corso: {c['nome']} (ID {c['id']})": c["nome"] for c in corsi}
         corso_sel_id = label_to_id.get(scelta)
+        corso_sel_nome = label_to_nome.get(scelta)
+    # Salva in session state per renderlo disponibile al chatbot
+    st.session_state["_analytics_corso_id"] = corso_sel_id
+    st.session_state["_analytics_corso_nome"] = corso_sel_nome
 
     filtro = " AND cu.id = ?" if corso_sel_id else ""
     p = [docente_id] + ([corso_sel_id] if corso_sel_id else [])
@@ -780,16 +786,21 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
         st.error(f"Impossibile importare gli agenti AI: {e}")
         return
 
+    # Determina se il docente ha richiesto di NON generare quiz
+    _prompt_lower = (prompt or "").lower()
+    _senza_quiz = any(kw in _prompt_lower for kw in ("senza quiz", "no quiz", "without quiz", "nessun quiz", "non generare quiz"))
+
     # — Fase 1: Teoria —
-    with st.spinner("Fase 1/2 — Generazione contenuti teorici…"):
+    _fasi = "Fase 1/2" if not _senza_quiz else "Fase 1/1"
+    with st.spinner(f"{_fasi} — Generazione contenuti teorici…"):
         agente = crea_agente_content_gen()
-        argomento = f"{corso['nome']}. {prompt}".strip(". ") if prompt else corso["nome"]
         stato_t = esegui_generazione(
             agente=agente,
             corso_id=corso["id"],
-            argomento_richiesto=argomento,
+            argomento_richiesto=corso["nome"],
             docente_id=docente_id,
             is_corso_docente=True,
+            istruzioni_utente=prompt or "",
         )
 
     if stato_t.get("errore"):
@@ -801,10 +812,11 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
         st.error("L'agente non ha prodotto una struttura valida. Verifica che siano presenti materiali RAG.")
         return
 
-    # — Fase 2: Quiz per ogni capitolo —
+    # — Fase 2: Quiz per ogni capitolo (saltata se il docente ha richiesto "senza quiz") —
     nuovo_schema: list[dict] = []
     chunk_ids = stato_t.get("chunk_ids_utilizzati", [])
-    with st.spinner("Fase 2/2 — Generazione quiz di verifica…"):
+
+    if _senza_quiz:
         for capitolo in struttura["capitoli"]:
             nuovo_schema.append({
                 "tipo": "capitolo",
@@ -814,39 +826,157 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
                     for p in capitolo.get("paragrafi", [])
                 ],
             })
-            testo_cap = "\n\n".join(
-                p["testo"] for p in capitolo.get("paragrafi", []) if p.get("testo")
-            )
-            if not testo_cap:
-                continue
-            par_id = _get_primo_paragrafo_id(corso["id"], capitolo["titolo"])
-            stato_p = esegui_generazione_pratica(
-                paragrafo_id=par_id,
-                testo_paragrafo=testo_cap,
-                strumenti_richiesti=["quiz"],
-                studente_id=docente_id,
-                corso_universitario_id=corso["id"],
-                chunk_ids_utilizzati=chunk_ids,
-            )
-            quiz_list = stato_p.get("strumenti_generati", {}).get("quiz", [])
-            if quiz_list:
+    else:
+        with st.spinner("Fase 2/2 — Generazione quiz di verifica…"):
+            for capitolo in struttura["capitoli"]:
                 nuovo_schema.append({
-                    "tipo": "test",
-                    "titolo": f"Test — {capitolo['titolo']}",
-                    "domande": [
-                        {
-                            "testo": d["testo"],
-                            "opzioni": d["opzioni"],
-                            "corretta": d["indice_corretta"],
-                        }
-                        for d in quiz_list
+                    "tipo": "capitolo",
+                    "titolo": capitolo["titolo"],
+                    "paragrafi": [
+                        {"titolo": p["titolo"], "testo": p["testo"]}
+                        for p in capitolo.get("paragrafi", [])
                     ],
                 })
+                testo_cap = "\n\n".join(
+                    p["testo"] for p in capitolo.get("paragrafi", []) if p.get("testo")
+                )
+                if not testo_cap:
+                    continue
+                par_id = _get_primo_paragrafo_id(corso["id"], capitolo["titolo"])
+                stato_p = esegui_generazione_pratica(
+                    paragrafo_id=par_id,
+                    testo_paragrafo=testo_cap,
+                    strumenti_richiesti=["quiz"],
+                    studente_id=docente_id,
+                    corso_universitario_id=corso["id"],
+                    chunk_ids_utilizzati=chunk_ids,
+                )
+                quiz_list = stato_p.get("strumenti_generati", {}).get("quiz", [])
+                if quiz_list:
+                    nuovo_schema.append({
+                        "tipo": "test",
+                        "titolo": f"Test — {capitolo['titolo']}",
+                        "domande": [
+                            {
+                                "testo": d["testo"],
+                                "opzioni": d["opzioni"],
+                                "corretta": d["indice_corretta"],
+                            }
+                            for d in quiz_list
+                        ],
+                    })
 
     # — Fase 3: Aggiornamento UI —
     st.session_state[key] = nuovo_schema
     st.success("Contenuto corso generato con successo!")
     st.rerun()
+
+
+def _render_anteprima_lezione(corso_id: int) -> None:
+    """Mostra il contenuto del corso salvato nel DB come lo vedrebbe uno studente."""
+    try:
+        piani = db.trova_tutti(
+            "piani_personalizzati",
+            {"corso_universitario_id": corso_id, "is_corso_docente": 1},
+            ordine="id DESC",
+            limite=1,
+        )
+    except Exception:
+        return
+
+    if not piani:
+        return
+
+    piano_id = piani[0]["id"]
+
+    try:
+        capitoli = db.esegui(
+            "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
+            [piano_id],
+        )
+    except Exception:
+        return
+
+    if not capitoli:
+        st.info("Nessun contenuto salvato ancora. Vai in 'Contenuti AI', genera e salva la lezione.")
+        return
+
+    st.caption("Vista studente — anteprima del contenuto salvato.")
+    for cap in capitoli:
+        st.markdown(f"### {cap['titolo']}")
+        try:
+            paragrafi = db.esegui(
+                "SELECT id, titolo FROM piano_paragrafi WHERE capitolo_id = ? ORDER BY ordine",
+                [cap["id"]],
+            )
+        except Exception:
+            continue
+
+        for par in paragrafi:
+            st.markdown(f"**{par['titolo']}**")
+            try:
+                contenuto = db.trova_uno(
+                    "piano_contenuti", {"paragrafo_id": par["id"], "tipo": "lezione"}
+                )
+            except Exception:
+                contenuto = None
+
+            if contenuto and contenuto.get("contenuto_json"):
+                st.markdown(
+                    f"<div style='background:#f8fafc;border-left:3px solid #003087;"
+                    f"padding:12px 16px;border-radius:0 8px 8px 0;font-size:0.88rem;"
+                    f"line-height:1.7;color:#1f2937;margin-bottom:10px'>"
+                    f"{contenuto['contenuto_json'].replace(chr(10), '<br>')}</div>",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.caption("_(nessun testo salvato per questo paragrafo)_")
+
+        # Quiz del capitolo (se presente)
+        try:
+            import json as _jq
+            quiz_contenuti = db.esegui(
+                """SELECT pc.quiz_id FROM piano_contenuti pc
+                   JOIN piano_paragrafi pp ON pp.id = pc.paragrafo_id
+                   WHERE pp.capitolo_id = ? AND pc.tipo = 'quiz' AND pc.quiz_id IS NOT NULL
+                   LIMIT 1""",
+                [cap["id"]],
+            )
+        except Exception:
+            quiz_contenuti = []
+
+        if quiz_contenuti and quiz_contenuti[0].get("quiz_id"):
+            quiz_id = quiz_contenuti[0]["quiz_id"]
+            try:
+                domande = db.trova_tutti("domande_quiz", {"quiz_id": quiz_id}, ordine="ordine ASC")
+            except Exception:
+                domande = []
+            if domande:
+                st.markdown(f"**Test di verifica** ({len(domande)} domande)")
+                for i, d in enumerate(domande, 1):
+                    try:
+                        opzioni = _jq.loads(d.get("opzioni_json") or "[]")
+                    except Exception:
+                        opzioni = []
+                    st.markdown(
+                        f"<div style='background:#f0f4f8;padding:8px 12px;border-radius:6px;"
+                        f"font-size:0.85rem;margin-bottom:6px'>"
+                        f"<strong>D{i}.</strong> {d.get('testo','')}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    for opz in opzioni:
+                        corretta = d.get("risposta_corretta") == opz
+                        colore = "#1A7F4B" if corretta else "#5A6A7E"
+                        st.markdown(
+                            f"<div style='font-size:0.82rem;color:{colore};padding-left:16px'>"
+                            f"{'✓' if corretta else '○'} {opz}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+        st.markdown(
+            "<hr style='border:none;border-top:1px solid #E8EEF6;margin:12px 0'>",
+            unsafe_allow_html=True,
+        )
 
 
 def _render_contenuti_ai(corso: dict):
@@ -1007,6 +1137,7 @@ def _render_contenuti_ai(corso: dict):
             st.error(msg)
 
 
+
 def _render_dettaglio_corso(corso: dict, docente_id: int):
     stato_lbl, stato_class = _stato_corso(corso)
     title_col, close_col = st.columns([10, 1])
@@ -1022,15 +1153,21 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
             st.session_state["_corso_doc_sel"] = None
             st.rerun()
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso", "Contenuto Lezione"])
 
     with tab1:
+        tutti_cdl = _get_tutti_cdl()
+        cdl_correnti_ids = _get_cdl_corso(corso["id"])
+        cdl_correnti_nomi = [c["nome"] for c in tutti_cdl if c["id"] in cdl_correnti_ids]
+        cdl_label = ", ".join(cdl_correnti_nomi) if cdl_correnti_nomi else "—"
+
         st.markdown(
             f"""
             <div class='tab-note'>
             <strong>Descrizione:</strong> {corso.get('descrizione') or '—'}<br>
             <strong>CFU:</strong> {corso.get('cfu') or '—'}<br>
             <strong>Anno:</strong> {corso.get('anno_di_corso') or '—'} · Livello: {corso.get('livello') or '—'} · Semestre: {corso.get('semestre') or '—'}<br>
+            <strong>Corsi di Laurea:</strong> {cdl_label}<br>
             <strong>Studenti iscritti:</strong> {_conta_studenti_corso(corso['id'])}
             </div>
             """,
@@ -1078,6 +1215,9 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
         col2.metric("Quiz pubblicati", dati["quiz"])
         col3.metric("Tentativi quiz", dati["tentativi"])
         st.caption("Drill-down per capitolo/argomento verrà aggiunto dopo la raccolta dati.")
+
+    with tab5:
+        _render_anteprima_lezione(corso["id"])
 
 
 def _render_corsi(docente_id: int):
@@ -1227,8 +1367,20 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         risposta = "Lea non è configurata (AWS Bedrock non attivo)."
         if chat_con_orchestratore and aggiorna_contesto:
             try:
-                # Imposta sempre il contesto docente, indipendentemente dal corso selezionato
-                aggiorna_contesto(corso_id=corso_id, corso_nome=corso_nome, tipo_vista="docente", piano_id=None, piano_titolo=None)
+                # Imposta il contesto docente: include anche il corso attivo nelle analytics
+                analytics_id = st.session_state.get("_analytics_corso_id")
+                analytics_nome = st.session_state.get("_analytics_corso_nome")
+                ctx_id = corso_id or analytics_id
+                ctx_nome = corso_nome or analytics_nome
+                aggiorna_contesto(
+                    corso_id=ctx_id,
+                    corso_nome=ctx_nome,
+                    tipo_vista="docente",
+                    piano_id=None,
+                    piano_titolo=None,
+                    extra={"analytics_corso_id": analytics_id, "analytics_corso_nome": analytics_nome}
+                    if analytics_id else {},
+                )
                 risposta = chat_con_orchestratore(
                     messaggio_utente=messaggio_finale,
                     corso_contestuale_id=corso_id,
@@ -1258,6 +1410,10 @@ def mostra_homepage_docente():
             corso_sel = next((c for c in corsi if c["id"] == sel_id), None)
             if corso_sel:
                 corso_nome = corso_sel["nome"]
+        # Fallback: usa il corso selezionato nella sezione analytics
+        if not sel_id:
+            sel_id = st.session_state.get("_analytics_corso_id")
+            corso_nome = st.session_state.get("_analytics_corso_nome")
         _render_chatbot_docente(utente, sel_id, corso_nome)
     if st.session_state.get("_doc_refresh"):
         st.session_state["_doc_refresh"] = False
