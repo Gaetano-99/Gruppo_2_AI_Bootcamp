@@ -101,9 +101,17 @@ Dopo ogni analisi, proponi sempre azioni concrete di intervento.
 COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto       → sapere quale corso è attualmente visualizzato.
 2. tool_analizza_classe      → analizzare performance studenti, argomenti più difficili, rischio abbandono.
-3. tool_esplora_catalogo     → esplorare i materiali didattici caricati nel corso.
+3. tool_esplora_catalogo     → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
+                                tipo_ricerca='corsi' → lista corsi attivi.
+                                tipo_ricerca='argomenti' → materiali di un corso specifico.
+                                tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
+                                tra tutti i materiali del corso e quelli caricati dal docente.
 4. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+                                Accetta un parametro opzionale materiale_id per generare
+                                la lezione SOLO dal contenuto di quel materiale specifico.
 5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
+6. tool_modifica_piano       → leggere e riscrivere il testo di capitoli/paragrafi del corso,
+                                rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
@@ -117,8 +125,32 @@ REGOLE DI COMPORTAMENTO:
 - Non parlare mai di "piano personalizzato": i docenti gestiscono corsi, non piani.
 - Dopo ogni analisi, suggerisci azioni concrete: es. rivedere un argomento, creare esercizi mirati.
 - Se il docente non ha ancora studenti o quiz, comunicalo chiaramente e suggerisci come procedere.
+- RICERCA MATERIALI PER NOME: quando il docente menziona un materiale o documento per nome
+  (es. "il materiale di DeepLearning", "le slide di marketing", "il PDF sulla cybersecurity", ecc.),
+  NON chiedere dove si trova. Usa SUBITO tool_esplora_catalogo(tipo_ricerca='cerca_materiale',
+  keyword='...') per cercarlo. Se trovi UN solo risultato, usalo direttamente senza chiedere
+  conferma. Se trovi più risultati, mostrali e chiedi quale intende. Se non trovi nulla,
+  comunicalo e suggerisci di verificare i materiali caricati.
+- MODIFICA CONTENUTI DEL CORSO: quando il docente chiede di modificare, riscrivere, semplificare
+  o espandere un paragrafo o capitolo del corso:
+  1. Chiama tool_leggi_contesto → ottieni il piano_id e la struttura (capitoli e paragrafi con ID).
+  2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
+  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
+  4. Genera il testo riscritto in modo completo e dettagliato.
+  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
+     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
+     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
+  NON dire mai che non puoi modificare il contenuto: hai sempre tool_modifica_piano a disposizione.
+- ARRICCHIRE UN CORSO CON MATERIALE: quando il docente chiede di arricchire, integrare o ampliare
+  un corso usando un materiale specifico, segui lo stesso flusso della modifica ma per contenuti nuovi:
+  1. Chiama tool_leggi_contesto → ottieni piano_id e struttura.
+  2. Cerca il materiale con tool_esplora_catalogo.
+  3. Per ogni nuovo argomento: aggiungi capitolo con 'aggiungi_capitolo',
+     poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con 'riscrivi_contenuto'
+     passando SEMPRE il materiale_id per tracciare la fonte.
+  NON creare mai capitoli vuoti senza paragrafi.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
-- Se la richiesta è davvero ambigua E il contesto non indica nessun corso, fai UNA sola domanda mirata.
+- Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
 - Gestisci gli errori con empatia e suggerisci il passo successivo.
 """
@@ -132,7 +164,11 @@ piacevole. Dopo ogni azione completata, proponi proattivamente il passo successi
 
 COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
-2. tool_esplora_catalogo        → scoprire corsi o materiali disponibili (con ID materiale).
+2. tool_esplora_catalogo        → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
+                                  tipo_ricerca='corsi' → lista corsi attivi.
+                                  tipo_ricerca='argomenti' → materiali di un corso specifico.
+                                  tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
+                                  tra tutti i materiali dello studente (personali e dei corsi).
 3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
                                   Accetta un parametro opzionale materiale_id per generare
                                   la lezione SOLO dal contenuto di quel materiale specifico.
@@ -143,9 +179,19 @@ COSA SAI FARE (tool a tua disposizione):
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
-- I CORSI UNIVERSITARI sono in sola lettura. Non puoi modificarli.
+- I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
+  chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
+  rispondi che i corsi non sono modificabili dagli studenti e suggerisci di creare un piano
+  personalizzato dove potrà avere la propria versione personalizzata dei contenuti,
+  oppure di modificare un piano personalizzato esistente se ne ha già uno.
 - I PIANI PERSONALIZZATI sono spazi privati dello studente. Quando generi contenuti,
   stai sempre creando un PIANO PERSONALIZZATO — mai modificando il corso ufficiale.
+- RICERCA MATERIALI PER NOME: quando lo studente menziona un materiale, un documento o un
+  argomento per nome (es. "il mio materiale di DeepLearning", "le slide di marketing", ecc.),
+  NON chiedere dove si trova. Usa SUBITO tool_esplora_catalogo(tipo_ricerca='cerca_materiale',
+  keyword='...') per cercarlo. Se trovi UN solo risultato, usalo direttamente senza chiedere
+  conferma. Se trovi più risultati, mostrali e chiedi quale intende. Se non trovi nulla,
+  comunicalo e suggerisci di controllare i materiali caricati.
 - MATERIALE SELEZIONATO: se tool_leggi_contesto riporta "Materiale selezionato", lo studente
   vuole una lezione su quel materiale specifico. Usa SUBITO tool_genera_corso passando
   il materiale_id indicato nel contesto. Se non c'è un corso associato, usa corso_universitario_id=0.
@@ -157,11 +203,29 @@ REGOLE DI COMPORTAMENTO:
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
   3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
   4. Genera il testo riscritto in modo completo e dettagliato.
-  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo).
+  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
+     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
+     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
   NON chiedere mai il numero del piano all'utente: è già nel contesto.
   NON dire mai che non puoi modificare il testo: hai sempre questo percorso disponibile.
+- ARRICCHIRE UN PIANO CON MATERIALE DIDATTICO: quando lo studente chiede di arricchire,
+  integrare o ampliare un piano personalizzato usando un materiale specifico:
+  1. Chiama tool_leggi_contesto → ottieni piano_id e la struttura attuale del piano.
+  2. Cerca il materiale con tool_esplora_catalogo(tipo_ricerca='cerca_materiale', keyword='...').
+  3. Leggi il contenuto del materiale per capire gli argomenti che copre.
+  4. Per OGNI argomento rilevante del materiale:
+     a. Aggiungi un capitolo: tool_modifica_piano(piano_id, 'aggiungi_capitolo', 0, titolo_capitolo)
+        → ottieni il capitolo_id dalla risposta.
+     b. Per ogni sotto-argomento, aggiungi un paragrafo:
+        tool_modifica_piano(piano_id, 'aggiungi_paragrafo', capitolo_id, titolo_paragrafo)
+        → ottieni il paragrafo_id dalla risposta.
+     c. Scrivi il contenuto del paragrafo basandoti sul materiale:
+        tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, testo_completo, materiale_id)
+        IMPORTANTE: passa SEMPRE il materiale_id per tracciare la fonte nel piano.
+  NON creare mai capitoli vuoti senza paragrafi. Ogni capitolo DEVE avere almeno un paragrafo con contenuto.
+  Se il piano ha già capitoli sugli stessi argomenti, arricchisci quelli esistenti invece di duplicarli.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
-- Se la richiesta è ambigua, fai UNA sola domanda mirata.
+- Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
 - Gestisci gli errori con empatia e suggerisci il passo successivo.
 """
@@ -188,7 +252,13 @@ def tool_leggi_contesto() -> str:
     if tipo == "docente":
         parti.append("L'utente è un DOCENTE. Usa la modalità docente: analisi classe, gestione corso.")
     elif tipo == "corso":
-        parti.append("L'utente sta visualizzando un CORSO universitario (sola lettura).")
+        parti.append(
+            "L'utente sta visualizzando un CORSO universitario (sola lettura). "
+            "I corsi NON sono modificabili dagli studenti. Se lo studente chiede di "
+            "modificare, accorciare, riscrivere o cambiare qualsiasi contenuto del corso, "
+            "rispondi che i corsi sono gestiti dai docenti e non modificabili. "
+            "Suggerisci di creare un piano personalizzato per avere una versione propria dei contenuti."
+        )
     elif tipo == "piano":
         parti.append("L'utente sta studiando nel proprio PIANO PERSONALIZZATO.")
 
@@ -261,11 +331,13 @@ def tool_leggi_contesto() -> str:
 
 
 @tool
-def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None) -> str:
+def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None, keyword: str = "") -> str:
     """
-    Scopri i corsi universitari disponibili o i materiali di un corso specifico.
-    - tipo_ricerca='corsi'     → lista tutti i corsi attivi.
-    - tipo_ricerca='argomenti' → materiali del corso (richiede corso_universitario_id).
+    Scopri i corsi universitari disponibili o cerca materiali didattici.
+    - tipo_ricerca='corsi'           → lista tutti i corsi attivi.
+    - tipo_ricerca='argomenti'       → materiali del corso (richiede corso_universitario_id).
+    - tipo_ricerca='cerca_materiale' → cerca materiali per nome/keyword tra TUTTI i materiali
+                                       dello studente (personali e dei corsi). Richiede keyword.
     """
     if tipo_ricerca == "corsi":
         corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
@@ -274,6 +346,35 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None)
         return "Corsi disponibili:\n" + "\n".join(
             f"- ID {c['id']}: {c['nome']}" for c in corsi
         )
+
+    elif tipo_ricerca == "cerca_materiale":
+        if not keyword or not keyword.strip():
+            return "Errore: specifica una keyword per cercare i materiali."
+        studente_id = _STUDENTE_ID_CORRENTE
+        kw = f"%{keyword.strip()}%"
+        risultati = db.esegui(
+            "SELECT id, titolo, tipo, corso_universitario_id, is_processed "
+            "FROM materiali_didattici "
+            "WHERE (docente_id = ? OR corso_universitario_id IN "
+            "  (SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?)) "
+            "AND titolo LIKE ? "
+            "ORDER BY caricato_il DESC",
+            [studente_id, studente_id, kw],
+        )
+        if not risultati:
+            return f"Nessun materiale trovato con keyword '{keyword}'."
+        righe = [f"Materiali trovati per '{keyword}':"]
+        for m in risultati:
+            corso_info = f"corso ID {m['corso_universitario_id']}" if m["corso_universitario_id"] else "materiale personale"
+            stato = "✅ elaborato" if m.get("is_processed") else "⏳ in attesa"
+            righe.append(f"- materiale_id={m['id']}: {m['titolo']} ({m['tipo']}, {corso_info}, {stato})")
+        if len(risultati) == 1:
+            m = risultati[0]
+            righe.append(
+                f"\nTrovato UN SOLO materiale. Usalo direttamente con tool_genera_corso "
+                f"(corso_universitario_id={m['corso_universitario_id'] or 0}, materiale_id={m['id']})."
+            )
+        return "\n".join(righe)
 
     elif tipo_ricerca == "argomenti":
         if not corso_universitario_id:
@@ -294,7 +395,7 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None)
             + "con materiale_id=<id del materiale>."
         )
 
-    return "Errore: tipo_ricerca deve essere 'corsi' o 'argomenti'."
+    return "Errore: tipo_ricerca deve essere 'corsi', 'argomenti' o 'cerca_materiale'."
 
 
 @tool
@@ -414,9 +515,9 @@ def tool_analizza_preparazione(tentativo_id: int) -> str:
 
 
 @tool
-def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore: str = "") -> str:
+def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore: str = "", materiale_id: int = 0) -> str:
     """
-    Modifica la struttura o il contenuto di un piano personalizzato dello studente.
+    Modifica la struttura o il contenuto di un piano (studente o corso docente).
 
     azione può essere:
       - 'rinomina_capitolo'       → rinomina piano_capitoli.titolo (target_id = capitolo_id)
@@ -426,6 +527,9 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
       - 'elimina_capitolo'        → elimina il capitolo e tutti i suoi paragrafi (target_id = capitolo_id)
       - 'elimina_paragrafo'       → elimina il paragrafo e i suoi contenuti (target_id = paragrafo_id)
       - 'aggiungi_capitolo'       → aggiunge un nuovo capitolo al piano (nuovo_valore = titolo)
+      - 'aggiungi_paragrafo'      → aggiunge un nuovo paragrafo a un capitolo (target_id = capitolo_id,
+                                    nuovo_valore = titolo del paragrafo). Restituisce l'ID del paragrafo
+                                    creato, che puoi usare con 'riscrivi_contenuto' per scrivere il testo.
       - 'sposta_paragrafo'        → sposta il paragrafo in un altro capitolo (target_id = paragrafo_id,
                                     nuovo_valore = capitolo_id di destinazione come stringa intera).
                                     Usalo per riorganizzare paragrafi tra capitoli diversi.
@@ -434,6 +538,8 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
       - 'riscrivi_contenuto'      → sostituisce il testo di un paragrafo (target_id = paragrafo_id,
                                     nuovo_valore = testo completo riscritto). Il testo deve essere
                                     completo e ben strutturato, non un riassunto.
+                                    materiale_id (opzionale): se il testo è stato arricchito usando un
+                                    materiale specifico, passa il materiale_id per tracciarlo nel piano.
 
     Usa 'leggi_contenuto' + 'riscrivi_contenuto' quando lo studente chiede di riscrivere,
     modificare, semplificare, espandere o tradurre il testo di un paragrafo.
@@ -543,6 +649,22 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
             })
             return f"Nuovo capitolo '{nuovo_valore}' aggiunto al piano (ID: {nuovo_id})."
 
+        elif azione == "aggiungi_paragrafo":
+            if not nuovo_valore:
+                return "Specifica il titolo per il nuovo paragrafo."
+            # target_id = capitolo_id a cui aggiungere il paragrafo
+            cap = db.trova_uno("piano_capitoli", {"id": target_id, "piano_id": piano_id})
+            if not cap:
+                return f"Capitolo ID {target_id} non trovato in questo piano."
+            paragrafi = db.trova_tutti("piano_paragrafi", {"capitolo_id": target_id}, ordine="ordine DESC", limite=1)
+            nuovo_ordine = (paragrafi[0]["ordine"] + 1) if paragrafi else 0
+            nuovo_id = db.inserisci("piano_paragrafi", {
+                "capitolo_id": target_id,
+                "titolo": nuovo_valore,
+                "ordine": nuovo_ordine,
+            })
+            return f"Nuovo paragrafo '{nuovo_valore}' aggiunto al capitolo '{cap['titolo']}' (paragrafo ID: {nuovo_id}). Usa 'riscrivi_contenuto' con target_id={nuovo_id} per scrivere il testo."
+
         elif azione == "leggi_contenuto":
             # Verifica che il paragrafo appartenga al piano
             par = db.esegui(
@@ -575,21 +697,44 @@ def tool_modifica_piano(piano_id: int, azione: str, target_id: int, nuovo_valore
             # Aggiorna se esiste, altrimenti inserisce
             esistente = db.trova_uno("piano_contenuti", {"paragrafo_id": target_id, "tipo": "lezione"})
             if esistente:
+                aggiornamento = {"contenuto_json": nuovo_valore.strip()}
+                # Se è stato usato un materiale, aggiungi i suoi chunk_ids a quelli esistenti
+                if materiale_id and materiale_id > 0:
+                    chunk_ids_esistenti: list = []
+                    try:
+                        chunk_ids_esistenti = json.loads(esistente.get("chunk_ids_utilizzati") or "[]")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    nuovi_chunks = db.esegui(
+                        "SELECT id FROM materiali_chunks WHERE materiale_id = ?",
+                        [materiale_id],
+                    )
+                    for c in nuovi_chunks:
+                        if c["id"] not in chunk_ids_esistenti:
+                            chunk_ids_esistenti.append(c["id"])
+                    aggiornamento["chunk_ids_utilizzati"] = json.dumps(chunk_ids_esistenti)
                 db.aggiorna(
                     "piano_contenuti",
                     {"paragrafo_id": target_id, "tipo": "lezione"},
-                    {"contenuto_json": nuovo_valore.strip()},
+                    aggiornamento,
                 )
             else:
-                db.inserisci("piano_contenuti", {
+                nuovo_record = {
                     "paragrafo_id": target_id,
                     "tipo": "lezione",
                     "contenuto_json": nuovo_valore.strip(),
-                })
+                }
+                if materiale_id and materiale_id > 0:
+                    nuovi_chunks = db.esegui(
+                        "SELECT id FROM materiali_chunks WHERE materiale_id = ?",
+                        [materiale_id],
+                    )
+                    nuovo_record["chunk_ids_utilizzati"] = json.dumps([c["id"] for c in nuovi_chunks])
+                db.inserisci("piano_contenuti", nuovo_record)
             return f"✅ Paragrafo '{titolo}' riscritto e salvato nel piano. Lo studente vedrà la nuova versione al prossimo caricamento."
 
         else:
-            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo, sposta_paragrafo, leggi_contenuto, riscrivi_contenuto."
+            return f"Azione '{azione}' non riconosciuta. Azioni valide: rinomina_capitolo, rinomina_paragrafo, riordina_capitolo, riordina_paragrafo, elimina_capitolo, elimina_paragrafo, aggiungi_capitolo, aggiungi_paragrafo, sposta_paragrafo, leggi_contenuto, riscrivi_contenuto."
 
     except Exception as e:
         return f"Errore durante la modifica del piano: {e}"
@@ -740,6 +885,7 @@ def _get_orchestratore():
                     tool_genera_corso,
                     tool_genera_pratica,
                     tool_analizza_classe,
+                    tool_modifica_piano,
                 ],
                 system_prompt=_SYSTEM_PROMPT_DOCENTE,
                 memoria=True,

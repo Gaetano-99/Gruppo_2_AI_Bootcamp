@@ -165,8 +165,11 @@ _CSS = """
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 10px;
-    position: relative;
-    z-index: 10;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
 }
 </style>
 """

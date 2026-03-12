@@ -1852,13 +1852,18 @@ def _dialog_upload_materiale_libero():
         if st.button("Carica ed elabora", type="primary", use_container_width=True):
             try:
                 from src.tools.document_processor import elabora_e_salva_documento
-                with st.spinner("Elaborazione in corso..."):
-                    elabora_e_salva_documento(
-                        uploaded_file=uploaded,
-                        corso_universitario_id=None,
-                        titolo=titolo,
-                        tipo=uploaded.name.rsplit(".", 1)[-1].lower() or "dispensa",
-                    )
+                progress_bar = st.progress(0, text="Estrazione testo...")
+                def _aggiorna_progresso(i, totale):
+                    pct = int((i + 1) / totale * 100)
+                    progress_bar.progress(pct, text=f"Analisi sezione {i + 1}/{totale}...")
+                elabora_e_salva_documento(
+                    uploaded_file=uploaded,
+                    corso_universitario_id=None,
+                    titolo=titolo,
+                    tipo=uploaded.name.rsplit(".", 1)[-1].lower() or "dispensa",
+                    progress_callback=_aggiorna_progresso,
+                )
+                progress_bar.progress(100, text="Completato!")
                 st.success(f"✅ '{titolo}' caricato ed elaborato! Lea può ora usarlo per generare lezioni.")
                 st.rerun()
             except Exception as e:
