@@ -1153,7 +1153,7 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
             st.session_state["_corso_doc_sel"] = None
             st.rerun()
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso", "Contenuto Lezione"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso", "Contenuto Lezione", "Modifica Panoramica"])
 
     with tab1:
         tutti_cdl = _get_tutti_cdl()
@@ -1173,35 +1173,6 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
             """,
             unsafe_allow_html=True,
         )
-        if not corso.get("attivo"):
-            st.info("Puoi modificare questo corso finché non viene pubblicato.")
-            tutti_cdl = _get_tutti_cdl()
-            cdl_correnti_ids = _get_cdl_corso(corso["id"])
-            cdl_nomi_tutti = [c["nome"] for c in tutti_cdl]
-            cdl_correnti_nomi = [c["nome"] for c in tutti_cdl if c["id"] in cdl_correnti_ids]
-            with st.form(f"modifica_corso_{corso['id']}"):
-                nome = st.text_input("Nome corso", value=corso.get("nome", ""))
-                descrizione = st.text_area("Descrizione", value=corso.get("descrizione", "") or "")
-                cfu = st.number_input("CFU", min_value=0, max_value=30, step=1, value=int(corso.get("cfu") or 0))
-                anno = st.number_input(
-                    "Anno di corso (1-5)", min_value=1, max_value=5, step=1, value=int(corso.get("anno_di_corso") or 1)
-                )
-                livello = st.selectbox(
-                    "Livello", ["base", "intermedio", "avanzato"], index=["base", "intermedio", "avanzato"].index(corso.get("livello") or "base")
-                )
-                semestre = st.selectbox("Semestre", [1, 2], index=[1, 2].index(corso.get("semestre") or 1))
-                cdl_sel = st.multiselect("Corsi di Laurea", cdl_nomi_tutti, default=cdl_correnti_nomi)
-                if st.form_submit_button("Aggiorna bozza", type="primary"):
-                    db.aggiorna(
-                        "corsi_universitari",
-                        {"id": corso["id"]},
-                        {"nome": nome, "descrizione": descrizione, "cfu": cfu, "anno_di_corso": anno, "livello": livello, "semestre": semestre},
-                    )
-                    cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
-                    _salva_cdl_corso(corso["id"], cdl_sel_ids)
-                    st.success("Bozza aggiornata.")
-                    st.session_state["_doc_refresh"] = True
-
     with tab2:
         _render_materiali(corso, docente_id)
 
@@ -1218,6 +1189,50 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
 
     with tab5:
         _render_anteprima_lezione(corso["id"])
+
+    with tab6:
+        is_pubblicato = bool(corso.get("attivo"))
+        if is_pubblicato:
+            st.info("Il corso è pubblicato. Le modifiche saranno visibili immediatamente agli studenti iscritti.")
+        tutti_cdl_mod = _get_tutti_cdl()
+        cdl_correnti_ids_mod = _get_cdl_corso(corso["id"])
+        cdl_nomi_tutti_mod = [c["nome"] for c in tutti_cdl_mod]
+        cdl_correnti_nomi_mod = [c["nome"] for c in tutti_cdl_mod if c["id"] in cdl_correnti_ids_mod]
+        with st.form(f"modifica_panoramica_{corso['id']}"):
+            nome_mod = st.text_input("Nome corso", value=corso.get("nome", ""))
+            descrizione_mod = st.text_area("Descrizione", value=corso.get("descrizione", "") or "", height=120)
+            col_a, col_b, col_c, col_d = st.columns(4)
+            with col_a:
+                cfu_mod = st.number_input("CFU", min_value=0, max_value=30, step=1, value=int(corso.get("cfu") or 0))
+            with col_b:
+                anno_mod = st.number_input("Anno (1-5)", min_value=1, max_value=5, step=1, value=int(corso.get("anno_di_corso") or 1))
+            with col_c:
+                livello_mod = st.selectbox(
+                    "Livello",
+                    ["base", "intermedio", "avanzato"],
+                    index=["base", "intermedio", "avanzato"].index(corso.get("livello") or "base"),
+                )
+            with col_d:
+                semestre_mod = st.selectbox("Semestre", [1, 2], index=[1, 2].index(corso.get("semestre") or 1))
+            cdl_sel_mod = st.multiselect("Corsi di Laurea", cdl_nomi_tutti_mod, default=cdl_correnti_nomi_mod)
+            label_btn = "Salva modifiche" if is_pubblicato else "Aggiorna bozza"
+            if st.form_submit_button(label_btn, type="primary"):
+                db.aggiorna(
+                    "corsi_universitari",
+                    {"id": corso["id"]},
+                    {
+                        "nome": nome_mod,
+                        "descrizione": descrizione_mod,
+                        "cfu": cfu_mod,
+                        "anno_di_corso": anno_mod,
+                        "livello": livello_mod,
+                        "semestre": semestre_mod,
+                    },
+                )
+                cdl_sel_ids_mod = [c["id"] for c in tutti_cdl_mod if c["nome"] in cdl_sel_mod]
+                _salva_cdl_corso(corso["id"], cdl_sel_ids_mod)
+                st.success("Panoramica aggiornata con successo.")
+                st.session_state["_doc_refresh"] = True
 
 
 def _render_corsi(docente_id: int):
