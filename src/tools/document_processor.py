@@ -93,7 +93,29 @@ def elabora_e_salva_documento(
     # 1. Estrai testo
     testo_estratto: str = estrai_testo_da_upload(uploaded_file)
     if not testo_estratto or not testo_estratto.strip():
-        raise ValueError("Il file caricato non contiene testo leggibile.")
+        nome = getattr(uploaded_file, "name", "file")
+        ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+        if ext == "pdf":
+            raise ValueError(
+                "Il PDF non contiene testo selezionabile. "
+                "Probabilmente è una scansione o contiene solo immagini. "
+                "Converti il file con uno strumento OCR e ricaricalo."
+            )
+        raise ValueError(
+            f"Il file '{nome}' non contiene testo leggibile. "
+            "Verifica che il file non sia corrotto o protetto da password."
+        )
+
+    # Controlla se il testo è quasi tutto composto da segnaposti immagine (PDF scansionato)
+    _linee = [l.strip() for l in testo_estratto.splitlines() if l.strip()]
+    if _linee:
+        _linee_immagine = sum(1 for l in _linee if l.startswith("[Pagina ") and "non testuale" in l)
+        if _linee_immagine == len(_linee):
+            raise ValueError(
+                "Il PDF sembra essere una scansione: tutte le pagine contengono solo immagini, "
+                "nessun testo selezionabile è stato trovato. "
+                "Converti il file con uno strumento OCR e ricaricalo."
+            )
 
     # 2. Inserisci il materiale didattico nel DB
     materiale_id: int = db.inserisci(

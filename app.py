@@ -11,7 +11,29 @@
 #   ruolo=admin    → views/admin.py    (futura implementazione)
 # ============================================================================
 
+import atexit
+import os
+import shutil
+
 import streamlit as st
+
+# ---------------------------------------------------------------------------
+# Pulizia file temporanei alla chiusura del server
+# ---------------------------------------------------------------------------
+_ROOT_DIR = os.path.dirname(__file__)
+_UPLOAD_DIR = os.path.join(_ROOT_DIR, "uploads")
+
+def _cleanup_temp():
+    if os.path.exists(_UPLOAD_DIR):
+        shutil.rmtree(_UPLOAD_DIR, ignore_errors=True)
+    for root, _, files in os.walk(_ROOT_DIR):
+        if ".claude" in root or "venv" in root:
+            continue
+        for fname in files:
+            if ".tmp" in fname or ".temp" in fname:
+                os.remove(os.path.join(root, fname))
+
+atexit.register(_cleanup_temp)
 
 # ---------------------------------------------------------------------------
 # Configurazione pagina — deve essere il PRIMO comando Streamlit

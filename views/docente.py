@@ -551,6 +551,21 @@ def _render_materiali(corso: dict, docente_id: int):
     st.markdown("### Materiali didattici (fonte RAG)")
     st.caption("Questi file alimentano la generazione di lezioni/quiz. Formati accettati: pdf, docx, txt, pptx, xlsx.")
 
+    # Mostra errori di upload salvati in session_state (persistono dopo il rerun)
+    errori_chiave = f"_upload_errori_{corso['id']}"
+    errori_salvati: list[tuple[str, str]] = st.session_state.pop(errori_chiave, [])
+    for nome_file, msg_errore in errori_salvati:
+        with st.expander(f"❌ Errore caricamento — {nome_file}", expanded=True):
+            st.error(msg_errore)
+            if any(kw in msg_errore for kw in ("testo leggibile", "scansione", "immagini")):
+                st.info(
+                    "**Possibili cause:**\n"
+                    "- Il PDF contiene solo immagini/scansioni (nessun testo selezionabile)\n"
+                    "- Il file è protetto da password\n"
+                    "- Il file è corrotto o non valido\n\n"
+                    "**Soluzione:** converti il PDF in testo selezionabile con un tool OCR prima di caricarlo."
+                )
+
     materiali = _get_materiali_corso(corso["id"])
     if materiali:
         for m in materiali:
@@ -585,60 +600,63 @@ def _render_materiali(corso: dict, docente_id: int):
         "Tipo documento (salvato su DB)", ["pdf", "slide", "video", "dispensa", "libro"], key=f"tipo_{corso['id']}"
     )
     if files and st.button("Carica materiali", key=f"do_upload_{corso['id']}"):
+        _elabora = None
+        _import_err = None
         try:
             from src.tools.document_processor import elabora_e_salva_documento as _elabora
-        except Exception:
-            _elabora = None
+        except Exception as _ie:
+            _import_err = _ie
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
-        os.makedirs(upload_dir, exist_ok=True)
-        ok = 0
-        errori = []
-        for f in files:
-            # Salva il file fisico sul disco
-            disk_path = os.path.join(upload_dir, f.name)
-            with open(disk_path, "wb") as out:
-                out.write(f.getbuffer())
-            f.seek(0)  # reset per la lettura successiva
+        if _import_err:
+            st.error(
+                f"**Impossibile caricare il modulo di elaborazione documenti.**\n\n"
+                f"Dettaglio tecnico: `{_import_err}`\n\n"
+                "Controlla che tutte le dipendenze siano installate (`pip install -r requirements.txt`)."
+            )
+        else:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            upload_dir = os.path.join(base_dir, "uploads", str(corso["id"]))
+            os.makedirs(upload_dir, exist_ok=True)
+            ok = 0
+            errori: list[tuple[str, str]] = []
 
-            if _elabora:
-                try:
-                    mat_id = _elabora(
-                        uploaded_file=f,
-                        corso_universitario_id=corso["id"],
-                        titolo=f.name,
-                        tipo=tipo_scelto,
-                    )
-                    # Aggiorna s3_key con il percorso reale sul disco
-                    db.aggiorna(
-                        "materiali_didattici",
-                        {"id": mat_id},
-                        {"s3_key": f"uploads/{corso['id']}/{f.name}"},
-                    )
-                    ok += 1
-                except Exception as e:
-                    errori.append(f"{f.name}: {e}")
-            else:
-                # Fallback senza elaborazione testo
-                db.inserisci(
-                    "materiali_didattici",
-                    {
-                        "corso_universitario_id": corso["id"],
-                        "docente_id": docente_id,
-                        "titolo": f.name,
-                        "tipo": tipo_scelto,
-                        "s3_key": f"uploads/{corso['id']}/{f.name}",
-                        "is_processed": 0,
-                    },
-                )
-                ok += 1
+            for f in files:
+                with st.spinner(f"Elaborazione di **{f.name}**… (estrazione testo, OCR se necessario, arricchimento AI)"):
+                    # Salva il file fisico sul disco
+                    disk_path = os.path.join(upload_dir, f.name)
+                    with open(disk_path, "wb") as out:
+                        out.write(f.getbuffer())
+                    f.seek(0)
 
-        if ok:
-            st.success(f"{ok} file caricati e processati per la RAG.")
-        for err in errori:
-            st.error(f"Errore: {err}")
-        st.session_state["_doc_refresh"] = True
+                    try:
+                        mat_id = _elabora(
+                            uploaded_file=f,
+                            corso_universitario_id=corso["id"],
+                            titolo=f.name,
+                            tipo=tipo_scelto,
+                        )
+                        db.aggiorna(
+                            "materiali_didattici",
+                            {"id": mat_id},
+                            {"s3_key": f"uploads/{corso['id']}/{f.name}"},
+                        )
+                        ok += 1
+                    except ValueError as e:
+                        # Errori prevedibili (es. file senza testo leggibile)
+                        errori.append((f.name, str(e)))
+                    except Exception as e:
+                        # Errori imprevisti — mostra tipo eccezione per diagnosi
+                        errori.append((f.name, f"{type(e).__name__}: {e}"))
+
+            if ok:
+                st.session_state["_doc_refresh"] = True
+
+            if errori:
+                st.session_state[f"_upload_errori_{corso['id']}"] = errori
+
+            # Rerun sempre: su successo aggiorna la lista materiali,
+            # su errore porta gli errori in cima alla sezione via session_state
+            st.rerun()
 
 
 def _cancella_contenuto_piano_corso(corso_id: int) -> None:

@@ -324,10 +324,64 @@ def chat_stream(messaggi: list[dict], system_prompt: str = "") -> Generator[str,
 # ---------------------------------------------------------------------------
 
 
+def _ocr_pdf_con_claude(dati: bytes) -> str:
+    """Estrae testo da un PDF scansionato usando Claude Vision via AWS Bedrock.
+
+    Usa PyMuPDF per renderizzare ogni pagina come immagine JPEG, poi invia
+    ogni immagine a Claude (già configurato nel progetto) per l'estrazione
+    del testo tramite visione artificiale.
+
+    Parametri:
+        dati: Contenuto grezzo del file PDF in byte.
+
+    Ritorna:
+        Testo estratto via OCR, oppure stringa vuota se l'operazione fallisce.
+    """
+    import fitz  # PyMuPDF
+    import base64
+
+    doc = fitz.open(stream=dati, filetype="pdf")
+    llm = _get_llm_veloce()
+
+    pagine_testo: list[str] = []
+    for i, page in enumerate(doc, start=1):
+        # Zoom 2x ≈ 144 DPI — buona qualità OCR con immagini < 1 MB
+        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+        img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+
+        messaggio = HumanMessage(content=[
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            },
+            {
+                "type": "text",
+                "text": (
+                    "Estrai tutto il testo presente in questa immagine. "
+                    "Mantieni la struttura originale (titoli, paragrafi, elenchi). "
+                    "Rispondi solo con il testo estratto, senza commenti aggiuntivi."
+                ),
+            },
+        ])
+
+        risposta = llm.invoke([messaggio])
+        testo_pagina = risposta.content.strip() if risposta.content else ""
+        if testo_pagina:
+            pagine_testo.append(f"[Pagina {i}]\n{testo_pagina}")
+
+    doc.close()
+    return "\n\n".join(pagine_testo).strip()
+
+
 def estrai_testo_da_upload(uploaded_file) -> str:
     """
     Legge il contenuto di un file caricato tramite st.file_uploader.
-    Supporta file .txt, .md, .csv, .pdf, .xls e .xlsx.
+    Supporta file .txt, .md, .csv, .pdf, .xls, .xlsx, .docx e .pptx.
+
+    Per i PDF usa pdfplumber (gestisce layout complessi e tabelle); se una pagina
+    non produce testo (es. pagina con sole immagini) viene aggiunto un segnaposto.
+    Per i DOCX estrae paragrafi e celle di tabella. Per i PPTX estrae il testo
+    da tutti gli shape di ogni slide.
 
     Parametri:
         uploaded_file: l'oggetto restituito da st.file_uploader()
@@ -336,7 +390,7 @@ def estrai_testo_da_upload(uploaded_file) -> str:
         Il contenuto del file come stringa
 
     Esempio:
-        file = st.file_uploader("Carica un file", type=["txt", "pdf", "csv", "xls", "xlsx"])
+        file = st.file_uploader("Carica un file", type=["txt", "pdf", "csv", "xls", "xlsx", "docx", "pptx"])
         if file:
             testo = estrai_testo_da_upload(file)
             st.write(testo)
@@ -344,25 +398,103 @@ def estrai_testo_da_upload(uploaded_file) -> str:
     if uploaded_file is None:
         return ""
 
+    import io
     nome = uploaded_file.name.lower()
+    dati = uploaded_file.read()
 
     # --- PDF ---
     if nome.endswith(".pdf"):
+        # Tentativo 1: pdfplumber (migliore per layout complessi e colonne)
+        _pagine_pdfplumber: list[str] | None = None
+        try:
+            import pdfplumber
+            _pagine_tmp: list[str] = []
+            with pdfplumber.open(io.BytesIO(dati)) as pdf:
+                for i, pagina in enumerate(pdf.pages, start=1):
+                    testo_pagina = pagina.extract_text() or ""
+                    if testo_pagina.strip():
+                        _pagine_tmp.append(testo_pagina)
+                    else:
+                        _pagine_tmp.append(f"[Pagina {i}: contenuto non testuale — possibile immagine o scansione]")
+            _pagine_pdfplumber = _pagine_tmp
+        except Exception:
+            pass
+
+        if _pagine_pdfplumber is not None:
+            testo = "\n\n".join(_pagine_pdfplumber).strip()
+            _solo_immagini = bool(_pagine_pdfplumber) and all(
+                p.startswith("[Pagina") and "non testuale" in p
+                for p in _pagine_pdfplumber
+            )
+            if _solo_immagini:
+                # OCR via Claude Vision — le eccezioni qui vengono propagate
+                # così docente.py può mostrarle all'utente
+                return _ocr_pdf_con_claude(dati)
+            if testo:
+                return testo
+
+        # Fallback: PyPDF2
         try:
             from PyPDF2 import PdfReader
-            import io
-            reader = PdfReader(io.BytesIO(uploaded_file.read()))
+            reader = PdfReader(io.BytesIO(dati))
             pagine = [p.extract_text() or "" for p in reader.pages]
             return "\n\n".join(pagine).strip()
         except Exception as e:
             return f"[Errore lettura PDF: {e}]"
 
+    # --- DOCX ---
+    if nome.endswith(".docx"):
+        try:
+            from docx import Document
+            doc = Document(io.BytesIO(dati))
+            parti: list[str] = []
+
+            # Paragrafi del corpo principale
+            for para in doc.paragraphs:
+                testo_para = para.text.strip()
+                if testo_para:
+                    parti.append(testo_para)
+
+            # Testo nelle tabelle
+            for tabella in doc.tables:
+                for riga in tabella.rows:
+                    testo_riga = " | ".join(
+                        cella.text.strip() for cella in riga.cells if cella.text.strip()
+                    )
+                    if testo_riga:
+                        parti.append(testo_riga)
+
+            return "\n\n".join(parti).strip()
+        except Exception as e:
+            return f"[Errore lettura DOCX: {e}]"
+
+    # --- PPTX ---
+    if nome.endswith(".pptx"):
+        try:
+            from pptx import Presentation
+            prs = Presentation(io.BytesIO(dati))
+            slide_testi: list[str] = []
+
+            for idx, slide in enumerate(prs.slides, start=1):
+                testi_slide: list[str] = []
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            testo_para = "".join(run.text for run in para.runs).strip()
+                            if testo_para:
+                                testi_slide.append(testo_para)
+                if testi_slide:
+                    slide_testi.append(f"[Slide {idx}]\n" + "\n".join(testi_slide))
+
+            return "\n\n".join(slide_testi).strip()
+        except Exception as e:
+            return f"[Errore lettura PPTX: {e}]"
+
     # --- CSV ---
     if nome.endswith(".csv"):
         try:
             import pandas as pd
-            import io
-            df = pd.read_csv(io.BytesIO(uploaded_file.read()))
+            df = pd.read_csv(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
             return f"[Errore lettura CSV: {e}]"
@@ -371,18 +503,16 @@ def estrai_testo_da_upload(uploaded_file) -> str:
     if nome.endswith((".xls", ".xlsx")):
         try:
             import pandas as pd
-            import io
-            df = pd.read_excel(io.BytesIO(uploaded_file.read()))
+            df = pd.read_excel(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
             return f"[Errore lettura Excel: {e}]"
 
     # --- File di testo (.txt, .md, e altri) ---
-    contenuto = uploaded_file.read()
-    if isinstance(contenuto, bytes):
-        contenuto = contenuto.decode("utf-8", errors="replace")
+    if isinstance(dati, bytes):
+        dati = dati.decode("utf-8", errors="replace")
 
-    return contenuto
+    return dati
 
 
 def _parse_json_risposta(testo: str) -> dict:
