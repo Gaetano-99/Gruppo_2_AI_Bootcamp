@@ -562,7 +562,7 @@ img{{display:block;max-width:100%;}}
             Università degli Studi di Napoli Federico II per studenti e professionisti.
         </p>
         <div class="hero-btns">
-            <a class="btn-gold" href="/?azione=login" target="_top">Accedi alla piattaforma</a>
+            <a class="btn-gold" href="http://localhost:8501/?azione=login" target="_top">Accedi alla piattaforma</a>
             <a class="btn-outline-w" href="/?azione=ospite" target="_top">Continua come ospite</a>
         </div>
 
