@@ -130,7 +130,21 @@ def cerca_chunk_rilevanti(
         key=lambda c: (-c["score_rilevanza"], c.get("indice_chunk", 0))
     )
 
-    return candidati_con_score[:top_k]
+    risultato: list[dict] = candidati_con_score[:top_k]
+
+    # Se i risultati keyword sono meno di top_k, integra con chunk generici
+    # (es. corso con nome generico che non matcha il contenuto del materiale)
+    if len(risultato) < top_k:
+        presenti_ids: set[int] = {c["id"] for c in risultato}
+        generici = _recupera_chunk_generici(corso_id, top_k)
+        for g in generici:
+            if g["id"] not in presenti_ids:
+                risultato.append(g)
+                presenti_ids.add(g["id"])
+                if len(risultato) >= top_k:
+                    break
+
+    return risultato
 
 
 def formatta_contesto_rag(chunks: list[dict]) -> str:

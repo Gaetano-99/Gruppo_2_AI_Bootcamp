@@ -61,18 +61,30 @@ def _get_llm_veloce():
     return _llm_veloce
 
 
-def get_llm(veloce: bool = False):
+def get_llm(veloce: bool = False, max_tokens: int | None = None):
     """
     Restituisce l'oggetto LLM di LangChain, utile se volete usarlo
     direttamente con LangGraph o per creare agenti custom.
 
     Parametri:
         veloce: se True, usa il modello Haiku (più economico)
+        max_tokens: se specificato, crea un'istanza dedicata con questo limite token
+                    (utile per output strutturati complessi che richiedono più spazio)
 
     Esempio:
         llm = get_llm()
         llm_haiku = get_llm(veloce=True)
+        llm_long = get_llm(max_tokens=8192)
     """
+    if max_tokens is not None:
+        return ChatBedrockConverse(
+            model=config.BEDROCK_MODEL_ID_FAST if veloce else config.BEDROCK_MODEL_ID,
+            region_name=config.AWS_DEFAULT_REGION,
+            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+            temperature=config.LLM_TEMPERATURE,
+            max_tokens=max_tokens,
+        )
     return _get_llm_veloce() if veloce else _get_llm_principale()
 
 
@@ -502,21 +514,52 @@ def estrai_testo_da_upload(uploaded_file) -> str:
     if nome.endswith(".pptx"):
         try:
             import zipfile
+            import re as _re
             import xml.etree.ElementTree as ET
             _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+            _P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+            _R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
             slide_testi: list[str] = []
             with zipfile.ZipFile(io.BytesIO(dati)) as zf:
-                nomi_slide = sorted(
-                    n for n in zf.namelist()
-                    if n.startswith("ppt/slides/slide") and n.endswith(".xml")
-                )
-                for idx, nome_slide in enumerate(nomi_slide, start=1):
-                    root = ET.fromstring(zf.read(nome_slide))
-                    testi_slide = [
-                        t.text.strip()
-                        for t in root.iter(f"{{{_A}}}t")
-                        if t.text and t.text.strip()
+                nomi_disponibili = set(zf.namelist())
+
+                # Determina l'ordine reale delle slide da presentation.xml.rels
+                nomi_slide_ordinati: list[str] = []
+                try:
+                    rels_root = ET.fromstring(zf.read("ppt/_rels/presentation.xml.rels"))
+                    rels_map = {r.get("Id"): r.get("Target") for r in rels_root}
+                    prs_root = ET.fromstring(zf.read("ppt/presentation.xml"))
+                    for sld in prs_root.iter(f"{{{_P}}}sldId"):
+                        rid = sld.get(f"{{{_R}}}id")
+                        if rid and rid in rels_map:
+                            path = f"ppt/{rels_map[rid]}"
+                            if path in nomi_disponibili:
+                                nomi_slide_ordinati.append(path)
+                except Exception:
+                    pass
+
+                # Fallback: sort numerico sul numero nel nome file
+                if not nomi_slide_ordinati:
+                    tutti = [
+                        n for n in nomi_disponibili
+                        if n.startswith("ppt/slides/slide") and n.endswith(".xml")
                     ]
+                    nomi_slide_ordinati = sorted(
+                        tutti,
+                        key=lambda x: int(_re.search(r"\d+", x.split("/")[-1]).group()),
+                    )
+
+                for idx, nome_slide in enumerate(nomi_slide_ordinati, start=1):
+                    root = ET.fromstring(zf.read(nome_slide))
+                    testi_slide: list[str] = []
+                    # Itera sui paragrafi (<a:p>) e unisce i run (<a:t>) al loro interno,
+                    # così una frase con stili misti resta una riga intera
+                    for para in root.iter(f"{{{_A}}}p"):
+                        testo_para = "".join(
+                            t.text or "" for t in para.iter(f"{{{_A}}}t")
+                        ).strip()
+                        if testo_para:
+                            testi_slide.append(testo_para)
                     if testi_slide:
                         slide_testi.append(f"[Slide {idx}]\n" + "\n".join(testi_slide))
             return "\n\n".join(slide_testi).strip()

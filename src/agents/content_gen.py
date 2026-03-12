@@ -44,7 +44,8 @@ from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, c
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_MAX_CHUNK_IN_CONTESTO: int = 8
+_MAX_CHUNK_IN_CONTESTO: int = 12
+_MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
 
 _SYSTEM_PROMPT_AGENTE = """Sei il Content Generation Engine della piattaforma LearnAI.
 Il tuo compito è strutturare materiale didattico in un formato JSON rigoroso.
@@ -117,7 +118,7 @@ class StrutturaCorso(BaseModel):
     titolo_corso: str = Field(description="Titolo del corso")
     descrizione_breve: str = Field(description="Descrizione sintetica del corso")
     durata_stimata_minuti: int = Field(description="Durata stimata in minuti")
-    capitoli: list[Capitolo] = Field(default_factory=list, description="Lista dei capitoli del corso")
+    capitoli: list[Capitolo] = Field(description="Lista dei capitoli del corso (almeno uno obbligatorio)")
 
 
 # ---------------------------------------------------------------------------
@@ -228,13 +229,16 @@ def _nodo_genera_struttura_corso(stato: ContentGenState) -> dict:
         if istruzioni else ""
     )
 
-    prompt_struttura = f"""Genera la struttura completa di un corso didattico sull'argomento: "{argomento}".
+    prompt_struttura = f"""Analizza il materiale didattico fornito e genera la struttura completa di un corso.
+Il nome del corso è "{argomento}" — usalo come riferimento, ma struttura i capitoli
+in base ai TEMI REALI presenti nel materiale, non al nome del corso.
 {sezione_istruzioni}
-CONTESTO DIDATTICO (usa SOLO queste informazioni):
+MATERIALE DIDATTICO (usa SOLO queste informazioni):
 {contesto_rag}
 
-ISTRUZIONE FONDAMENTALE: ogni affermazione deve provenire dai chunk sopra.
-Non aggiungere informazioni esterne. Se il materiale è insufficiente, dichiaralo.
+ISTRUZIONE FONDAMENTALE: ogni affermazione deve provenire dal materiale sopra.
+Non aggiungere informazioni esterne. Devi SEMPRE generare almeno un capitolo
+con tutto il contenuto disponibile nel materiale.
 
 Organizza i contenuti in:
 - Capitoli tematici coerenti (con id_capitolo, titolo, ordine)
@@ -246,7 +250,7 @@ Stima la durata totale del corso in minuti.
 
 Lingua: Italiano."""
 
-    llm = get_llm()
+    llm = get_llm(max_tokens=_MAX_TOKENS_GENERAZIONE)
     llm_strutturato = llm.with_structured_output(StrutturaCorso)
 
     messaggi = [
@@ -261,6 +265,13 @@ Lingua: Italiano."""
             "struttura_corso_generata": {},
             "chunk_ids_utilizzati": [],
             "errore": f"Il modello non ha generato una struttura valida: {exc}",
+        }
+
+    if output is None:
+        return {
+            "struttura_corso_generata": {},
+            "chunk_ids_utilizzati": [],
+            "errore": "Il modello non ha restituito output. Riprova.",
         }
 
     if not output.capitoli:

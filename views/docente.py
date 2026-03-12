@@ -660,30 +660,31 @@ def _render_materiali(corso: dict, docente_id: int):
 
 
 def _cancella_contenuto_piano_corso(corso_id: int) -> None:
-    """Elimina il piano docente esistente (is_corso_docente=1) e tutto il suo contenuto."""
+    """Elimina TUTTI i piani docente esistenti (is_corso_docente=1) e il loro contenuto."""
     piani = db.trova_tutti("piani_personalizzati", {"corso_universitario_id": corso_id, "is_corso_docente": 1})
     if not piani:
         return
-    piano_id = piani[0]["id"]
-    paragrafi = db.esegui(
-        "SELECT pp.id FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id WHERE pc.piano_id = ?",
-        [piano_id],
-    )
-    par_ids = [p["id"] for p in paragrafi]
-    if par_ids:
-        ph = ",".join("?" * len(par_ids))
-        contenuti_quiz = db.esegui(
-            f"SELECT quiz_id FROM piano_contenuti WHERE paragrafo_id IN ({ph}) AND quiz_id IS NOT NULL", par_ids
+    for piano in piani:
+        piano_id = piano["id"]
+        paragrafi = db.esegui(
+            "SELECT pp.id FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id WHERE pc.piano_id = ?",
+            [piano_id],
         )
-        quiz_ids = [c["quiz_id"] for c in contenuti_quiz if c.get("quiz_id")]
-        db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({ph})", par_ids)
-        db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({ph})", par_ids)
-        if quiz_ids:
-            qph = ",".join("?" * len(quiz_ids))
-            db.esegui(f"DELETE FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids)
-            db.esegui(f"DELETE FROM quiz WHERE id IN ({qph})", quiz_ids)
-    db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
-    db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
+        par_ids = [p["id"] for p in paragrafi]
+        if par_ids:
+            ph = ",".join("?" * len(par_ids))
+            contenuti_quiz = db.esegui(
+                f"SELECT quiz_id FROM piano_contenuti WHERE paragrafo_id IN ({ph}) AND quiz_id IS NOT NULL", par_ids
+            )
+            quiz_ids = [c["quiz_id"] for c in contenuti_quiz if c.get("quiz_id")]
+            db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({ph})", par_ids)
+            db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({ph})", par_ids)
+            if quiz_ids:
+                qph = ",".join("?" * len(quiz_ids))
+                db.esegui(f"DELETE FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+                db.esegui(f"DELETE FROM quiz WHERE id IN ({qph})", quiz_ids)
+        db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
+        db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
 
 
 def _salva_contenuti_corso_db(corso_id: int, docente_id: int, schema: List[dict]) -> tuple[bool, str]:

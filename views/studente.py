@@ -728,7 +728,7 @@ def _get_piano_docente_corso(corso_id: int) -> dict | None:
         piani = db.trova_tutti("piani_personalizzati", {
             "corso_universitario_id": corso_id,
             "is_corso_docente": 1,
-        })
+        }, ordine="id DESC", limite=1)
         return piani[0] if piani else None
     except Exception:
         return None
