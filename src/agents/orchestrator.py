@@ -1024,11 +1024,29 @@ def chat_con_orchestratore(
     # non è accessibile — leggono _STUDENTE_ID_CORRENTE dal modulo.
     _aggiorna_studente_corrente()
 
-    return esegui_agente(
-        _get_orchestratore(),
-        messaggio_utente,
-        thread_id=_get_thread_id(),
-    )
+    try:
+        return esegui_agente(
+            _get_orchestratore(),
+            messaggio_utente,
+            thread_id=_get_thread_id(),
+        )
+    except Exception as e:
+        # Se il checkpoint contiene AIMessage con tool_calls orfani (senza
+        # il corrispondente ToolMessage), la conversazione è corrotta.
+        # Questo succede quando un rerun di Streamlit interrompe l'agente
+        # a metà di una tool call.  Ricreiamo l'agente con un InMemorySaver
+        # pulito e riproviamo — l'utente perde la cronologia LangGraph ma
+        # la chat UI (chat_history_display) resta intatta.
+        if "tool_calls" in str(e) and "ToolMessage" in str(e):
+            st.session_state.pop(_SK_ORCHESTRATORE, None)
+            st.session_state.pop(_SK_ORCHESTRATORE_DOCENTE, None)
+            st.session_state.pop(_SK_THREAD_ID, None)
+            return esegui_agente(
+                _get_orchestratore(),
+                messaggio_utente,
+                thread_id=_get_thread_id(),
+            )
+        raise
 
 
 def reset_sessione_chat() -> None:

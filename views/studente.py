@@ -14,6 +14,7 @@
 # ============================================================================
 
 import json
+import re
 import sys
 import os
 
@@ -632,6 +633,15 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 
 
 # ---------------------------------------------------------------------------
+# Helper HTML escaping
+# ---------------------------------------------------------------------------
+
+def _esc(text: str) -> str:
+    """Escapa caratteri HTML speciali per evitare XSS nei template unsafe_allow_html."""
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+# ---------------------------------------------------------------------------
 # Helper DB
 # ---------------------------------------------------------------------------
 
@@ -801,14 +811,17 @@ def _render_topbar(utente: dict) -> bool:
     # col_esci PRIMA (sinistra) così non viene coperto dal topbar HTML
     col_esci, col_brand = st.columns([1, 10])
 
+    logout_richiesto = False
     with col_esci:
         # Sfondo identico alla topbar per continuità visiva
         st.markdown("""
         <div class="topbar-logout-bg"></div>
         """, unsafe_allow_html=True)
-        return st.button("Esci", key="logout_btn", use_container_width=True)
+        logout_richiesto = st.button("Esci", key="logout_btn", use_container_width=True)
 
     with col_brand:
+        nome_safe = _esc(utente['nome'])
+        cognome_safe = _esc(utente['cognome'])
         st.markdown(f"""
         <div class="topbar">
             <div class="topbar-brand">Learn<span>AI</span> &nbsp;·&nbsp;
@@ -817,13 +830,13 @@ def _render_topbar(utente: dict) -> bool:
                 </span>
             </div>
             <div class="topbar-user">
-                <span>{utente['nome']} {utente['cognome']}</span>
+                <span>{nome_safe} {cognome_safe}</span>
                 <div class="topbar-avatar">{iniziali}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
 
-    return False
+    return logout_richiesto
 
 
 def _render_sidebar_corsi(corsi: list[dict]):
@@ -852,11 +865,11 @@ def _render_sidebar_corsi(corsi: list[dict]):
 
         st.markdown(f"""
         <div class="corso-item {attivo_cls}" style="margin-bottom:8px;">
-            <div class="corso-nome">{corso["nome"]}</div>
+            <div class="corso-nome">{_esc(corso["nome"])}</div>
             <div class="corso-meta">
                 {"Anno " + str(corso["anno_di_corso"]) if corso.get("anno_di_corso") else ""}
                 {" · " + str(corso["cfu"]) + " CFU" if corso.get("cfu") else ""}
-                &nbsp;<span class="corso-stato {stato_cls}">{stato.capitalize()}</span>
+                &nbsp;<span class="corso-stato {stato_cls}">{_esc(stato.capitalize())}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -893,10 +906,10 @@ def _render_sidebar_piani(studente_id: int):
         titolo_breve = (piano["titolo"] or "")[:42]
         st.markdown(f"""
         <div class="piano-card {'attivo' if attivo else ''}">
-            <h5>{titolo_breve}{'…' if len(piano["titolo"] or '') > 42 else ''}</h5>
+            <h5>{_esc(titolo_breve)}{'…' if len(piano["titolo"] or '') > 42 else ''}</h5>
             <div class="piano-meta">
                 <span class="ai-badge">AI</span>
-                &nbsp;{corso_nome_breve}
+                &nbsp;{_esc(corso_nome_breve)}
                 &nbsp;·&nbsp;{piano.get("created_at", "")[:10]}
             </div>
         </div>
@@ -952,7 +965,7 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
     </div>
     """, unsafe_allow_html=True)
 
-    st.space("small")
+    st.markdown("<div style='margin-top:12px'></div>", unsafe_allow_html=True)
 
     # ------------------------------------------------------------------ #
     # 2. CONTENUTO — capitoli espandibili
@@ -1427,9 +1440,12 @@ def _render_chatbot(
             piano_titolo=piano_titolo,
         )
 
+    # Flag per bloccare l'interazione durante l'elaborazione di Lea
+    is_processing = st.session_state.get("_lea_processing", False)
+
     # ---- Bottone "Torna alla home" sopra la chat ----
     if view_mode:
-        if st.button("🏠 Torna alla home", key="btn_home_chat", use_container_width=True):
+        if st.button("🏠 Torna alla home", key="btn_home_chat", use_container_width=True, disabled=is_processing):
             st.session_state["_view_mode"] = None
             st.session_state["_corso_sel"] = None
             st.session_state["_piano_sel"] = None
@@ -1470,9 +1486,8 @@ def _render_chatbot(
                 testo_safe = m["content"].replace("<", "&lt;").replace(">", "&gt;")
                 html += f'<div class="msg-user">{testo_safe}</div>'
             else:
-                import re as _re
                 contenuto = m["content"].replace("<", "&lt;").replace(">", "&gt;")
-                contenuto = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', contenuto)
+                contenuto = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', contenuto)
                 contenuto = contenuto.replace("\n", "<br>")
                 html += f'<div class="msg-ai">{contenuto}</div>'
         
@@ -1489,31 +1504,140 @@ def _render_chatbot(
 
     # Render messaggi tramite segnaposto (per aggiornamento immediato)
     chat_placeholder = st.empty()
-    chat_placeholder.markdown(get_chat_html(), unsafe_allow_html=True)
+    chat_placeholder.markdown(get_chat_html(is_typing=is_processing), unsafe_allow_html=True)
+
+    # ==================================================================
+    # PHASE 2: Elaborazione messaggio pendente (bloccante)
+    # Eseguita nel rerun successivo a Phase 1 — widget disabilitati.
+    # ==================================================================
+    if is_processing:
+        pending_msg = st.session_state.get("_lea_pending_message")
+        if pending_msg:
+            _p2_mat_scelto = st.session_state.pop("_lea_pending_mat_scelto", None)
+            _p2_materiali_liberi = st.session_state.pop("_lea_pending_materiali_liberi", None)
+
+            # Aggiorna contesto materiale
+            if _p2_mat_scelto and aggiorna_contesto is not None:
+                aggiorna_contesto(
+                    corso_id=_p2_mat_scelto["corso_id"],
+                    materiale_selezionato=_p2_mat_scelto,
+                )
+            if _p2_materiali_liberi and not _p2_mat_scelto and aggiorna_contesto is not None:
+                _p2_titoli = ", ".join(f"'{m['titolo']}'" for m in _p2_materiali_liberi)
+                _p2_primo_id = _p2_materiali_liberi[0]["id"]
+                aggiorna_contesto(
+                    clear_corso=True,
+                    materiale_selezionato={"id": _p2_primo_id, "titolo": _p2_titoli, "corso_id": None},
+                )
+
+            # Snapshot piani esistenti PRIMA della chiamata all'agente
+            _mat_libero_corso = (_p2_materiali_liberi[0].get("corso_universitario_id") if _p2_materiali_liberi else None)
+            _corso_id_eff = (_p2_mat_scelto["corso_id"] if _p2_mat_scelto else None) or _mat_libero_corso or corso_id
+            _studente_id_chat = st.session_state.get("current_user_id")
+            _piani_prima: set[int] = set()
+            if _corso_id_eff:
+                _piani_prima = {
+                    p["id"] for p in db.trova_tutti(
+                        "piani_personalizzati",
+                        {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
+                    )
+                }
+            elif _p2_materiali_liberi:
+                _piani_prima = {
+                    p["id"] for p in db.esegui(
+                        "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
+                        [_studente_id_chat],
+                    )
+                }
+
+            # Esecuzione IA
+            if chat_con_orchestratore is not None and aggiorna_contesto is not None:
+                if corso_id or piano_id or view_mode:
+                    aggiorna_contesto(
+                        corso_id=corso_id,
+                        corso_nome=corso_nome,
+                        tipo_vista=view_mode,
+                        piano_id=piano_id,
+                        piano_titolo=piano_titolo,
+                    )
+                try:
+                    risposta = chat_con_orchestratore(
+                        messaggio_utente=pending_msg,
+                        corso_contestuale_id=corso_id,
+                        corso_contestuale_nome=corso_nome,
+                    )
+                except Exception as e:
+                    risposta = f"⚠️ Errore: {str(e)[:120]}"
+                finally:
+                    if _p2_mat_scelto and aggiorna_contesto is not None:
+                        aggiorna_contesto(clear_materiale=True)
+            else:
+                risposta = (
+                    "⚙️ Lea non è ancora configurata (AWS Bedrock non attivo). "
+                    "Configura le credenziali AWS in `config.py` per abilitarla."
+                )
+
+            st.session_state["chat_history_display"].append(
+                {"role": "assistant", "content": risposta}
+            )
+
+            # Controlla se l'agente ha creato un nuovo piano → auto-naviga
+            if _corso_id_eff:
+                _piani_dopo = {
+                    p["id"] for p in db.trova_tutti(
+                        "piani_personalizzati",
+                        {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
+                    )
+                }
+                nuovi = _piani_dopo - _piani_prima
+                if nuovi:
+                    nuovo_piano_id = max(nuovi)
+                    st.session_state["_piano_sel"]  = nuovo_piano_id
+                    st.session_state["_corso_sel"]  = _corso_id_eff
+                    st.session_state["_view_mode"]  = "piano"
+            elif _p2_materiali_liberi:
+                _tutti_piani_dopo = {
+                    p["id"] for p in db.esegui(
+                        "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
+                        [_studente_id_chat],
+                    )
+                }
+                nuovi = _tutti_piani_dopo - _piani_prima
+                if nuovi:
+                    nuovo_piano_id = max(nuovi)
+                    st.session_state["_piano_sel"]  = nuovo_piano_id
+                    st.session_state["_corso_sel"]  = None
+                    st.session_state["_view_mode"]  = "piano"
+
+            # Pulisci stato di processing
+            st.session_state.pop("_lea_pending_message", None)
+            st.session_state.pop("_lea_processing", None)
+            st.rerun()
 
     # ---- Materiale selezionato tramite "Visualizza materiale" → auto-messaggio ----
     messaggio_da_materiale: str | None = None
-    mat_scelto = st.session_state.pop("_materiale_da_studiare", None)
-    if mat_scelto and aggiorna_contesto is not None:
-        # Inietta il materiale nel contesto PRIMA di invocare l'agente
-        aggiorna_contesto(
-            corso_id=mat_scelto["corso_id"],
-            materiale_selezionato=mat_scelto,
-        )
-        messaggio_da_materiale = f"Crea una lezione dal materiale '{mat_scelto['titolo']}'"
-
-    # ---- Materiali liberi selezionati (senza corso) → auto-messaggio ----
-    materiali_liberi = st.session_state.pop("_materiali_liberi_selezionati", None)
-    if materiali_liberi and not messaggio_da_materiale:
-        titoli_str = ", ".join(f"'{m['titolo']}'" for m in materiali_liberi)
-        primo_id = materiali_liberi[0]["id"]
-        if aggiorna_contesto is not None:
-            # clear_corso=True azzera l'eventuale corso precedente nel contesto
+    mat_scelto = None
+    materiali_liberi = None
+    if not is_processing:
+        mat_scelto = st.session_state.pop("_materiale_da_studiare", None)
+        if mat_scelto and aggiorna_contesto is not None:
             aggiorna_contesto(
-                clear_corso=True,
-                materiale_selezionato={"id": primo_id, "titolo": titoli_str, "corso_id": None},
+                corso_id=mat_scelto["corso_id"],
+                materiale_selezionato=mat_scelto,
             )
-        messaggio_da_materiale = f"Genera una lezione basata sui seguenti documenti: {titoli_str}"
+            messaggio_da_materiale = f"Crea una lezione dal materiale '{mat_scelto['titolo']}'"
+
+        # ---- Materiali liberi selezionati (senza corso) → auto-messaggio ----
+        materiali_liberi = st.session_state.pop("_materiali_liberi_selezionati", None)
+        if materiali_liberi and not messaggio_da_materiale:
+            titoli_str = ", ".join(f"'{m['titolo']}'" for m in materiali_liberi)
+            primo_id = materiali_liberi[0]["id"]
+            if aggiorna_contesto is not None:
+                aggiorna_contesto(
+                    clear_corso=True,
+                    materiale_selezionato={"id": primo_id, "titolo": titoli_str, "corso_id": None},
+                )
+            messaggio_da_materiale = f"Genera una lezione basata sui seguenti documenti: {titoli_str}"
 
     # ---- Suggerimenti rapidi — compatti, sopra l'input ----
     suggerimenti = [
@@ -1524,108 +1648,33 @@ def _render_chatbot(
     messaggio_da_suggerimento: str | None = None
     with st.container(horizontal=True):
         for sug_i, (icona, testo) in enumerate(suggerimenti):
-            if st.button(f"{icona} {testo}", key=f"sug_{sug_i}"):
+            if st.button(f"{icona} {testo}", key=f"sug_{sug_i}", disabled=is_processing):
                 if corso_id and corso_nome:
                     messaggio_da_suggerimento = f"{testo} per il corso di {corso_nome}"
                 else:
                     messaggio_da_suggerimento = testo
 
     # ---- Input chat nativo (pulizia automatica dopo invio) ----
-    user_input = st.chat_input("Chiedi a Lea...", key="lea_chat_input")
+    user_input = st.chat_input("Chiedi a Lea...", key="lea_chat_input", disabled=is_processing)
 
     # Unifica input da campo libero, da suggerimento e da selezione materiale
     messaggio_finale: str | None = user_input or messaggio_da_suggerimento or messaggio_da_materiale
 
-    if messaggio_finale:
+    # ==================================================================
+    # PHASE 1: Salva il messaggio e avvia il processing
+    # Al prossimo rerun i widget saranno disabilitati e Phase 2 elaborerà.
+    # ==================================================================
+    if messaggio_finale and not is_processing:
         st.session_state["chat_history_display"].append(
             {"role": "user", "content": messaggio_finale}
         )
-        # Mostra subito la domanda + l'animazione "sta scrivendo..."
-        chat_placeholder.markdown(get_chat_html(is_typing=True), unsafe_allow_html=True)
-
-        # Snapshot piani esistenti PRIMA della chiamata all'agente
-        _mat_libero_corso = (materiali_liberi[0].get("corso_universitario_id") if materiali_liberi else None)
-        _corso_id_eff = (mat_scelto["corso_id"] if mat_scelto else None) or _mat_libero_corso or corso_id
-        _studente_id_chat = st.session_state.get("current_user_id")
-        _piani_prima: set[int] = set()
-        if _corso_id_eff:
-            _piani_prima = {
-                p["id"] for p in db.trova_tutti(
-                    "piani_personalizzati",
-                    {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
-                )
-            }
-        elif materiali_liberi:
-            _piani_prima = {
-                p["id"] for p in db.esegui(
-                    "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
-                    [_studente_id_chat],
-                )
-            }
-
-        # Esecuzione IA
-        if chat_con_orchestratore is not None and aggiorna_contesto is not None:
-            if corso_id or piano_id or view_mode:
-                aggiorna_contesto(
-                    corso_id=corso_id,
-                    corso_nome=corso_nome,
-                    tipo_vista=view_mode,
-                    piano_id=piano_id,
-                    piano_titolo=piano_titolo,
-                )
-            try:
-                risposta = chat_con_orchestratore(
-                    messaggio_utente=messaggio_finale,
-                    corso_contestuale_id=corso_id,
-                    corso_contestuale_nome=corso_nome,
-                )
-            except Exception as e:
-                risposta = f"⚠️ Errore: {str(e)[:120]}"
-            finally:
-                # Dopo che Lea ha risposto, rimuovi il materiale selezionato dal contesto
-                # per evitare che venga riutilizzato nelle conversazioni successive.
-                if mat_scelto and aggiorna_contesto is not None:
-                    aggiorna_contesto(clear_materiale=True)
-        else:
-            risposta = (
-                "⚙️ Lea non è ancora configurata (AWS Bedrock non attivo). "
-                "Configura le credenziali AWS in `config.py` per abilitarla."
-            )
-
-        st.session_state["chat_history_display"].append(
-            {"role": "assistant", "content": risposta}
-        )
-
-        # Controlla se l'agente ha creato un nuovo piano → auto-naviga in vista piano
-        _studente_id_chat = st.session_state.get("current_user_id")
-        if _corso_id_eff:
-            _piani_dopo = {
-                p["id"] for p in db.trova_tutti(
-                    "piani_personalizzati",
-                    {"studente_id": _studente_id_chat, "corso_universitario_id": _corso_id_eff},
-                )
-            }
-            nuovi = _piani_dopo - _piani_prima
-            if nuovi:
-                nuovo_piano_id = max(nuovi)
-                st.session_state["_piano_sel"]  = nuovo_piano_id
-                st.session_state["_corso_sel"]  = _corso_id_eff
-                st.session_state["_view_mode"]  = "piano"
-        elif materiali_liberi:
-            # Piano creato senza corso: cerca i nuovi piani senza corso_universitario_id
-            _tutti_piani_dopo = {
-                p["id"] for p in db.esegui(
-                    "SELECT id FROM piani_personalizzati WHERE studente_id = ? AND corso_universitario_id IS NULL",
-                    [_studente_id_chat],
-                )
-            }
-            nuovi = _tutti_piani_dopo - _piani_prima
-            if nuovi:
-                nuovo_piano_id = max(nuovi)
-                st.session_state["_piano_sel"]  = nuovo_piano_id
-                st.session_state["_corso_sel"]  = None
-                st.session_state["_view_mode"]  = "piano"
-
+        st.session_state["_lea_pending_message"] = messaggio_finale
+        st.session_state["_lea_processing"] = True
+        # Salva contesto materiale per Phase 2
+        if mat_scelto:
+            st.session_state["_lea_pending_mat_scelto"] = mat_scelto
+        if materiali_liberi:
+            st.session_state["_lea_pending_materiali_liberi"] = materiali_liberi
         st.rerun()
 
 
@@ -1875,8 +1924,10 @@ def _dialog_view_materiale_libero(user_id: int):
     st.markdown("**Materiale disponibile per generare la lezione**")
     st.caption("Seleziona uno o più documenti e clicca il pulsante per generare la lezione.")
     try:
+        # docente_id contiene l'ID dell'utente che ha caricato il materiale
+        # (anche quando l'uploader è uno studente)
         materiali = db.esegui(
-            "SELECT * FROM materiali_didattici WHERE docente_id = ? ORDER BY caricato_il DESC",
+            "SELECT * FROM materiali_didattici WHERE docente_id = ? AND corso_universitario_id IS NULL ORDER BY caricato_il DESC",
             [user_id],
         )
     except Exception:
@@ -1991,7 +2042,7 @@ def mostra_homepage_studente():
     with col_cx:
         if not view_mode:
             # Welcome screen
-            nome = utente["nome"]
+            nome = _esc(utente["nome"])
             st.markdown(f"""
             <div class="empty-state" style="padding-top:24px; padding-bottom:8px">
                 <div class="icon">🎓</div>
@@ -2019,7 +2070,7 @@ def mostra_homepage_studente():
             col_hdr, col_disiscriviti = st.columns([5, 1])
             with col_hdr:
                 st.markdown(f"""
-                <div class="section-header">{corso_sel_nome}</div>
+                <div class="section-header">{_esc(corso_sel_nome)}</div>
                 <div class="section-sub">Corso universitario · Sola lettura</div>
                 """, unsafe_allow_html=True)
             with col_disiscriviti:
@@ -2047,9 +2098,9 @@ def mostra_homepage_studente():
             piano_info = db.trova_tutti("piani_personalizzati", {"id": piano_sel_id})
             titolo_piano = piano_info[0]["titolo"] if piano_info else "Piano di studio"
 
-            sub_label = f"{corso_sel_nome} · Piano personalizzato" if corso_sel_nome else "Piano personalizzato"
+            sub_label = f"{_esc(corso_sel_nome)} · Piano personalizzato" if corso_sel_nome else "Piano personalizzato"
             st.markdown(f"""
-            <div class="section-header">{titolo_piano}</div>
+            <div class="section-header">{_esc(titolo_piano)}</div>
             <div class="section-sub">{sub_label}</div>
             """, unsafe_allow_html=True)
 
