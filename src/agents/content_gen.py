@@ -38,7 +38,7 @@ if _ROOT not in sys.path:
 
 from platform_sdk.database import db
 from platform_sdk.llm import get_llm
-from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso
+from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso, recupera_sommari_materiali
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,7 @@ from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, c
 # ---------------------------------------------------------------------------
 _MAX_CHUNK_IN_CONTESTO: int = 12
 _MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
+_MAX_CONTESTO_CHARS: int = 35000     # Limite caratteri contesto RAG per evitare output troncato
 
 _SYSTEM_PROMPT_AGENTE = """Sei il Content Generation Engine della piattaforma LearnAI.
 Il tuo compito è strutturare materiale didattico in un formato JSON rigoroso.
@@ -135,6 +136,7 @@ class ContentGenState(TypedDict):
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
         materiale_id: Se specificato, limita il RAG ai chunk di quel singolo materiale.
+        materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
         chunks_recuperati: Lista di dizionari con i chunk RAG (id, testo, ...).
         n_chunk_totali_corso: Conteggio totale chunk del corso (per display).
         struttura_corso_generata: Dizionario JSON con la StrutturaCorso prodotta.
@@ -147,6 +149,7 @@ class ContentGenState(TypedDict):
     docente_id: int
     is_corso_docente: bool
     materiale_id: int | None
+    materiale_ids: list[int] | None
     chunks_recuperati: list[dict]
     n_chunk_totali_corso: int
     struttura_corso_generata: dict
@@ -163,6 +166,7 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
 
     Delega interamente a ``cerca_chunk_rilevanti`` in ``rag_engine.py``
     la logica di keyword extraction, query SQL LIKE multi-campo e scoring.
+    Supporta sia singolo materiale_id sia lista materiale_ids.
 
     Args:
         stato: Stato corrente del grafo.
@@ -174,8 +178,19 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
     corso_id: int | None = stato["corso_id"]
     argomento: str = stato["argomento_richiesto"]
     materiale_id: int | None = stato.get("materiale_id")
+    materiale_ids: list[int] | None = stato.get("materiale_ids")
 
-    n_totali: int = conta_chunk_corso(corso_id, materiale_id=materiale_id)
+    # Aumenta top_k quando ci sono più materiali per garantire copertura
+    top_k = _MAX_CHUNK_IN_CONTESTO
+    if materiale_ids and len(materiale_ids) > 1:
+        top_k = min(_MAX_CHUNK_IN_CONTESTO * 2, 24)
+
+    n_totali: int = conta_chunk_corso(
+        corso_id, materiale_id=materiale_id, materiale_ids=materiale_ids,
+    )
+
+    print(f"[DEBUG _nodo_recupera_chunks] corso_id={corso_id}, materiale_id={materiale_id}, "
+          f"materiale_ids={materiale_ids}, n_totali={n_totali}, top_k={top_k}")
 
     if n_totali == 0:
         return {
@@ -190,9 +205,12 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
     chunks_rilevanti: list[dict] = cerca_chunk_rilevanti(
         corso_id=corso_id,
         query=argomento,
-        top_k=_MAX_CHUNK_IN_CONTESTO,
+        top_k=top_k,
         materiale_id=materiale_id,
+        materiale_ids=materiale_ids,
     )
+
+    print(f"[DEBUG _nodo_recupera_chunks] chunks_rilevanti={len(chunks_rilevanti)}")
 
     return {
         "chunks_recuperati": chunks_rilevanti,
@@ -220,6 +238,10 @@ def _nodo_genera_struttura_corso(stato: ContentGenState) -> dict:
     chunks: list[dict] = stato["chunks_recuperati"]
     argomento: str = stato["argomento_richiesto"]
     istruzioni: str = stato.get("istruzioni_utente", "").strip()
+
+    # Limita i chunk se il contesto supera il massimo consentito,
+    # per evitare che l'output strutturato venga troncato dal limite token.
+    chunks = _tronca_chunks_per_contesto(chunks)
 
     contesto_rag: str = formatta_contesto_rag(chunks)
     chunk_ids: list[int] = [c["id"] for c in chunks]
@@ -258,20 +280,33 @@ Lingua: Italiano."""
         HumanMessage(content=prompt_struttura),
     ]
 
-    try:
-        output: StrutturaCorso = llm_strutturato.invoke(messaggi)
-    except (ValidationError, Exception) as exc:
-        return {
-            "struttura_corso_generata": {},
-            "chunk_ids_utilizzati": [],
-            "errore": f"Il modello non ha generato una struttura valida: {exc}",
-        }
+    print(f"[DEBUG _nodo_genera_struttura] n_chunks={len(chunks)}, "
+          f"contesto_rag_len={len(contesto_rag)} chars, argomento='{argomento}'")
+
+    # Primo tentativo
+    output = _invoca_llm_strutturato(llm_strutturato, messaggi)
+
+    # Retry con contesto ridotto se il primo tentativo fallisce
+    if output is None and len(chunks) > 6:
+        chunks_ridotti = chunks[:len(chunks) // 2]
+        contesto_ridotto = formatta_contesto_rag(chunks_ridotti)
+        chunk_ids = [c["id"] for c in chunks_ridotti]
+
+        prompt_retry = prompt_struttura.replace(contesto_rag, contesto_ridotto)
+        messaggi_retry = [
+            SystemMessage(content=_SYSTEM_PROMPT_AGENTE),
+            HumanMessage(content=prompt_retry),
+        ]
+
+        print(f"[DEBUG _nodo_genera_struttura] RETRY con {len(chunks_ridotti)} chunks, "
+              f"contesto_len={len(contesto_ridotto)} chars")
+        output = _invoca_llm_strutturato(llm_strutturato, messaggi_retry)
 
     if output is None:
         return {
             "struttura_corso_generata": {},
             "chunk_ids_utilizzati": [],
-            "errore": "Il modello non ha restituito output. Riprova.",
+            "errore": "Il modello non ha generato una struttura valida. Riprova con meno materiali.",
         }
 
     if not output.capitoli:
@@ -431,6 +466,7 @@ def esegui_generazione(
     docente_id: int = 1,
     is_corso_docente: bool = True,
     materiale_id: int | None = None,
+    materiale_ids: list[int] | None = None,
     istruzioni_utente: str = "",
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
@@ -442,6 +478,7 @@ def esegui_generazione(
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, salva come corso docente; se False, come piano studente.
         materiale_id: Se specificato, limita il RAG ai chunk di quel materiale.
+        materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
         istruzioni_utente: Istruzioni aggiuntive su come strutturare la lezione.
 
     Returns:
@@ -454,6 +491,7 @@ def esegui_generazione(
         "argomento_richiesto": argomento_richiesto,
         "istruzioni_utente": istruzioni_utente,
         "materiale_id": materiale_id,
+        "materiale_ids": materiale_ids,
         "chunks_recuperati": [],
         "n_chunk_totali_corso": 0,
         "struttura_corso_generata": {},

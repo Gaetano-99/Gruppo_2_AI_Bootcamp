@@ -17,10 +17,15 @@ import json
 import re
 from typing import Generator
 
+from botocore.config import Config as BotoConfig
 from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 import config
+
+# Timeout esteso per chiamate LLM con contesto ampio o structured output.
+# Il default boto3 (60s) non basta per generazioni complesse (es. multi-materiale).
+_BEDROCK_CONFIG = BotoConfig(read_timeout=300, connect_timeout=10, retries={"max_attempts": 2})
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +47,7 @@ def _get_llm_principale():
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=config.LLM_MAX_TOKENS,
+            config=_BEDROCK_CONFIG,
         )
     return _llm_principale
 
@@ -57,6 +63,7 @@ def _get_llm_veloce():
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=config.LLM_MAX_TOKENS_FAST,
+            config=_BEDROCK_CONFIG,
         )
     return _llm_veloce
 
@@ -84,6 +91,7 @@ def get_llm(veloce: bool = False, max_tokens: int | None = None):
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=max_tokens,
+            config=_BEDROCK_CONFIG,
         )
     return _get_llm_veloce() if veloce else _get_llm_principale()
 

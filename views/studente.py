@@ -1267,6 +1267,11 @@ def _render_raccomandazioni(studente_id: int):
     raccomanda_corsi = _import_recommender()
     st.markdown('<div class="divider-label">Consigliati per te</div>', unsafe_allow_html=True)
 
+    # Feedback iscrizione da raccomandazione
+    corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
+    if corso_appena_iscritto:
+        st.success(f"Iscrizione a **{corso_appena_iscritto}** completata!")
+
     # Testo fallback sempre visibile (colore esplicito, non caption bianco)
     def _fallback(msg: str):
         st.markdown(
@@ -1315,6 +1320,18 @@ def _render_raccomandazioni(studente_id: int):
             </div>
         </div>
         """, unsafe_allow_html=True)
+        if st.button("Iscriviti", key=f"racc_iscriviti_{r.corso_id}", type="primary", use_container_width=True):
+            try:
+                db.inserisci("studenti_corsi", {
+                    "studente_id": studente_id,
+                    "corso_universitario_id": r.corso_id,
+                    "anno_accademico": _anno_accademico_corrente(),
+                    "stato": "iscritto",
+                })
+                st.session_state["_iscrizione_feedback"] = r.corso_nome
+            except Exception:
+                st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -1523,12 +1540,23 @@ def _render_chatbot(
                     materiale_selezionato=_p2_mat_scelto,
                 )
             if _p2_materiali_liberi and not _p2_mat_scelto and aggiorna_contesto is not None:
-                _p2_titoli = ", ".join(f"'{m['titolo']}'" for m in _p2_materiali_liberi)
-                _p2_primo_id = _p2_materiali_liberi[0]["id"]
-                aggiorna_contesto(
-                    clear_corso=True,
-                    materiale_selezionato={"id": _p2_primo_id, "titolo": _p2_titoli, "corso_id": None},
-                )
+                if len(_p2_materiali_liberi) == 1:
+                    aggiorna_contesto(
+                        clear_corso=True,
+                        materiale_selezionato={
+                            "id": _p2_materiali_liberi[0]["id"],
+                            "titolo": _p2_materiali_liberi[0]["titolo"],
+                            "corso_id": None,
+                        },
+                    )
+                else:
+                    aggiorna_contesto(
+                        clear_corso=True,
+                        materiali_selezionati=[
+                            {"id": m["id"], "titolo": m["titolo"], "corso_id": None}
+                            for m in _p2_materiali_liberi
+                        ],
+                    )
 
             # Snapshot piani esistenti PRIMA della chiamata all'agente
             _mat_libero_corso = (_p2_materiali_liberi[0].get("corso_universitario_id") if _p2_materiali_liberi else None)
@@ -1631,13 +1659,27 @@ def _render_chatbot(
         materiali_liberi = st.session_state.pop("_materiali_liberi_selezionati", None)
         if materiali_liberi and not messaggio_da_materiale:
             titoli_str = ", ".join(f"'{m['titolo']}'" for m in materiali_liberi)
-            primo_id = materiali_liberi[0]["id"]
             if aggiorna_contesto is not None:
-                aggiorna_contesto(
-                    clear_corso=True,
-                    materiale_selezionato={"id": primo_id, "titolo": titoli_str, "corso_id": None},
-                )
-            messaggio_da_materiale = f"Genera una lezione basata sui seguenti documenti: {titoli_str}"
+                if len(materiali_liberi) == 1:
+                    # Singolo materiale: comportamento classico
+                    aggiorna_contesto(
+                        clear_corso=True,
+                        materiale_selezionato={
+                            "id": materiali_liberi[0]["id"],
+                            "titolo": materiali_liberi[0]["titolo"],
+                            "corso_id": None,
+                        },
+                    )
+                else:
+                    # Più materiali: passa la lista completa per analisi coerenza
+                    aggiorna_contesto(
+                        clear_corso=True,
+                        materiali_selezionati=[
+                            {"id": m["id"], "titolo": m["titolo"], "corso_id": None}
+                            for m in materiali_liberi
+                        ],
+                    )
+            messaggio_da_materiale = f"Genera una lezione separata per ciascuno di questi documenti: {titoli_str}"
 
     # ---- Suggerimenti rapidi — compatti, sopra l'input ----
     suggerimenti = [
@@ -1818,10 +1860,28 @@ def _get_materiali_usati_piano(piano_id: int) -> list[dict]:
         return []
 
 
+def _prepara_download_materiale(m: dict) -> tuple:
+    """Restituisce (data, filename, mime) per il download di un materiale.
+    Prova prima il file fisico su disco; se non esiste, usa il testo estratto dal DB."""
+    s3_key = m.get("s3_key")
+    if s3_key:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        file_path = os.path.join(base_dir, s3_key)
+        if os.path.isfile(file_path):
+            with open(file_path, "rb") as f:
+                return f.read(), os.path.basename(s3_key), "application/pdf"
+    # Fallback: testo estratto salvato nel DB
+    testo = m.get("testo_estratto")
+    if testo:
+        titolo_safe = (m.get("titolo") or "materiale").replace(" ", "_")
+        return testo.encode("utf-8"), f"{titolo_safe}.txt", "text/plain"
+    return None, None, None
+
+
 @st.dialog("Materiale del piano")
 def _dialog_materiale_piano_libero(piano_id: int):
     st.markdown("**Materiale usato per generare questo piano**")
-    st.caption("Questi sono i documenti da cui Lea ha creato il piano. Clicca 'Studia' per generare una nuova lezione.")
+    st.caption("Questi sono i documenti da cui Lea ha creato il piano. Clicca 'Scarica' per scaricare il materiale.")
     materiali = _get_materiali_usati_piano(piano_id)
 
     if not materiali:
@@ -1837,22 +1897,24 @@ def _dialog_materiale_piano_libero(piano_id: int):
                 stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
                 st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
             with c2:
-                if elaborato:
-                    if st.button("📖 Studia", key=f"studia_mat_piano_{m['id']}", use_container_width=True):
-                        st.session_state["_materiale_da_studiare"] = {
-                            "id": m["id"],
-                            "titolo": m["titolo"],
-                            "corso_id": m.get("corso_universitario_id"),
-                        }
-                        st.rerun()
+                file_data, file_name, mime = _prepara_download_materiale(m)
+                if file_data:
+                    st.download_button(
+                        "📥 Scarica materiale",
+                        data=file_data,
+                        file_name=file_name,
+                        mime=mime,
+                        key=f"download_mat_piano_{m['id']}",
+                        use_container_width=True,
+                    )
                 else:
-                    st.caption("⚠️ Non elaborato")
+                    st.caption("⚠️ File non disponibile")
 
 
 @st.dialog("Materiale del corso")
 def _dialog_materiale_corso(corso_id: int, corso_nome: str):
     st.markdown(f"**Materiale disponibile per {corso_nome}**")
-    st.caption("Clicca su un documento per chiedere a Lea di creare una lezione da quel materiale.")
+    st.caption("Clicca 'Scarica' per scaricare il materiale del corso.")
     try:
         materiali = db.trova_tutti("materiali_didattici", {"corso_universitario_id": corso_id})
     except Exception:
@@ -1871,20 +1933,18 @@ def _dialog_materiale_corso(corso_id: int, corso_nome: str):
                 stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
                 st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
             with c2:
-                if elaborato:
-                    if st.button(
-                        "📖 Studia",
-                        key=f"studia_mat_corso_{m['id']}",
+                file_data, file_name, mime = _prepara_download_materiale(m)
+                if file_data:
+                    st.download_button(
+                        "📥 Scarica materiale",
+                        data=file_data,
+                        file_name=file_name,
+                        mime=mime,
+                        key=f"download_mat_corso_{m['id']}",
                         use_container_width=True,
-                    ):
-                        st.session_state["_materiale_da_studiare"] = {
-                            "id": m["id"],
-                            "titolo": m["titolo"],
-                            "corso_id": corso_id,
-                        }
-                        st.rerun()
+                    )
                 else:
-                    st.caption("⚠️ Non ancora elaborato")
+                    st.caption("⚠️ File non disponibile")
 
 
 @st.dialog("Carica materiale didattico")

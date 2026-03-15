@@ -40,11 +40,13 @@ if _ROOT not in sys.path:
 
 from langchain_core.tools import tool
 from platform_sdk.database import db
+from platform_sdk.llm import get_llm
 from platform_sdk.agent import crea_agente, esegui_agente
 
 from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
 from src.agents.practice_gen import esegui_generazione_pratica
 from src.agents.gap_analysis import analizza_gap
+from src.tools.rag_engine import recupera_sommari_materiali
 
 # ---------------------------------------------------------------------------
 # Chiavi session_state
@@ -109,9 +111,12 @@ COSA SAI FARE (tool a tua disposizione):
 4. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
                                 Accetta un parametro opzionale materiale_id per generare
                                 la lezione SOLO dal contenuto di quel materiale specifico.
+                                IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
 5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
 6. tool_modifica_piano       → leggere e riscrivere il testo di capitoli/paragrafi del corso,
                                 rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
+7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+                                Utile per decidere come integrare materiali in un corso esistente.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
@@ -172,10 +177,13 @@ COSA SAI FARE (tool a tua disposizione):
 3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
                                   Accetta un parametro opzionale materiale_id per generare
                                   la lezione SOLO dal contenuto di quel materiale specifico.
+                                  IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
 4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
 5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
 6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
                                   LEGGERE e RISCRIVERE il testo di una lezione.
+7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+                                  Utile per decidere come integrare materiali in un piano esistente.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
@@ -192,10 +200,21 @@ REGOLE DI COMPORTAMENTO:
   keyword='...') per cercarlo. Se trovi UN solo risultato, usalo direttamente senza chiedere
   conferma. Se trovi più risultati, mostrali e chiedi quale intende. Se non trovi nulla,
   comunicalo e suggerisci di controllare i materiali caricati.
-- MATERIALE SELEZIONATO: se tool_leggi_contesto riporta "Materiale selezionato", lo studente
-  vuole una lezione su quel materiale specifico. Usa SUBITO tool_genera_corso passando
-  il materiale_id indicato nel contesto. Se non c'è un corso associato, usa corso_universitario_id=0.
-  Non chiedere conferme.
+- MATERIALE SELEZIONATO (SINGOLO): se tool_leggi_contesto riporta "Materiale selezionato" con
+  UN SOLO materiale_id, lo studente vuole una lezione su quel materiale specifico. Usa SUBITO
+  tool_genera_corso passando il materiale_id indicato nel contesto. Se non c'è un corso
+  associato, usa corso_universitario_id=0. Non chiedere conferme.
+- MATERIALI MULTIPLI SELEZIONATI: se tool_leggi_contesto riporta "Materiali selezionati"
+  con più materiale_ids, DEVI generare una lezione SEPARATA per CIASCUN materiale.
+  NON tentare MAI di combinare più materiali in una sola lezione (causa errori di generazione).
+  Flusso OBBLIGATORIO:
+  1. Informa lo studente che genererai un piano separato per ogni materiale selezionato.
+  2. Per CIASCUN materiale nella lista, chiama tool_genera_corso con il singolo materiale_id
+     e corso_universitario_id=0.
+  3. Al termine, comunica allo studente che sono stati creati i piani e suggerisci di
+     consultarli singolarmente.
+  Se lo studente vuole poi unificare i contenuti, suggerisci di creare un piano vuoto
+  e usare tool_modifica_piano per integrare i contenuti dei vari piani.
 - MATERIALE SENZA CORSO: se lo studente vuole una lezione da materiali personali non legati
   a nessun corso, usa tool_genera_corso con corso_universitario_id=0 e il materiale_id appropriato.
 - Quando lo studente chiede di riscrivere, modificare, semplificare, espandere un paragrafo:
@@ -316,9 +335,25 @@ def tool_leggi_contesto() -> str:
         )
         parti.append(f"Ultime sezioni generate:\n{lista}")
 
-    # Materiale selezionato dallo studente tramite il pannello "Visualizza materiale"
+    # Materiale/i selezionato/i dallo studente tramite il pannello "Visualizza materiale"
+    materiali_multipli = contesto.get("materiali_selezionati")
     mat = contesto.get("materiale_selezionato")
-    if mat:
+
+    if materiali_multipli and len(materiali_multipli) > 1:
+        # Più materiali selezionati → genera un piano SEPARATO per ciascuno
+        titoli = ", ".join(f"'{m['titolo']}'" for m in materiali_multipli)
+        elenco_mat = "\n".join(
+            f"  - materiale_id={m['id']}: '{m['titolo']}' (corso_id=0)"
+            for m in materiali_multipli
+        )
+        parti.append(
+            f"Materiali selezionati dallo studente (MULTIPLI): {titoli}\n"
+            f"{elenco_mat}\n"
+            f"IMPORTANTE: genera un piano SEPARATO per CIASCUN materiale. "
+            f"Chiama tool_genera_corso una volta per ogni materiale con il singolo materiale_id "
+            f"e corso_universitario_id=0. NON combinare più materiali in una sola lezione."
+        )
+    elif mat:
         corso_id_mat = mat.get("corso_id") or 0  # 0 = nessun corso associato
         parti.append(
             f"Materiale selezionato dallo studente: '{mat['titolo']}' "
@@ -399,7 +434,7 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
 
 
 @tool
-def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0) -> str:
+def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "") -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
@@ -408,6 +443,10 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     Parametro opzionale materiale_id: se > 0, la lezione viene generata usando SOLO
     i contenuti di quel materiale specifico (utile quando lo studente ha selezionato
     un documento dal pannello "Visualizza materiale").
+    IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
+    Se ci sono più materiali, chiama questo tool una volta per ciascun materiale.
+    Parametro materiale_ids_csv: riservato per integrazione in corsi esistenti, non usare
+    per generare lezioni nuove da più materiali combinati.
     """
     # Usa la variabile globale aggiornata dal thread principale prima dell'invocazione
     studente_id = _STUDENTE_ID_CORRENTE
@@ -415,17 +454,39 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     # corso_id=0 è il sentinella per "nessun corso": passa None al motore
     corso_id_eff = corso_universitario_id if corso_universitario_id and corso_universitario_id > 0 else None
 
+    # Parsing materiale_ids_csv
+    mat_ids: list[int] | None = None
+    mat_id_singolo: int | None = None
+    if materiale_ids_csv and materiale_ids_csv.strip():
+        try:
+            mat_ids = [int(x.strip()) for x in materiale_ids_csv.split(",") if x.strip()]
+            if len(mat_ids) == 1:
+                mat_id_singolo = mat_ids[0]
+                mat_ids = None
+        except ValueError:
+            return "Errore: materiale_ids_csv deve contenere ID numerici separati da virgola."
+    elif materiale_id and materiale_id > 0:
+        mat_id_singolo = materiale_id
+
+    print(f"[DEBUG tool_genera_corso] corso_id_eff={corso_id_eff}, argomento='{argomento}', "
+          f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}")
+
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
         corso_id=corso_id_eff,
         argomento_richiesto=argomento,
         docente_id=studente_id,
         is_corso_docente=False,
-        materiale_id=materiale_id if materiale_id and materiale_id > 0 else None,
+        materiale_id=mat_id_singolo,
+        materiale_ids=mat_ids,
     )
 
     if stato_finale.get("errore"):
+        print(f"[DEBUG tool_genera_corso] ERRORE: {stato_finale['errore']}")
         return f"Errore durante la generazione: {stato_finale['errore']}"
+
+    print(f"[DEBUG tool_genera_corso] Generazione completata con successo, "
+          f"n_chunks={len(stato_finale.get('chunks_recuperati', []))}")
 
     struttura = stato_finale.get("struttura_corso_generata", {})
     titolo = struttura.get("titolo_corso", "Senza Titolo")
@@ -459,6 +520,101 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         f"MEMORIA (usa questi ID per quiz/flashcard se richiesti):\n{elenco}\n"
         f"Suggerisci all'utente di esercitarsi con quiz o flashcard."
     )
+
+
+@tool
+def tool_analizza_coerenza_materiali(materiale_ids_csv: str) -> str:
+    """
+    Analizza la coerenza tematica tra più materiali didattici selezionati.
+    Utile per capire come raggruppare materiali per argomento o per decidere
+    come integrare contenuti di più materiali in un piano esistente.
+
+    Parametro materiale_ids_csv: stringa di ID materiali separati da virgola (es. "12,34,56").
+
+    Restituisce un'analisi JSON con:
+    - coerenti: true/false — se i materiali trattano lo stesso ambito tematico
+    - gruppi: raggruppamento dei materiali per area tematica (se non coerenti)
+    - suggerimento: messaggio per l'utente
+    """
+    if not materiale_ids_csv or not materiale_ids_csv.strip():
+        return "Errore: specifica gli ID dei materiali separati da virgola."
+
+    try:
+        mat_ids = [int(x.strip()) for x in materiale_ids_csv.split(",") if x.strip()]
+    except ValueError:
+        return "Errore: materiale_ids_csv deve contenere ID numerici separati da virgola."
+
+    if len(mat_ids) < 2:
+        return json.dumps({
+            "coerenti": True,
+            "motivo": "Un solo materiale selezionato, non serve analisi di coerenza.",
+            "materiali": mat_ids,
+        }, ensure_ascii=False)
+
+    # Recupera sommari e argomenti chiave di ogni materiale
+    sommari = recupera_sommari_materiali(mat_ids)
+    if not sommari:
+        return "Errore: nessun materiale trovato con gli ID specificati."
+
+    # Costruisci il prompt per l'LLM
+    descrizione_materiali = []
+    for s in sommari:
+        argomenti_str = ", ".join(s["argomenti_chiave"][:15]) if s["argomenti_chiave"] else "(nessun argomento estratto)"
+        sommari_str = " | ".join(s["sommari_chunks"][:3]) if s["sommari_chunks"] else "(nessun sommario)"
+        descrizione_materiali.append(
+            f"- Materiale ID {s['materiale_id']}: \"{s['titolo']}\" (tipo: {s['tipo']})\n"
+            f"  Argomenti chiave: {argomenti_str}\n"
+            f"  Sommari: {sommari_str}"
+        )
+
+    prompt = f"""Analizza i seguenti materiali didattici e determina se sono tematicamente coerenti
+(cioè se trattano la stessa materia o argomenti strettamente correlati che possono essere
+raggruppati per area tematica).
+
+MATERIALI SELEZIONATI:
+{chr(10).join(descrizione_materiali)}
+
+Rispondi ESCLUSIVAMENTE con un JSON valido (senza markdown, senza backtick) con questa struttura:
+{{
+  "coerenti": true/false,
+  "motivo": "spiegazione breve del perché sono o non sono coerenti",
+  "gruppi": [
+    {{
+      "tema": "nome del tema comune",
+      "materiale_ids": [lista di ID che appartengono a questo tema],
+      "titoli": [lista dei titoli corrispondenti]
+    }}
+  ]
+}}
+
+Se coerenti=true, ci sarà UN solo gruppo con tutti i materiali.
+Se coerenti=false, ci saranno più gruppi, uno per ogni area tematica distinta.
+
+Sii ragionevole: materiali di aree vicine (es. due argomenti di informatica) sono coerenti.
+Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
+
+    try:
+        llm = get_llm(max_tokens=1024)
+        from langchain_core.messages import HumanMessage
+        risposta = llm.invoke([HumanMessage(content=prompt)])
+        contenuto = risposta.content.strip()
+        # Pulizia eventuale markdown
+        if contenuto.startswith("```"):
+            contenuto = contenuto.split("\n", 1)[1] if "\n" in contenuto else contenuto[3:]
+            if contenuto.endswith("```"):
+                contenuto = contenuto[:-3]
+            contenuto = contenuto.strip()
+        # Valida il JSON
+        analisi = json.loads(contenuto)
+        return json.dumps(analisi, ensure_ascii=False)
+    except json.JSONDecodeError:
+        return json.dumps({
+            "coerenti": True,
+            "motivo": "Impossibile determinare la coerenza con certezza. Procedo assumendo coerenza.",
+            "gruppi": [{"tema": "Tutti i materiali", "materiale_ids": mat_ids, "titoli": [s["titolo"] for s in sommari]}],
+        }, ensure_ascii=False)
+    except Exception as e:
+        return f"Errore durante l'analisi di coerenza: {e}"
 
 
 @tool
@@ -886,6 +1042,7 @@ def _get_orchestratore():
                     tool_genera_pratica,
                     tool_analizza_classe,
                     tool_modifica_piano,
+                    tool_analizza_coerenza_materiali,
                 ],
                 system_prompt=_SYSTEM_PROMPT_DOCENTE,
                 memoria=True,
@@ -902,6 +1059,7 @@ def _get_orchestratore():
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
+                tool_analizza_coerenza_materiali,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,
@@ -933,6 +1091,7 @@ def aggiorna_contesto_sessione(
     piano_id: int | None = None,
     piano_titolo: str | None = None,
     materiale_selezionato: dict | None = None,
+    materiali_selezionati: list[dict] | None = None,
     clear_materiale: bool = False,
     clear_corso: bool = False,
     extra: dict | None = None,
@@ -949,6 +1108,7 @@ def aggiorna_contesto_sessione(
         piano_id:              ID del piano personalizzato attivo (solo quando tipo_vista="piano").
         piano_titolo:          Titolo del piano attivo.
         materiale_selezionato: Dict {"id", "titolo", "corso_id"} del materiale scelto dallo studente.
+        materiali_selezionati: Lista di dict {"id", "titolo", "corso_id"} per selezione multipla.
         clear_materiale:       Se True, rimuove materiale_selezionato dal contesto.
         clear_corso:           Se True, rimuove corso_id e corso_nome dal contesto (es. materiale senza corso).
     """
@@ -977,8 +1137,11 @@ def aggiorna_contesto_sessione(
         contesto["piano_titolo"] = piano_titolo
     if materiale_selezionato is not None:
         contesto["materiale_selezionato"] = materiale_selezionato
+    if materiali_selezionati is not None:
+        contesto["materiali_selezionati"] = materiali_selezionati
     if clear_materiale:
         contesto.pop("materiale_selezionato", None)
+        contesto.pop("materiali_selezionati", None)
     if extra:
         contesto.update(extra)
     st.session_state[_SK_CONTESTO] = contesto
