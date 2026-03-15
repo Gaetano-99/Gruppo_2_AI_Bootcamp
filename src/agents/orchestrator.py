@@ -463,7 +463,7 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
 
 
 @tool
-def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "") -> str:
+def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
@@ -476,6 +476,9 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     Se ci sono più materiali, chiama questo tool una volta per ciascun materiale.
     Parametro materiale_ids_csv: riservato per integrazione in corsi esistenti, non usare
     per generare lezioni nuove da più materiali combinati.
+    Parametro forza_ricerca_keyword: usa 1 SOLO se la ricerca semantica è fallita
+    e l'utente ha dato il consenso esplicito a procedere con la ricerca per parole chiave
+    (meno precisa). Default 0.
     """
     # Usa la variabile globale aggiornata dal thread principale prima dell'invocazione
     studente_id = _STUDENTE_ID_CORRENTE
@@ -498,7 +501,8 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         mat_id_singolo = materiale_id
 
     print(f"[DEBUG tool_genera_corso] corso_id_eff={corso_id_eff}, argomento='{argomento}', "
-          f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}")
+          f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}, "
+          f"forza_ricerca_keyword={forza_ricerca_keyword}")
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -508,11 +512,28 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         is_corso_docente=False,
         materiale_id=mat_id_singolo,
         materiale_ids=mat_ids,
+        forza_keyword=bool(forza_ricerca_keyword),
     )
 
     if stato_finale.get("errore"):
-        print(f"[DEBUG tool_genera_corso] ERRORE: {stato_finale['errore']}")
-        return f"Errore durante la generazione: {stato_finale['errore']}"
+        errore = stato_finale["errore"]
+        print(f"[DEBUG tool_genera_corso] ERRORE: {errore}")
+
+        # Gestione speciale: ricerca semantica fallita → chiedi consenso all'utente
+        if errore.startswith("RICERCA_SEMANTICA_FALLITA|"):
+            motivo = errore.split("|", 1)[1]
+            return (
+                f"La ricerca nel database vettoriale non è riuscita.\n"
+                f"Motivo: {motivo}\n\n"
+                f"È disponibile una ricerca alternativa basata su parole chiave "
+                f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+                f"rispetto alla ricerca semantica.\n\n"
+                f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+                f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+                f"ma con forza_ricerca_keyword=1."
+            )
+
+        return f"Errore durante la generazione: {errore}"
 
     print(f"[DEBUG tool_genera_corso] Generazione completata con successo, "
           f"n_chunks={len(stato_finale.get('chunks_recuperati', []))}")
@@ -647,7 +668,7 @@ Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
 
 
 @tool
-def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str:
+def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera una lezione attingendo da TUTTI i materiali della piattaforma (modalità 'Lea sceglie').
     Usa questo tool SOLO dopo aver chiarito le intenzioni dello studente (max 3 messaggi).
@@ -658,6 +679,9 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str
     Parametro argomento: topic specifico su cui generare la lezione (non generico).
     Parametro istruzioni_utente: istruzioni aggiuntive raccolte durante la conversazione
     (es. livello di approfondimento, aree da includere/escludere).
+    Parametro forza_ricerca_keyword: usa 1 SOLO se la ricerca semantica è fallita
+    e l'utente ha dato il consenso esplicito a procedere con la ricerca per parole chiave
+    (meno precisa). Default 0.
     """
     studente_id = _STUDENTE_ID_CORRENTE
 
@@ -670,7 +694,24 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str
         )
 
     # Ricerca platform-wide
-    chunks = cerca_chunk_piattaforma(query=argomento, top_k=16)
+    risultato_rag = cerca_chunk_piattaforma(
+        query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
+    )
+
+    # Se la ricerca semantica è fallita, chiedi consenso all'utente
+    if risultato_rag.errore_semantico and not forza_ricerca_keyword:
+        return (
+            f"La ricerca nel database vettoriale non è riuscita.\n"
+            f"Motivo: {risultato_rag.errore_semantico}\n\n"
+            f"È disponibile una ricerca alternativa basata su parole chiave "
+            f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+            f"rispetto alla ricerca semantica.\n\n"
+            f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+            f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+            f"ma con forza_ricerca_keyword=1."
+        )
+
+    chunks = risultato_rag.chunks
     if not chunks:
         return (
             "Non ho trovato materiale pertinente sull'argomento richiesto. "

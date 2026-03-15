@@ -26,6 +26,7 @@ import sys
 import os
 import re
 import json
+from dataclasses import dataclass, field
 from typing import Optional
 
 # ---------------------------------------------------------------------------
@@ -36,6 +37,27 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+
+
+# ---------------------------------------------------------------------------
+# Risultato strutturato della ricerca RAG
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RisultatoRicercaRAG:
+    """Risultato di una ricerca RAG con informazioni sul metodo utilizzato.
+
+    Attributes:
+        chunks: Lista di chunk trovati (vuota se la ricerca è fallita).
+        metodo_utilizzato: Metodo usato: ``"semantico"``, ``"keyword"``,
+            ``"generico"`` o ``"nessuno"`` (se fallita senza fallback).
+        errore_semantico: Messaggio di errore se la ricerca semantica è
+            fallita. None se la ricerca semantica ha avuto successo.
+    """
+    chunks: list[dict] = field(default_factory=list)
+    metodo_utilizzato: str = "nessuno"
+    errore_semantico: str | None = None
+
 
 # ---------------------------------------------------------------------------
 # Costanti di retrieval
@@ -77,15 +99,15 @@ def cerca_chunk_rilevanti(
     top_k: int = _TOP_K_DEFAULT,
     materiale_id: int | None = None,
     materiale_ids: list[int] | None = None,
-) -> list[dict]:
+    forza_keyword: bool = False,
+) -> RisultatoRicercaRAG:
     """Recupera i chunk più rilevanti per una query, filtrati per corso o materiale.
 
-    Implementa una pipeline in due fasi:
-        1. **Retrieval SQL**: query LIKE multi-parola-chiave su tre campi.
-        2. **Ranking Python**: scoring basato su frequenza e campo di match.
-
-    Quando ``corso_id`` è None, la ricerca avviene direttamente per ``materiale_id``
-    o ``materiale_ids`` (materiali personali senza corso associato).
+    La ricerca semantica nel database vettoriale è il metodo primario.
+    Se fallisce e ``forza_keyword`` è False, restituisce un risultato con
+    ``errore_semantico`` popolato (senza fallback automatico).
+    Se ``forza_keyword`` è True, salta la ricerca semantica e usa direttamente
+    il keyword matching sui metadati.
 
     Args:
         corso_id: ID del corso universitario. None per materiali senza corso.
@@ -94,16 +116,19 @@ def cerca_chunk_rilevanti(
         materiale_id: Se specificato, limita i chunk al singolo materiale.
         materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
             Ha priorità su ``materiale_id`` se entrambi sono forniti.
+        forza_keyword: Se True, salta la ricerca semantica e usa direttamente
+            il keyword matching. Usare solo dopo consenso esplicito dell'utente.
 
     Returns:
-        Lista di dizionari rappresentanti i chunk, ciascuno arricchito
-        con il campo ``score_rilevanza`` (intero) e ``parole_trovate`` (lista).
-        Ordinati per ``score_rilevanza`` decrescente.
+        ``RisultatoRicercaRAG`` con i chunk trovati, il metodo utilizzato e
+        l'eventuale errore semantico.
 
     Example:
-        >>> chunk = cerca_chunk_rilevanti(1, "normalizzazione database", top_k=5)
-        >>> print(chunk[0]["score_rilevanza"])
-        12
+        >>> ris = cerca_chunk_rilevanti(1, "normalizzazione database", top_k=5)
+        >>> if ris.errore_semantico:
+        ...     print(f"Ricerca semantica fallita: {ris.errore_semantico}")
+        >>> else:
+        ...     print(ris.chunks[0]["score_rilevanza"])
     """
     # Normalizza: se materiale_ids è fornito, usalo; altrimenti materiale_id singolo
     ids_effettivi: list[int] | None = None
@@ -112,15 +137,56 @@ def cerca_chunk_rilevanti(
     elif materiale_id:
         ids_effettivi = [materiale_id]
 
+    # --- Ricerca semantica (prioritaria, salvo forza_keyword) ---
+    if not forza_keyword:
+        try:
+            from src.tools.vector_store import cerca_simili, RicercaSemanticaFallita
+            chunk_ids_semantici = cerca_simili(
+                query=query,
+                corso_id=corso_id,
+                top_k=top_k,
+                materiale_id=ids_effettivi[0] if ids_effettivi and len(ids_effettivi) == 1 else None,
+                materiale_ids=ids_effettivi if ids_effettivi and len(ids_effettivi) > 1 else None,
+            )
+            # Ricerca semantica riuscita
+            chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
+            for i, chunk in enumerate(chunks):
+                chunk["score_rilevanza"] = top_k - i
+                chunk["parole_trovate"] = ["(semantico)"]
+            return RisultatoRicercaRAG(
+                chunks=chunks,
+                metodo_utilizzato="semantico",
+            )
+        except Exception as e:
+            # Importa RicercaSemanticaFallita per il check (potrebbe non essere importabile)
+            try:
+                from src.tools.vector_store import RicercaSemanticaFallita as _RSF
+                is_errore_semantico = isinstance(e, _RSF)
+            except ImportError:
+                is_errore_semantico = False
+
+            motivo = str(e) if is_errore_semantico else f"Errore imprevisto: {e}"
+            print(f"[WARN rag_engine] Ricerca semantica fallita: {motivo}")
+
+            # NON fallback automatico: restituisci errore per chiedere consenso
+            return RisultatoRicercaRAG(
+                chunks=[],
+                metodo_utilizzato="nessuno",
+                errore_semantico=motivo,
+            )
+
+    # --- Keyword matching (eseguito solo se forza_keyword=True) ---
     parole_chiave: list[str] = _estrai_parole_chiave(query)
 
     # Quando corso_id è None, cerca direttamente per materiale_id(s)
     if corso_id is None:
         if not ids_effettivi:
-            return []
+            return RisultatoRicercaRAG(chunks=[], metodo_utilizzato="keyword")
         if len(ids_effettivi) == 1:
-            return _query_sql_like_materiale(ids_effettivi[0], parole_chiave, top_k)
-        return _query_sql_like_materiali_multipli(ids_effettivi, parole_chiave, top_k)
+            chunks = _query_sql_like_materiale(ids_effettivi[0], parole_chiave, top_k)
+        else:
+            chunks = _query_sql_like_materiali_multipli(ids_effettivi, parole_chiave, top_k)
+        return RisultatoRicercaRAG(chunks=chunks, metodo_utilizzato="keyword")
 
     if not parole_chiave:
         # Argomento generico: restituisce i primi Top-K del corso
@@ -128,7 +194,7 @@ def cerca_chunk_rilevanti(
         if ids_effettivi:
             ids_set = set(ids_effettivi)
             candidati = [c for c in candidati if c.get("materiale_id") in ids_set][:top_k]
-        return candidati
+        return RisultatoRicercaRAG(chunks=candidati, metodo_utilizzato="generico")
 
     # Fase 1: retrieval SQL con LIKE
     candidati: list[dict] = _query_sql_like(corso_id, parole_chiave)
@@ -139,7 +205,7 @@ def cerca_chunk_rilevanti(
         if ids_effettivi:
             ids_set = set(ids_effettivi)
             candidati = [c for c in candidati if c.get("materiale_id") in ids_set][:top_k]
-        return candidati
+        return RisultatoRicercaRAG(chunks=candidati, metodo_utilizzato="generico")
 
     # Filtra per materiale/i specifico/i se richiesto
     if ids_effettivi:
@@ -157,7 +223,6 @@ def cerca_chunk_rilevanti(
     risultato: list[dict] = candidati_con_score[:top_k]
 
     # Se i risultati keyword sono meno di top_k, integra con chunk generici
-    # (es. corso con nome generico che non matcha il contenuto del materiale)
     if len(risultato) < top_k:
         presenti_ids: set[int] = {c["id"] for c in risultato}
         generici = _recupera_chunk_generici(corso_id, top_k)
@@ -168,7 +233,7 @@ def cerca_chunk_rilevanti(
                 if len(risultato) >= top_k:
                     break
 
-    return risultato
+    return RisultatoRicercaRAG(chunks=risultato, metodo_utilizzato="keyword")
 
 
 def formatta_contesto_rag(chunks: list[dict]) -> str:
@@ -247,6 +312,32 @@ def conta_chunk_corso(
             return righe[0]["n"] if righe else 0
         return 0
     return db.conta("materiali_chunks", {"corso_universitario_id": corso_id})
+
+
+# ===========================================================================
+# Helper: recupero chunk per ID (usato dal retrieval semantico)
+# ===========================================================================
+
+def _recupera_chunks_per_ids(chunk_ids: list[int]) -> list[dict]:
+    """Recupera chunk completi da SQLite mantenendo l'ordine degli ID.
+
+    Args:
+        chunk_ids: Lista di ID chunk nell'ordine di rilevanza desiderato.
+
+    Returns:
+        Lista di dizionari-chunk, ordinati come ``chunk_ids``.
+    """
+    if not chunk_ids:
+        return []
+    placeholders = ",".join("?" for _ in chunk_ids)
+    chunks = db.esegui(
+        f"SELECT id, materiale_id, corso_universitario_id, indice_chunk, "
+        f"titolo_sezione, testo, sommario, argomenti_chiave, n_token "
+        f"FROM materiali_chunks WHERE id IN ({placeholders})",
+        chunk_ids,
+    )
+    id_to_chunk = {c["id"]: c for c in chunks}
+    return [id_to_chunk[cid] for cid in chunk_ids if cid in id_to_chunk]
 
 
 # ===========================================================================
@@ -661,26 +752,67 @@ def conta_chunk_piattaforma() -> int:
 def cerca_chunk_piattaforma(
     query: str,
     top_k: int = _TOP_K_DEFAULT,
-) -> list[dict]:
+    forza_keyword: bool = False,
+) -> RisultatoRicercaRAG:
     """Recupera i chunk più rilevanti cercando su TUTTO il materiale della piattaforma.
 
-    A differenza di ``cerca_chunk_rilevanti``, non filtra per corso o materiale:
-    interroga l'intera tabella ``materiali_chunks`` con JOIN su ``materiali_didattici``
-    per ottenere titolo e tipo del materiale sorgente.
+    La ricerca semantica nel database vettoriale è il metodo primario.
+    Se fallisce e ``forza_keyword`` è False, restituisce un risultato con
+    ``errore_semantico`` popolato (senza fallback automatico).
 
     Args:
         query: Argomento o domanda dell'utente.
         top_k: Numero massimo di chunk da restituire (default 8).
+        forza_keyword: Se True, salta la ricerca semantica e usa direttamente
+            il keyword matching. Usare solo dopo consenso esplicito dell'utente.
 
     Returns:
-        Lista di dizionari-chunk arricchiti con ``score_rilevanza``,
-        ``parole_trovate``, ``materiale_titolo`` e ``materiale_tipo``.
+        ``RisultatoRicercaRAG`` con i chunk trovati, il metodo utilizzato e
+        l'eventuale errore semantico.
     """
+    # --- Ricerca semantica platform-wide (prioritaria, salvo forza_keyword) ---
+    if not forza_keyword:
+        try:
+            from src.tools.vector_store import cerca_simili_piattaforma, RicercaSemanticaFallita
+            chunk_ids_semantici = cerca_simili_piattaforma(query, top_k=top_k)
+            # Ricerca semantica riuscita
+            chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
+            for i, c in enumerate(chunks):
+                mat = db.esegui(
+                    "SELECT titolo, tipo FROM materiali_didattici WHERE id = ?",
+                    [c.get("materiale_id")],
+                )
+                if mat:
+                    c["materiale_titolo"] = mat[0]["titolo"]
+                    c["materiale_tipo"] = mat[0].get("tipo", "")
+                c["score_rilevanza"] = top_k - i
+                c["parole_trovate"] = ["(semantico)"]
+            return RisultatoRicercaRAG(
+                chunks=chunks,
+                metodo_utilizzato="semantico",
+            )
+        except Exception as e:
+            try:
+                from src.tools.vector_store import RicercaSemanticaFallita as _RSF
+                is_errore_semantico = isinstance(e, _RSF)
+            except ImportError:
+                is_errore_semantico = False
+
+            motivo = str(e) if is_errore_semantico else f"Errore imprevisto: {e}"
+            print(f"[WARN rag_engine] Ricerca semantica piattaforma fallita: {motivo}")
+
+            return RisultatoRicercaRAG(
+                chunks=[],
+                metodo_utilizzato="nessuno",
+                errore_semantico=motivo,
+            )
+
+    # --- Keyword matching (eseguito solo se forza_keyword=True) ---
     parole_chiave: list[str] = _estrai_parole_chiave(query)
 
     if not parole_chiave:
-        # Argomento generico: restituisce i primi chunk della piattaforma
-        return _recupera_chunk_piattaforma_generici(top_k)
+        chunks = _recupera_chunk_piattaforma_generici(top_k)
+        return RisultatoRicercaRAG(chunks=chunks, metodo_utilizzato="generico")
 
     # Costruisci condizioni LIKE per ogni parola chiave
     condizioni: list[str] = []
@@ -705,7 +837,8 @@ def cerca_chunk_piattaforma(
     candidati: list[dict] = db.esegui(sql, parametri)
 
     if not candidati:
-        return _recupera_chunk_piattaforma_generici(top_k)
+        chunks = _recupera_chunk_piattaforma_generici(top_k)
+        return RisultatoRicercaRAG(chunks=chunks, metodo_utilizzato="generico")
 
     # Scoring e ranking
     candidati_con_score = _calcola_score(candidati, parole_chiave)
@@ -714,20 +847,19 @@ def cerca_chunk_piattaforma(
     )
 
     # --- Filtro di rilevanza minima ---
-    # Nella ricerca platform-wide, il rischio di includere materiali non pertinenti
-    # è alto. Richiediamo che ogni chunk abbia matchato almeno una soglia minima
-    # di parole chiave per essere considerato rilevante.
     if len(parole_chiave) >= 2:
-        soglia_min_parole = max(2, (len(parole_chiave) + 1) // 2)  # almeno 50%
+        soglia_min_parole = max(2, (len(parole_chiave) + 1) // 2)
         filtrati = [
             c for c in candidati_con_score
             if len(c.get("parole_trovate", [])) >= soglia_min_parole
         ]
-        # Usa il filtro solo se restano abbastanza risultati
         if filtrati:
             candidati_con_score = filtrati
 
-    return candidati_con_score[:top_k]
+    return RisultatoRicercaRAG(
+        chunks=candidati_con_score[:top_k],
+        metodo_utilizzato="keyword",
+    )
 
 
 def _recupera_chunk_piattaforma_generici(top_k: int) -> list[dict]:

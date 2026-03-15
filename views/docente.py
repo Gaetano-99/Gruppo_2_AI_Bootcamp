@@ -801,7 +801,7 @@ def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
         return 0
 
 
-def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str) -> None:
+def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str, forza_keyword: bool = False) -> None:
     """Invoca agente teorico e agente pratico in sequenza, poi aggiorna lo stato UI."""
     try:
         from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
@@ -816,7 +816,11 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
 
     # — Fase 1: Teoria —
     _fasi = "Fase 1/2" if not _senza_quiz else "Fase 1/1"
-    with st.spinner(f"{_fasi} — Generazione contenuti teorici…"):
+    _label = f"{_fasi} — Generazione contenuti teorici"
+    if forza_keyword:
+        _label += " (ricerca per parole chiave)"
+    _label += "…"
+    with st.spinner(_label):
         agente = crea_agente_content_gen()
         stato_t = esegui_generazione(
             agente=agente,
@@ -825,10 +829,25 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
             docente_id=docente_id,
             is_corso_docente=True,
             istruzioni_utente=prompt or "",
+            forza_keyword=forza_keyword,
         )
 
     if stato_t.get("errore"):
-        st.error(f"Errore teoria: {stato_t['errore']}")
+        errore = stato_t["errore"]
+
+        # Gestione speciale: ricerca semantica fallita → salva stato per chiedere consenso
+        if errore.startswith("RICERCA_SEMANTICA_FALLITA|"):
+            motivo = errore.split("|", 1)[1]
+            # Salva in session_state per mostrare il prompt di fallback nella UI
+            st.session_state[f"_sem_fallita_{corso['id']}"] = {
+                "motivo": motivo,
+                "prompt": prompt,
+                "key": key,
+            }
+            st.rerun()
+            return
+
+        st.error(f"Errore teoria: {errore}")
         return
 
     struttura = stato_t.get("struttura_corso_generata", {})
@@ -1025,6 +1044,28 @@ def _render_contenuti_ai(corso: dict):
         placeholder="Es: Focalizzati su esempi pratici. Usa un linguaggio accessibile agli studenti del primo anno.",
         key=f"prompt_{corso['id']}",
     )
+    # Gestione fallback ricerca semantica → keyword (con consenso docente)
+    _sem_fallita_key = f"_sem_fallita_{corso['id']}"
+    if _sem_fallita_key in st.session_state:
+        _info_fallita = st.session_state[_sem_fallita_key]
+        st.warning(
+            f"La ricerca nel database vettoriale non è riuscita.\n\n"
+            f"**Motivo:** {_info_fallita['motivo']}\n\n"
+            f"È disponibile una ricerca alternativa basata su parole chiave "
+            f"(keyword matching sui metadati), che potrebbe essere meno precisa."
+        )
+        col_si, col_no = st.columns(2)
+        with col_si:
+            if st.button("Procedi con ricerca per parole chiave", key=f"kw_si_{corso['id']}"):
+                _prompt_salvato = _info_fallita["prompt"]
+                _key_salvato = _info_fallita["key"]
+                del st.session_state[_sem_fallita_key]
+                _genera_contenuto_corso(corso, docente_id, _prompt_salvato, _key_salvato, forza_keyword=True)
+        with col_no:
+            if st.button("Annulla", key=f"kw_no_{corso['id']}"):
+                del st.session_state[_sem_fallita_key]
+                st.rerun()
+
     if st.button("Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
         _genera_contenuto_corso(corso, docente_id, prompt, key)
 

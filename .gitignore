@@ -29,3 +29,4 @@ MANIFEST
 # Ignora il file .env contenente le key segrete del progetto
 .env
 .tmp
+data/chroma_db/

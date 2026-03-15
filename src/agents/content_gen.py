@@ -38,7 +38,7 @@ if _ROOT not in sys.path:
 
 from platform_sdk.database import db
 from platform_sdk.llm import get_llm
-from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso, recupera_sommari_materiali
+from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso, recupera_sommari_materiali, RisultatoRicercaRAG
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +180,7 @@ class ContentGenState(TypedDict):
         is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
         materiale_id: Se specificato, limita il RAG ai chunk di quel singolo materiale.
         materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
+        forza_keyword: Se True, usa keyword matching al posto della ricerca semantica.
         chunks_recuperati: Lista di dizionari con i chunk RAG (id, testo, ...).
         n_chunk_totali_corso: Conteggio totale chunk del corso (per display).
         struttura_corso_generata: Dizionario JSON con la StrutturaCorso prodotta.
@@ -193,6 +194,7 @@ class ContentGenState(TypedDict):
     is_corso_docente: bool
     materiale_id: int | None
     materiale_ids: list[int] | None
+    forza_keyword: bool
     chunks_recuperati: list[dict]
     n_chunk_totali_corso: int
     struttura_corso_generata: dict
@@ -236,6 +238,7 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
     argomento: str = stato["argomento_richiesto"]
     materiale_id: int | None = stato.get("materiale_id")
     materiale_ids: list[int] | None = stato.get("materiale_ids")
+    forza_keyword: bool = stato.get("forza_keyword", False)
 
     # Aumenta top_k quando ci sono più materiali per garantire copertura
     top_k = _MAX_CHUNK_IN_CONTESTO
@@ -247,7 +250,8 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
     )
 
     print(f"[DEBUG _nodo_recupera_chunks] corso_id={corso_id}, materiale_id={materiale_id}, "
-          f"materiale_ids={materiale_ids}, n_totali={n_totali}, top_k={top_k}")
+          f"materiale_ids={materiale_ids}, n_totali={n_totali}, top_k={top_k}, "
+          f"forza_keyword={forza_keyword}")
 
     if n_totali == 0:
         return {
@@ -259,18 +263,31 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
             ),
         }
 
-    chunks_rilevanti: list[dict] = cerca_chunk_rilevanti(
+    risultato: RisultatoRicercaRAG = cerca_chunk_rilevanti(
         corso_id=corso_id,
         query=argomento,
         top_k=top_k,
         materiale_id=materiale_id,
         materiale_ids=materiale_ids,
+        forza_keyword=forza_keyword,
     )
 
-    print(f"[DEBUG _nodo_recupera_chunks] chunks_rilevanti={len(chunks_rilevanti)}")
+    print(f"[DEBUG _nodo_recupera_chunks] metodo={risultato.metodo_utilizzato}, "
+          f"chunks={len(risultato.chunks)}, errore_sem={risultato.errore_semantico}")
+
+    # Se la ricerca semantica è fallita e non è stato forzato il keyword,
+    # restituisci l'errore per chiedere conferma all'utente
+    if risultato.errore_semantico and not forza_keyword:
+        return {
+            "chunks_recuperati": [],
+            "n_chunk_totali_corso": n_totali,
+            "errore": (
+                f"RICERCA_SEMANTICA_FALLITA|{risultato.errore_semantico}"
+            ),
+        }
 
     return {
-        "chunks_recuperati": chunks_rilevanti,
+        "chunks_recuperati": risultato.chunks,
         "n_chunk_totali_corso": n_totali,
         "errore": None,
     }
@@ -536,6 +553,7 @@ def esegui_generazione(
     materiale_ids: list[int] | None = None,
     istruzioni_utente: str = "",
     chunks_precaricati: list[dict] | None = None,
+    forza_keyword: bool = False,
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
@@ -549,6 +567,8 @@ def esegui_generazione(
         materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
         istruzioni_utente: Istruzioni aggiuntive su come strutturare la lezione.
         chunks_precaricati: Se forniti, salta il nodo RAG e usa questi chunk direttamente.
+        forza_keyword: Se True, il nodo RAG usa keyword matching al posto della
+            ricerca semantica. Usare solo dopo consenso esplicito dell'utente.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -561,6 +581,7 @@ def esegui_generazione(
         "istruzioni_utente": istruzioni_utente,
         "materiale_id": materiale_id,
         "materiale_ids": materiale_ids,
+        "forza_keyword": forza_keyword,
         "chunks_recuperati": chunks_precaricati or [],
         "n_chunk_totali_corso": 0,
         "struttura_corso_generata": {},
