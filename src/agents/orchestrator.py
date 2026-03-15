@@ -46,7 +46,12 @@ from platform_sdk.agent import crea_agente, esegui_agente
 from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
 from src.agents.practice_gen import esegui_generazione_pratica
 from src.agents.gap_analysis import analizza_gap
-from src.tools.rag_engine import recupera_sommari_materiali
+from src.tools.rag_engine import (
+    recupera_sommari_materiali,
+    cerca_chunk_piattaforma,
+    conta_chunk_piattaforma,
+    formatta_riferimenti_materiali,
+)
 
 # ---------------------------------------------------------------------------
 # Chiavi session_state
@@ -184,6 +189,10 @@ COSA SAI FARE (tool a tua disposizione):
                                   LEGGERE e RISCRIVERE il testo di una lezione.
 7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                   Utile per decidere come integrare materiali in un piano esistente.
+8. tool_genera_corso_libero        → generare una lezione attingendo a TUTTI i materiali della piattaforma
+                                  (modalità "Lea sceglie"). Lea cerca autonomamente il materiale più
+                                  pertinente tra tutto ciò che è disponibile nel sistema.
+                                  Il piano generato include automaticamente i riferimenti bibliografici.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
@@ -243,6 +252,26 @@ REGOLE DI COMPORTAMENTO:
         IMPORTANTE: passa SEMPRE il materiale_id per tracciare la fonte nel piano.
   NON creare mai capitoli vuoti senza paragrafi. Ogni capitolo DEVE avere almeno un paragrafo con contenuto.
   Se il piano ha già capitoli sugli stessi argomenti, arricchisci quelli esistenti invece di duplicarli.
+- MODALITÀ "LEA SCEGLIE" (ricerca su tutta la piattaforma):
+  Quando lo studente chiede una lezione su un argomento generico SENZA riferimento a un corso
+  specifico o a un materiale specifico, e tool_leggi_contesto NON riporta un corso o materiale
+  già selezionato nel contesto:
+  1. Offri allo studente 3 opzioni:
+     a) Riferirsi a un corso specifico tra quelli a cui è iscritto
+     b) Usare il proprio materiale didattico caricato
+     c) "Lea sceglie" — tu cercherai tra TUTTI i materiali disponibili sulla piattaforma
+  2. Se lo studente sceglie l'opzione c) ("Lea sceglie" o equivalente):
+     - Fai al MASSIMO 3 domande di chiarimento per capire:
+       * L'argomento specifico (non generico) su cui vuole la lezione
+       * Il livello di approfondimento desiderato (introduttivo, intermedio, avanzato)
+       * Eventuali aree specifiche da includere o escludere
+     - Dopo aver raccolto abbastanza informazioni (o dopo 3 messaggi di chiarimento),
+       chiama tool_genera_corso_libero con l'argomento raffinato e le istruzioni raccolte.
+     - NON chiedere MAI più di 3 domande: dopo la terza, procedi con le informazioni disponibili.
+  3. Il piano generato includerà automaticamente un capitolo "Riferimenti bibliografici"
+     con l'elenco dei materiali della piattaforma usati come fonte.
+  4. NON attivare questo flusso se c'è già un corso o materiale nel contesto (in quel caso
+     usa tool_genera_corso come di consueto).
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
 - Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
@@ -615,6 +644,149 @@ Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
         }, ensure_ascii=False)
     except Exception as e:
         return f"Errore durante l'analisi di coerenza: {e}"
+
+
+@tool
+def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str:
+    """
+    Genera una lezione attingendo da TUTTI i materiali della piattaforma (modalità 'Lea sceglie').
+    Usa questo tool SOLO dopo aver chiarito le intenzioni dello studente (max 3 messaggi).
+
+    Il piano generato include automaticamente un capitolo "Riferimenti bibliografici"
+    con l'elenco dei materiali didattici utilizzati come fonte.
+
+    Parametro argomento: topic specifico su cui generare la lezione (non generico).
+    Parametro istruzioni_utente: istruzioni aggiuntive raccolte durante la conversazione
+    (es. livello di approfondimento, aree da includere/escludere).
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Verifica che ci siano materiali sulla piattaforma
+    n_totali = conta_chunk_piattaforma()
+    if n_totali == 0:
+        return (
+            "Nessun materiale didattico disponibile sulla piattaforma. "
+            "Non è possibile generare una lezione senza materiale di riferimento."
+        )
+
+    # Ricerca platform-wide
+    chunks = cerca_chunk_piattaforma(query=argomento, top_k=16)
+    if not chunks:
+        return (
+            "Non ho trovato materiale pertinente sull'argomento richiesto. "
+            "Prova a riformulare con termini più specifici o scegli un altro argomento."
+        )
+
+    # Log info sui materiali coinvolti
+    materiale_ids_unici = list({c["materiale_id"] for c in chunks if c.get("materiale_id")})
+
+    print(f"[DEBUG tool_genera_corso_libero] argomento='{argomento}', "
+          f"chunks_trovati={len(chunks)}, materiali_coinvolti={len(materiale_ids_unici)}, "
+          f"studente_id={studente_id}")
+
+    # Genera il piano usando i chunk già recuperati dalla ricerca platform-wide.
+    # Passa i chunk direttamente (chunks_precaricati) per evitare che il nodo RAG
+    # ri-cerchi su tutti i materiale_ids e includa materiali non pertinenti.
+    stato_finale = esegui_generazione(
+        agente=_get_agente_teorico(),
+        corso_id=None,
+        argomento_richiesto=argomento,
+        docente_id=studente_id,
+        is_corso_docente=False,
+        materiale_id=None,
+        materiale_ids=None,
+        istruzioni_utente=istruzioni_utente,
+        chunks_precaricati=chunks,
+    )
+
+    if stato_finale.get("errore"):
+        print(f"[DEBUG tool_genera_corso_libero] ERRORE: {stato_finale['errore']}")
+        return f"Errore durante la generazione: {stato_finale['errore']}"
+
+    struttura = stato_finale.get("struttura_corso_generata", {})
+    titolo = struttura.get("titolo_corso", "Senza Titolo")
+
+    # Recupera il piano_id appena creato
+    piani = db.esegui(
+        "SELECT id FROM piani_personalizzati "
+        "WHERE studente_id = ? ORDER BY id DESC LIMIT 1",
+        [studente_id],
+    )
+    if not piani:
+        return f"Lezione '{titolo}' generata, ma impossibile recuperare il piano dal DB."
+
+    piano_id = piani[0]["id"]
+
+    # Assicura che il tipo sia 'libero' (backup nel caso content_gen non lo abbia impostato)
+    try:
+        db.aggiorna("piani_personalizzati", {"id": piano_id}, {"tipo": "libero"})
+    except Exception:
+        pass
+
+    # Aggiunge capitolo "Riferimenti bibliografici" con le fonti usate
+    try:
+        ref_text = formatta_riferimenti_materiali(chunks)
+
+        # Trova l'ordine massimo dei capitoli esistenti
+        capitoli_esistenti = db.esegui(
+            "SELECT MAX(ordine) AS max_ord FROM piano_capitoli WHERE piano_id = ?",
+            [piano_id],
+        )
+        ordine_ref = (capitoli_esistenti[0]["max_ord"] or 0) + 1 if capitoli_esistenti else 999
+
+        cap_ref_id = db.inserisci("piano_capitoli", {
+            "piano_id": piano_id,
+            "titolo": "Riferimenti bibliografici",
+            "ordine": ordine_ref,
+        })
+        par_ref_id = db.inserisci("piano_paragrafi", {
+            "capitolo_id": cap_ref_id,
+            "titolo": "Elenco fonti",
+            "ordine": 0,
+        })
+        db.inserisci("piano_contenuti", {
+            "paragrafo_id": par_ref_id,
+            "tipo": "lezione",
+            "contenuto_json": ref_text,
+            "chunk_ids_utilizzati": json.dumps([c["id"] for c in chunks]),
+        })
+    except Exception as e:
+        print(f"[DEBUG tool_genera_corso_libero] Errore aggiunta riferimenti: {e}")
+
+    # Recupera i paragrafi generati per la memoria dell'agente
+    paragrafi = db.esegui(
+        """SELECT pp.id, pp.titolo
+           FROM piano_paragrafi pp
+           JOIN piano_capitoli pc ON pp.capitolo_id = pc.id
+           WHERE pc.piano_id = ?""",
+        [piano_id],
+    )
+
+    # Aggiorna contesto sessione
+    try:
+        contesto = st.session_state.get(_SK_CONTESTO, {})
+        contesto["ultimi_paragrafi"] = paragrafi
+        st.session_state[_SK_CONTESTO] = contesto
+    except Exception:
+        pass
+
+    # Nomi dei materiali usati per il messaggio di ritorno
+    nomi_materiali = []
+    for mid in materiale_ids_unici:
+        info = db.esegui("SELECT titolo FROM materiali_didattici WHERE id = ?", [mid])
+        if info:
+            nomi_materiali.append(info[0]["titolo"])
+
+    elenco = "\n".join(f"- ID {p['id']}: {p['titolo']}" for p in paragrafi)
+    fonti = "\n".join(f"- {n}" for n in nomi_materiali) if nomi_materiali else "(nessuna fonte specifica)"
+
+    return (
+        f"SUCCESSO: Lezione '{titolo}' generata dalla piattaforma e salvata come piano libero.\n"
+        f"Materiali della piattaforma utilizzati:\n{fonti}\n\n"
+        f"MEMORIA (usa questi ID per quiz/flashcard se richiesti):\n{elenco}\n"
+        f"Il piano include un capitolo 'Riferimenti bibliografici' con le fonti.\n"
+        f"Suggerisci all'utente di consultare il piano e di esercitarsi con quiz o flashcard."
+    )
 
 
 @tool
@@ -1056,6 +1228,7 @@ def _get_orchestratore():
                 tool_leggi_contesto,
                 tool_esplora_catalogo,
                 tool_genera_corso,
+                tool_genera_corso_libero,
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,

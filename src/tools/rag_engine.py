@@ -48,6 +48,7 @@ _PESO_TESTO: int = 1                     # match sul campo testo
 
 # Stopwords italiane da escludere dalle parole chiave
 _STOPWORDS: frozenset[str] = frozenset({
+    # --- Articoli, preposizioni, pronomi ---
     "del", "della", "dello", "dei", "degli", "delle", "dal", "dalla",
     "nel", "nella", "nello", "nei", "negli", "nelle", "sul", "sulla",
     "con", "per", "tra", "fra", "che", "chi", "cui", "non", "una",
@@ -55,6 +56,14 @@ _STOPWORDS: frozenset[str] = frozenset({
     "quanto", "cosa", "questo", "questa", "questi", "queste", "ogni",
     "sono", "essere", "avere", "fare", "dire", "anche", "molto",
     "più", "suo", "sua", "suoi", "sue", "loro", "quale", "quali",
+    # --- Termini didattici generici (troppo comuni nei materiali, non discriminanti) ---
+    "introduzione", "applicazioni", "applicazione", "pratiche", "pratico",
+    "lezione", "lezioni", "corso", "capitolo", "sezione", "argomento",
+    "parte", "esempio", "esempi", "concetti", "concetto",
+    "base", "basi", "fondamenti", "generale", "generali",
+    "teoria", "pratica", "teorico", "teorica",
+    "approfondimento", "dispensa", "materiale", "slide",
+    "esercizi", "esercizio", "generi", "genera", "generare",
 })
 
 
@@ -633,3 +642,168 @@ def _recupera_chunk_generici(corso_id: int, top_k: int) -> list[dict]:
         chunk["score_rilevanza"] = 0
         chunk["parole_trovate"] = []
     return chunks
+
+
+# ===========================================================================
+# Ricerca platform-wide ("Lea sceglie")
+# ===========================================================================
+
+def conta_chunk_piattaforma() -> int:
+    """Conta il numero totale di chunk presenti sulla piattaforma.
+
+    Returns:
+        Numero totale di righe in ``materiali_chunks``.
+    """
+    righe = db.esegui("SELECT COUNT(*) AS n FROM materiali_chunks")
+    return righe[0]["n"] if righe else 0
+
+
+def cerca_chunk_piattaforma(
+    query: str,
+    top_k: int = _TOP_K_DEFAULT,
+) -> list[dict]:
+    """Recupera i chunk più rilevanti cercando su TUTTO il materiale della piattaforma.
+
+    A differenza di ``cerca_chunk_rilevanti``, non filtra per corso o materiale:
+    interroga l'intera tabella ``materiali_chunks`` con JOIN su ``materiali_didattici``
+    per ottenere titolo e tipo del materiale sorgente.
+
+    Args:
+        query: Argomento o domanda dell'utente.
+        top_k: Numero massimo di chunk da restituire (default 8).
+
+    Returns:
+        Lista di dizionari-chunk arricchiti con ``score_rilevanza``,
+        ``parole_trovate``, ``materiale_titolo`` e ``materiale_tipo``.
+    """
+    parole_chiave: list[str] = _estrai_parole_chiave(query)
+
+    if not parole_chiave:
+        # Argomento generico: restituisce i primi chunk della piattaforma
+        return _recupera_chunk_piattaforma_generici(top_k)
+
+    # Costruisci condizioni LIKE per ogni parola chiave
+    condizioni: list[str] = []
+    parametri: list = []
+    for parola in parole_chiave:
+        condizioni.append(
+            "(LOWER(mc.testo) LIKE ? OR LOWER(mc.sommario) LIKE ? OR LOWER(mc.argomenti_chiave) LIKE ?)"
+        )
+        parametri.extend([f"%{parola}%", f"%{parola}%", f"%{parola}%"])
+
+    clausola_where = " OR ".join(condizioni)
+    sql = (
+        "SELECT mc.id, mc.materiale_id, mc.corso_universitario_id, mc.indice_chunk, "
+        "mc.titolo_sezione, mc.testo, mc.sommario, mc.argomenti_chiave, mc.n_token, "
+        "md.titolo AS materiale_titolo, md.tipo AS materiale_tipo "
+        "FROM materiali_chunks mc "
+        "JOIN materiali_didattici md ON mc.materiale_id = md.id "
+        f"WHERE {clausola_where} "
+        "ORDER BY mc.indice_chunk ASC "
+        "LIMIT 200"
+    )
+    candidati: list[dict] = db.esegui(sql, parametri)
+
+    if not candidati:
+        return _recupera_chunk_piattaforma_generici(top_k)
+
+    # Scoring e ranking
+    candidati_con_score = _calcola_score(candidati, parole_chiave)
+    candidati_con_score.sort(
+        key=lambda c: (-c["score_rilevanza"], c.get("indice_chunk", 0))
+    )
+
+    # --- Filtro di rilevanza minima ---
+    # Nella ricerca platform-wide, il rischio di includere materiali non pertinenti
+    # è alto. Richiediamo che ogni chunk abbia matchato almeno una soglia minima
+    # di parole chiave per essere considerato rilevante.
+    if len(parole_chiave) >= 2:
+        soglia_min_parole = max(2, (len(parole_chiave) + 1) // 2)  # almeno 50%
+        filtrati = [
+            c for c in candidati_con_score
+            if len(c.get("parole_trovate", [])) >= soglia_min_parole
+        ]
+        # Usa il filtro solo se restano abbastanza risultati
+        if filtrati:
+            candidati_con_score = filtrati
+
+    return candidati_con_score[:top_k]
+
+
+def _recupera_chunk_piattaforma_generici(top_k: int) -> list[dict]:
+    """Fallback: restituisce i primi chunk della piattaforma senza filtro keyword.
+
+    Args:
+        top_k: Numero massimo di chunk da restituire.
+
+    Returns:
+        Lista di chunk arricchiti con metadati del materiale sorgente.
+    """
+    chunks = db.esegui(
+        "SELECT mc.id, mc.materiale_id, mc.corso_universitario_id, mc.indice_chunk, "
+        "mc.titolo_sezione, mc.testo, mc.sommario, mc.argomenti_chiave, mc.n_token, "
+        "md.titolo AS materiale_titolo, md.tipo AS materiale_tipo "
+        "FROM materiali_chunks mc "
+        "JOIN materiali_didattici md ON mc.materiale_id = md.id "
+        "ORDER BY mc.materiale_id, mc.indice_chunk ASC "
+        f"LIMIT {int(top_k)}"
+    )
+    for chunk in chunks:
+        chunk["score_rilevanza"] = 0
+        chunk["parole_trovate"] = []
+    return chunks
+
+
+def formatta_riferimenti_materiali(chunks: list[dict]) -> str:
+    """Produce un testo formattato con i riferimenti ai materiali usati.
+
+    Raggruppa i chunk per materiale sorgente e lista titolo, tipo e sezioni
+    utilizzate. Pensato per essere inserito come capitolo finale del piano.
+
+    Args:
+        chunks: Lista di chunk (come restituiti da ``cerca_chunk_piattaforma``).
+
+    Returns:
+        Testo Markdown con l'elenco dei materiali e le sezioni consultate.
+    """
+    if not chunks:
+        return "(Nessun materiale di riferimento disponibile)"
+
+    # Raggruppa per materiale_id
+    materiali: dict[int, dict] = {}
+    for c in chunks:
+        mid = c.get("materiale_id")
+        if not mid:
+            continue
+        if mid not in materiali:
+            materiali[mid] = {
+                "titolo": c.get("materiale_titolo") or f"Materiale {mid}",
+                "tipo": c.get("materiale_tipo") or "",
+                "sezioni": [],
+            }
+        titolo_sez = c.get("titolo_sezione")
+        if titolo_sez and titolo_sez not in materiali[mid]["sezioni"]:
+            materiali[mid]["sezioni"].append(titolo_sez)
+
+    if not materiali:
+        # Fallback: chunk senza materiale_titolo (recupera dal DB)
+        mat_ids = list({c.get("materiale_id") for c in chunks if c.get("materiale_id")})
+        for mid in mat_ids:
+            info = db.esegui("SELECT titolo, tipo FROM materiali_didattici WHERE id = ?", [mid])
+            if info:
+                materiali[mid] = {
+                    "titolo": info[0]["titolo"],
+                    "tipo": info[0].get("tipo", ""),
+                    "sezioni": [],
+                }
+
+    righe: list[str] = [
+        "Materiali didattici consultati per la generazione di questa lezione:\n"
+    ]
+    for mid, info in materiali.items():
+        tipo_label = f" ({info['tipo'].upper()})" if info["tipo"] else ""
+        righe.append(f"- **{info['titolo']}**{tipo_label}")
+        for sez in info["sezioni"]:
+            righe.append(f"  - {sez}")
+
+    return "\n".join(righe)

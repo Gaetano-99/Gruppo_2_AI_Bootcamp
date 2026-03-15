@@ -48,6 +48,44 @@ _MAX_CHUNK_IN_CONTESTO: int = 12
 _MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
 _MAX_CONTESTO_CHARS: int = 35000     # Limite caratteri contesto RAG per evitare output troncato
 
+
+def _invoca_llm_strutturato(llm_strutturato, messaggi) -> "StrutturaCorso | None":
+    """Invoca l'LLM con structured output e gestisce errori di parsing.
+
+    Args:
+        llm_strutturato: LLM configurato con ``with_structured_output(StrutturaCorso)``.
+        messaggi: Lista di messaggi (SystemMessage + HumanMessage).
+
+    Returns:
+        Oggetto ``StrutturaCorso`` se la generazione ha successo, None altrimenti.
+    """
+    try:
+        return llm_strutturato.invoke(messaggi)
+    except (ValidationError, Exception) as e:
+        print(f"[DEBUG _invoca_llm_strutturato] Errore: {e}")
+        return None
+
+
+def _tronca_chunks_per_contesto(chunks: list[dict]) -> list[dict]:
+    """Riduce il numero di chunk se il testo totale supera _MAX_CONTESTO_CHARS.
+
+    Rimuove iterativamente l'ultimo chunk (meno rilevante per score) finché
+    il contesto non rientra nel limite di caratteri consentito.
+
+    Args:
+        chunks: Lista di chunk ordinati per rilevanza decrescente.
+
+    Returns:
+        Lista (eventualmente ridotta) di chunk che rispetta il limite caratteri.
+    """
+    while chunks:
+        totale = sum(len(c.get("testo") or "") for c in chunks)
+        if totale <= _MAX_CONTESTO_CHARS:
+            break
+        chunks = chunks[:-1]
+    return chunks
+
+
 _SYSTEM_PROMPT_AGENTE = """Sei il Content Generation Engine della piattaforma LearnAI.
 Il tuo compito è strutturare materiale didattico in un formato JSON rigoroso.
 
@@ -88,10 +126,15 @@ def _db_supporta_tipo_corso() -> bool:
     )
 
 
-def _tipo_piano_da_salvare(is_corso: bool) -> str:
-    """Mantiene compatibilita' con DB legacy che non accettano ancora `corso`."""
+def _tipo_piano_da_salvare(is_corso: bool, corso_id: int | None = None) -> str:
+    """Determina il tipo di piano da salvare nel DB.
+
+    - Piano studente con corso → 'esame'
+    - Piano studente senza corso (Lea sceglie) → 'libero'
+    - Corso docente → 'corso' (se supportato dal DB) altrimenti 'esame'
+    """
     if not is_corso:
-        return "esame"
+        return "libero" if corso_id is None else "esame"
     return "corso" if _db_supporta_tipo_corso() else "esame"
 
 
@@ -168,6 +211,10 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
     la logica di keyword extraction, query SQL LIKE multi-campo e scoring.
     Supporta sia singolo materiale_id sia lista materiale_ids.
 
+    Se lo stato contiene già ``chunks_recuperati`` non vuoti (pre-caricati
+    dall'esterno, es. ricerca platform-wide), salta la ricerca e li usa
+    direttamente.
+
     Args:
         stato: Stato corrente del grafo.
 
@@ -175,6 +222,16 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
         Aggiornamento parziale dello stato con ``chunks_recuperati``,
         ``n_chunk_totali_corso`` ed eventuale ``errore``.
     """
+    # Se i chunk sono già stati pre-caricati dall'esterno, usali direttamente
+    if stato.get("chunks_recuperati"):
+        chunks_pre = stato["chunks_recuperati"]
+        print(f"[DEBUG _nodo_recupera_chunks] Chunks pre-caricati: {len(chunks_pre)}, skip RAG")
+        return {
+            "chunks_recuperati": chunks_pre,
+            "n_chunk_totali_corso": len(chunks_pre),
+            "errore": None,
+        }
+
     corso_id: int | None = stato["corso_id"]
     argomento: str = stato["argomento_richiesto"]
     materiale_id: int | None = stato.get("materiale_id")
@@ -391,7 +448,7 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
             "titolo": titolo_corso,
             "descrizione": descrizione,
             # `is_corso_docente` resta la fonte di verita' anche sui DB legacy.
-            "tipo": _tipo_piano_da_salvare(is_corso),
+            "tipo": _tipo_piano_da_salvare(is_corso, corso_id),
             "corso_universitario_id": corso_id,
             "stato": "attivo",
             "is_corso_docente": 1 if is_corso else 0,
@@ -428,6 +485,16 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
                     "generato_al_momento": 0,
                 },
             )
+
+    # 3. Popola piano_materiali_utilizzati per tracciamento fonti
+    for cid in chunk_ids:
+        try:
+            db.inserisci("piano_materiali_utilizzati", {
+                "piano_id": piano_id,
+                "chunk_id": cid,
+            })
+        except Exception:
+            pass  # UNIQUE constraint: chunk già tracciato
 
     return {}
 
@@ -468,6 +535,7 @@ def esegui_generazione(
     materiale_id: int | None = None,
     materiale_ids: list[int] | None = None,
     istruzioni_utente: str = "",
+    chunks_precaricati: list[dict] | None = None,
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
@@ -480,6 +548,7 @@ def esegui_generazione(
         materiale_id: Se specificato, limita il RAG ai chunk di quel materiale.
         materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
         istruzioni_utente: Istruzioni aggiuntive su come strutturare la lezione.
+        chunks_precaricati: Se forniti, salta il nodo RAG e usa questi chunk direttamente.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -492,7 +561,7 @@ def esegui_generazione(
         "istruzioni_utente": istruzioni_utente,
         "materiale_id": materiale_id,
         "materiale_ids": materiale_ids,
-        "chunks_recuperati": [],
+        "chunks_recuperati": chunks_precaricati or [],
         "n_chunk_totali_corso": 0,
         "struttura_corso_generata": {},
         "chunk_ids_utilizzati": [],
