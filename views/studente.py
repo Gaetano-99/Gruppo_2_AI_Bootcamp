@@ -90,11 +90,17 @@ _CSS = """
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding-top: 74px !important; padding-bottom: 60px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
-/* ---- COLONNA SINISTRA ---- */
+/* ---- COLONNA SINISTRA (solo sidebar principale, NON colonne annidate) ---- */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
     background: #E2E8F0;
     border-radius: 12px;
     padding: 12px 8px;
+}
+/* Reset: rimuovi sfondo grigio dalle colonne annidate dentro altre colonne */
+[data-testid="stColumn"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+    background: transparent !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
 }
 
 /* ---- EXPANDER SIDEBAR (corsi e piani) ---- */
@@ -103,6 +109,12 @@ _CSS = """
     border-radius: 10px !important;
     margin-bottom: 10px !important;
     overflow: hidden;
+    transition: box-shadow 0.2s, border-color 0.2s !important;
+    border: 1px solid transparent !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:hover {
+    box-shadow: 0 2px 10px rgba(0,48,135,0.10) !important;
+    border-color: #C8D5E3 !important;
 }
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] summary {
     font-weight: 600 !important;
@@ -110,6 +122,20 @@ _CSS = """
     font-size: 0.92rem !important;
     padding: 10px 14px !important;
     border-radius: 10px !important;
+    flex-direction: row-reverse !important;
+    justify-content: space-between !important;
+    cursor: pointer !important;
+    transition: background 0.2s !important;
+}
+/* Icona freccia a destra */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] summary svg {
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    color: #003087 !important;
+    opacity: 0.6;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:hover summary svg {
+    opacity: 1;
+    color: #1351A8 !important;
 }
 /* Corsi — primo expander: bianco */
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(1) {
@@ -124,6 +150,82 @@ _CSS = """
 }
 [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(2) summary {
     background: #EEF4FF !important;
+}
+
+/* ---- BOTTONI NAVIGAZIONE SIDEBAR ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button {
+    background: #FFFFFF !important;
+    border: 1px solid #C8D5E3 !important;
+    border-left: 3px solid transparent !important;
+    border-radius: 8px !important;
+    color: #001A4D !important;
+    font-family: 'Source Sans 3', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    padding: 10px 14px !important;
+    margin-bottom: 4px !important;
+    text-align: left !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 1px 3px rgba(0,48,135,0.04) !important;
+    cursor: pointer !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:hover {
+    border-left-color: #003087 !important;
+    background: #F8FAFF !important;
+    box-shadow: 0 2px 8px rgba(0,48,135,0.10) !important;
+    transform: translateX(2px) !important;
+    color: #003087 !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:active {
+    transform: translateX(2px) scale(0.98) !important;
+    box-shadow: 0 1px 4px rgba(0,48,135,0.08) !important;
+    background: #EEF4FF !important;
+}
+
+/* ---- ICONE MATERIAL SIDEBAR ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button [data-testid="stIconMaterial"] {
+    font-size: 1.1rem !important;
+    line-height: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 20px !important;
+    height: 20px !important;
+    flex-shrink: 0 !important;
+    color: #003087 !important;
+    transition: color 0.2s !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:hover [data-testid="stIconMaterial"] {
+    color: #1351A8 !important;
+}
+
+/* ---- LOGOUT BUTTON ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child > [data-testid="stVerticalBlock"] > div:last-child .stButton > button {
+    background: transparent !important;
+    border: 1px solid #C8D5E3 !important;
+    border-left: 3px solid transparent !important;
+    color: #5A6A7E !important;
+    font-weight: 500 !important;
+    font-size: 0.82rem !important;
+    margin-top: 8px !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child > [data-testid="stVerticalBlock"] > div:last-child .stButton > button:hover {
+    border-left-color: #C8102E !important;
+    color: #C8102E !important;
+    background: #FDE8EA !important;
+    transform: translateX(2px) !important;
+}
+
+/* ---- FIX CONTAINER ORIZZONTALE SIDEBAR ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stHorizontalBlock"] {
+    gap: 4px !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stHorizontalBlock"] .stButton > button {
+    font-size: 0.78rem !important;
+    padding: 8px 8px !important;
 }
 
 /* ---- HEADER (position:fixed, coerente col footer) ---- */
@@ -250,7 +352,8 @@ _CSS = """
     margin-bottom: 8px;
     gap: 0 !important;
     align-items: center !important;
-    transition: border-color 0.15s, box-shadow 0.15s;
+    position: relative !important;
+    transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s;
 }
 /* --- Course card --- */
 .element-container:has(.card-corso) + .element-container [data-testid="stHorizontalBlock"],
@@ -264,6 +367,25 @@ _CSS = """
 .element-container:has(.card-corso-active) + .element-container [data-testid="stHorizontalBlock"]:hover {
     border-left-color: #003087;
     box-shadow: 0 4px 16px rgba(0,48,135,0.12);
+    transform: translateX(3px);
+}
+/* Chevron indicator corso */
+.element-container:has(.card-corso) + .element-container [data-testid="stHorizontalBlock"]::after,
+.element-container:has(.card-corso-active) + .element-container [data-testid="stHorizontalBlock"]::after {
+    content: '\203A';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.2rem;
+    color: transparent;
+    transition: color 0.2s, right 0.2s;
+    font-weight: 700;
+}
+.element-container:has(.card-corso) + .element-container [data-testid="stHorizontalBlock"]:hover::after,
+.element-container:has(.card-corso-active) + .element-container [data-testid="stHorizontalBlock"]:hover::after {
+    color: #003087;
+    right: 8px;
 }
 .element-container:has(.card-corso-active) + .element-container [data-testid="stHorizontalBlock"] {
     border-left-color: #003087;
@@ -279,6 +401,25 @@ _CSS = """
 .element-container:has(.card-piano) + .element-container [data-testid="stHorizontalBlock"]:hover,
 .element-container:has(.card-piano-active) + .element-container [data-testid="stHorizontalBlock"]:hover {
     box-shadow: 0 4px 16px rgba(0,48,135,0.12);
+    transform: translateX(3px);
+}
+/* Chevron indicator piano */
+.element-container:has(.card-piano) + .element-container [data-testid="stHorizontalBlock"]::after,
+.element-container:has(.card-piano-active) + .element-container [data-testid="stHorizontalBlock"]::after {
+    content: '\203A';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.2rem;
+    color: transparent;
+    transition: color 0.2s, right 0.2s;
+    font-weight: 700;
+}
+.element-container:has(.card-piano) + .element-container [data-testid="stHorizontalBlock"]:hover::after,
+.element-container:has(.card-piano-active) + .element-container [data-testid="stHorizontalBlock"]:hover::after {
+    color: #003087;
+    right: 8px;
 }
 .element-container:has(.card-piano-active) + .element-container [data-testid="stHorizontalBlock"] {
     border: 2px solid #003087;
@@ -307,6 +448,31 @@ _CSS = """
 }
 .element-container:has(.card-click) + .element-container [data-testid="stColumn"]:last-child button:hover {
     color: #C8102E !important;
+}
+
+/* ---- BOTTONI AZIONE COLONNA CENTRALE ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button {
+    background: transparent !important;
+    border: 1.5px solid #C8D5E3 !important;
+    border-radius: 10px !important;
+    color: #003087 !important;
+    font-family: 'Source Sans 3', sans-serif !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+    padding: 10px 18px !important;
+    transition: all 0.2s ease !important;
+    box-shadow: none !important;
+    cursor: pointer !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button:hover {
+    background: #EEF4FF !important;
+    border-color: #003087 !important;
+    color: #001A4D !important;
+    box-shadow: 0 2px 8px rgba(0,48,135,0.10) !important;
+}
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button:active {
+    background: #DDE6F8 !important;
+    transform: scale(0.98) !important;
 }
 
 /* ---- SEZIONE CENTRALE — CONTENUTO ---- */
@@ -513,6 +679,27 @@ div[data-testid="stModal"] > div:first-child {
     overflow-y: auto !important;
     border-radius: 12px !important;
     box-shadow: 0 8px 32px rgba(0,0,0,0.18) !important;
+}
+
+/* ---- PANNELLO CONTENUTO SCROLLABILE (centro — corsi e piani) ---- */
+/* Il contenuto si apre in un riquadro scrollabile fissato alla pagina */
+.st-key-corso_scroll,
+.st-key-piano_scroll {
+    height: calc(100vh - 270px) !important;
+    max-height: calc(100vh - 270px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    border-radius: 12px !important;
+    border: 1px solid #E0E8F2 !important;
+    background: #FAFBFD !important;
+    scroll-behavior: smooth;
+}
+/* Override Streamlit internal wrapper height */
+.st-key-corso_scroll > div,
+.st-key-piano_scroll > div {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
 }
 
 /* ---- RACCOMANDAZIONI ---- */
@@ -993,7 +1180,7 @@ def _get_corsi_studente(studente_id: int) -> list[dict]:
     """Restituisce i corsi universitari a cui lo studente è iscritto."""
     return db.esegui("""
         SELECT
-            cu.id, cu.nome, cu.cfu, cu.anno_di_corso, cu.livello,
+            cu.id, cu.nome, cu.descrizione, cu.cfu, cu.anno_di_corso, cu.livello,
             sc.stato, sc.voto, sc.anno_accademico
         FROM studenti_corsi sc
         JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id
@@ -1226,6 +1413,7 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
             if st.button(corso['nome'], key=f"btn_corso_{cid}", use_container_width=True):
                 st.session_state["_corso_sel"]  = cid
                 st.session_state["_corso_nome"] = corso["nome"]
+                st.session_state["_corso_desc"] = corso.get("descrizione", "")
                 st.session_state["_view_mode"]  = "corso"
                 st.session_state["_piano_sel"]  = None
                 st.session_state["_chat_history"] = []
@@ -2089,6 +2277,7 @@ def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
                     if st.button("Apri →", key=f"search_open_{r['id']}"):
                         st.session_state["_corso_sel"] = r["id"]
                         st.session_state["_corso_nome"] = r["nome"]
+                        st.session_state["_corso_desc"] = r.get("descrizione", "")
                         st.session_state["_view_mode"] = "corso"
                         st.session_state["_piano_sel"] = None
                         st.session_state["_search_results"] = None
@@ -2830,6 +3019,7 @@ def mostra_homepage_studente():
     view_mode      = st.session_state.get("_view_mode")       # "corso" | "piano" | None
     corso_sel_id   = st.session_state.get("_corso_sel")
     corso_sel_nome = st.session_state.get("_corso_nome", "")
+    corso_sel_desc = st.session_state.get("_corso_desc", "")
     piano_sel_id   = st.session_state.get("_piano_sel")
 
     # Layout a tre colonne — sx:navigazione, cx:contenuto, dx:chatbot
@@ -2845,11 +3035,12 @@ def mostra_homepage_studente():
             st.session_state["_corso_sel"] = None
             st.session_state["_piano_sel"] = None
             st.session_state["_corso_nome"] = ""
+            st.session_state["_corso_desc"] = ""
             st.session_state["_search_results"] = None
             st.rerun()
 
         # Pulsante ricerca corsi (apre dialog)
-        if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
+        if st.button(":material/search: Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
             _dialog_ricerca_corsi(corsi, studente_id)
 
         # Bottoni materiale personale (sempre visibili, sempre dialog liberi)
@@ -2868,7 +3059,7 @@ def mostra_homepage_studente():
         # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
 
         # Logout — in fondo alla sidebar
-        if st.button("Logout", key="logout_btn", use_container_width=True):
+        if st.button(":material/logout: Logout", key="logout_btn", use_container_width=True):
             _, _, reset_fn = _import_orchestratore()
             if reset_fn:
                 try:
@@ -2921,12 +3112,14 @@ def mostra_homepage_studente():
 
         elif view_mode == "corso" and corso_sel_id:
             # ── VISTA CORSO — sola lettura ─────────────────────────────────
+            desc_html = f'<p style="color:#5A6A7E;font-size:0.88rem;margin:0 0 16px 0;line-height:1.5;">{_esc(corso_sel_desc)}</p>' if corso_sel_desc else ""
             st.markdown(f"""
                 <div class="section-header">{_esc(corso_sel_nome)}</div>
-                <div class="section-sub">Corso universitario · Sola lettura</div>
+                <div class="section-sub" style="margin-bottom:8px;">Corso universitario · Sola lettura</div>
+                {desc_html}
                 """, unsafe_allow_html=True)
 
-            col_mat, col_unsub, _ = st.columns([1, 1, 4])
+            col_mat, col_unsub = st.columns(2)
             with col_mat:
                 if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=True):
                     _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
@@ -2935,7 +3128,7 @@ def mostra_homepage_studente():
                     _dialog_cancella_iscrizione(studente_id, corso_sel_id, corso_sel_nome)
 
             # — Contenuto ufficiale del docente (se pubblicato) —
-            with st.container(height=600, border=False):
+            with st.container(border=False, key="corso_scroll"):
                 piano_docente = _get_piano_docente_corso(corso_sel_id)
                 if piano_docente:
                     st.markdown("#### Lezioni del corso")
@@ -2982,7 +3175,7 @@ def mostra_homepage_studente():
                         _dialog_materiale_piano_libero(piano_sel_id)
 
 
-            with st.container(height=600, border=False):
+            with st.container(border=False, key="piano_scroll"):
                 _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
 
     # -------------------------------------------------------------------------
