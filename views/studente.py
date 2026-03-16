@@ -88,18 +88,7 @@ _CSS = """
     font-family: 'Source Sans 3', sans-serif !important;
 }
 #MainMenu, footer, header { visibility: hidden; }
-.block-container {
-    padding-top: 74px !important;
-    padding-bottom: 60px !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-    max-height: 100vh !important;
-    overflow: hidden !important;
-}
-/* Vincola il layout colonne all'altezza disponibile */
-[data-testid="stMain"] {
-    overflow: hidden !important;
-}
+.block-container { padding-top: 74px !important; padding-bottom: 60px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
 /* ---- COLONNA SINISTRA (scoped via .st-key-sidebar) ---- */
 .st-key-sidebar {

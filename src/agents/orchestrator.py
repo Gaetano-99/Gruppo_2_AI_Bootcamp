@@ -102,6 +102,15 @@ def _aggiorna_studente_corrente() -> None:
 # ---------------------------------------------------------------------------
 _SYSTEM_PROMPT_DOCENTE = """Sei Lea, l'assistente virtuale dei docenti della piattaforma LearnAI.
 
+VINCOLO FONDAMENTALE — FONTI DELLE INFORMAZIONI:
+Tutte le informazioni che fornisci, generi o utilizzi per riscrivere contenuti devono
+provenire ESCLUSIVAMENTE dal materiale didattico presente sulla piattaforma (materiale
+dei corsi, materiale caricato dai docenti, o materiale recuperato tramite RAG).
+È SEVERAMENTE VIETATO usare conoscenze generali proprie del modello AI per generare,
+arricchire, integrare o riscrivere contenuti didattici.
+Se il materiale disponibile è insufficiente, comunicalo chiaramente e suggerisci al
+docente di caricare materiale aggiuntivo o cercare tra i materiali esistenti sulla piattaforma.
+
 IL TUO CARATTERE:
 Parli in italiano con un tono professionale, diretto e propositivo.
 Supporti i docenti nella gestione didattica e nel monitoraggio della classe.
@@ -120,10 +129,13 @@ COSA SAI FARE (tool a tua disposizione):
                                 la lezione SOLO dal contenuto di quel materiale specifico.
                                 IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
 5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
-6. tool_modifica_piano       → leggere e riscrivere il testo di capitoli/paragrafi del corso,
+6. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
                                 rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
+                                Per RISCRIVERE il testo usa tool_riscrivi_paragrafo.
 7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                 Utile per decidere come integrare materiali in un corso esistente.
+8. tool_riscrivi_paragrafo   → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+                                didattico della piattaforma. Usa SEMPRE questo per riscritture.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
@@ -147,18 +159,22 @@ REGOLE DI COMPORTAMENTO:
   o espandere un paragrafo o capitolo del corso:
   1. Chiama tool_leggi_contesto → ottieni il piano_id e la struttura (capitoli e paragrafi con ID).
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
-  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
-  4. Genera il testo riscritto in modo completo e dettagliato.
-  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
-     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
-     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
-  NON dire mai che non puoi modificare il contenuto: hai sempre tool_modifica_piano a disposizione.
+  3. Chiama tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id).
+     Passa come "istruzioni" ciò che il docente vuole (es. "espandi", "semplifica", "arricchisci").
+     Se il docente menziona un materiale specifico, passa il materiale_id.
+     Il tool gestisce AUTONOMAMENTE: lettura del testo originale, recupero materiale RAG,
+     riscrittura vincolata al solo materiale didattico, e salvataggio.
+  NON generare MAI tu stesso il testo riscritto nella conversazione.
+  NON usare tool_modifica_piano('riscrivi_contenuto') per la riscrittura: usa SEMPRE
+  tool_riscrivi_paragrafo che garantisce l'uso esclusivo di materiale didattico.
+  NON dire mai che non puoi modificare il contenuto: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN CORSO CON MATERIALE: quando il docente chiede di arricchire, integrare o ampliare
   un corso usando un materiale specifico, segui lo stesso flusso della modifica ma per contenuti nuovi:
   1. Chiama tool_leggi_contesto → ottieni piano_id e struttura.
   2. Cerca il materiale con tool_esplora_catalogo.
   3. Per ogni nuovo argomento: aggiungi capitolo con 'aggiungi_capitolo',
-     poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con 'riscrivi_contenuto'
+     poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con
+     tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id)
      passando SEMPRE il materiale_id per tracciare la fonte.
   NON creare mai capitoli vuoti senza paragrafi.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
@@ -168,6 +184,22 @@ REGOLE DI COMPORTAMENTO:
 """
 
 _SYSTEM_PROMPT = """Sei Lea, il tutor didattico intelligente della piattaforma LearnAI.
+
+VINCOLO FONDAMENTALE — FONTI DELLE INFORMAZIONI:
+Tutte le informazioni che fornisci, generi o utilizzi per riscrivere contenuti devono
+provenire ESCLUSIVAMENTE dal materiale didattico presente sulla piattaforma (materiale
+del corso, materiale del piano personalizzato, materiale caricato dallo studente, o
+materiale recuperato tramite RAG dalla piattaforma).
+È SEVERAMENTE VIETATO usare conoscenze generali proprie del modello AI per generare,
+arricchire, integrare o riscrivere contenuti didattici.
+Se il materiale disponibile è insufficiente per rispondere a una domanda o completare
+una richiesta, comunicalo chiaramente allo studente e suggerisci di:
+- Cercare materiale pertinente tra i corsi disponibili sulla piattaforma
+- Caricare materiale proprio
+- Consultare il docente del corso
+Al massimo, previo avviso esplicito allo studente e con il suo consenso, puoi cercare
+materiale pertinente in ALTRI corsi o materiali presenti sulla piattaforma usando
+tool_esplora_catalogo o tool_genera_corso_libero, ma MAI inventare contenuti.
 
 IL TUO CARATTERE:
 Parli in italiano con un tono caldo, chiaro e motivante. Non sei un bot che esegue
@@ -188,7 +220,9 @@ COSA SAI FARE (tool a tua disposizione):
 4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
 5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
 6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
-                                  LEGGERE e RISCRIVERE il testo di una lezione.
+                                  LEGGERE il testo di una lezione. Per RISCRIVERE usa tool_riscrivi_paragrafo.
+10. tool_riscrivi_paragrafo     → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+                                  didattico della piattaforma. Usa SEMPRE questo tool per riscritture.
 7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                   Utile per decidere come integrare materiali in un piano esistente.
 8. tool_genera_corso_libero        → generare una lezione attingendo a TUTTI i materiali della piattaforma
@@ -272,13 +306,18 @@ REGOLE DI COMPORTAMENTO:
 - Quando lo studente chiede di riscrivere, modificare, semplificare, espandere un paragrafo:
   1. Chiama tool_leggi_contesto → ottieni piano_id e l'elenco "Sezioni del piano" con gli ID.
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
-  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
-  4. Genera il testo riscritto in modo completo e dettagliato.
-  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
-     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
-     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
+  3. Chiama tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id).
+     Passa come "istruzioni" ciò che lo studente vuole (es. "espandi", "semplifica", "riscrivi
+     in modo più chiaro"). Se lo studente menziona un materiale specifico, passa il materiale_id.
+     Il tool gestisce AUTONOMAMENTE: lettura del testo originale, recupero materiale RAG,
+     riscrittura vincolata al solo materiale didattico, e salvataggio.
+  NON generare MAI tu stesso il testo riscritto nella conversazione.
+  NON usare tool_modifica_piano('riscrivi_contenuto') per la riscrittura: usa SEMPRE
+  tool_riscrivi_paragrafo che garantisce l'uso esclusivo di materiale didattico.
+  tool_modifica_piano('riscrivi_contenuto') è riservato SOLO a tool_riscrivi_paragrafo internamente
+  o per operazioni strutturali (rinomina, riordina, elimina, aggiungi).
   NON chiedere mai il numero del piano all'utente: è già nel contesto.
-  NON dire mai che non puoi modificare il testo: hai sempre questo percorso disponibile.
+  NON dire mai che non puoi modificare il testo: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN PIANO CON MATERIALE DIDATTICO: quando lo studente chiede di arricchire,
   integrare o ampliare un piano personalizzato usando un materiale specifico:
   1. Chiama tool_leggi_contesto → ottieni piano_id e la struttura attuale del piano.
@@ -290,8 +329,8 @@ REGOLE DI COMPORTAMENTO:
      b. Per ogni sotto-argomento, aggiungi un paragrafo:
         tool_modifica_piano(piano_id, 'aggiungi_paragrafo', capitolo_id, titolo_paragrafo)
         → ottieni il paragrafo_id dalla risposta.
-     c. Scrivi il contenuto del paragrafo basandoti sul materiale:
-        tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, testo_completo, materiale_id)
+     c. Scrivi il contenuto del paragrafo usando il materiale:
+        tool_riscrivi_paragrafo(piano_id, paragrafo_id, "scrivi il contenuto basandoti sul materiale", materiale_id)
         IMPORTANTE: passa SEMPRE il materiale_id per tracciare la fonte nel piano.
   NON creare mai capitoli vuoti senza paragrafi. Ogni capitolo DEVE avere almeno un paragrafo con contenuto.
   Se il piano ha già capitoli sugli stessi argomenti, arricchisci quelli esistenti invece di duplicarli.
@@ -1099,26 +1138,32 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     if doc_chat:
         istruzioni_extra = (
             "- Lo studente sta chattando su un DOCUMENTO SPECIFICO. Basa la risposta "
-            "PRINCIPALMENTE sul contenuto del documento fornito.\n"
+            "ESCLUSIVAMENTE sul contenuto del documento fornito.\n"
             "- Se la domanda riguarda qualcosa che il documento non tratta, segnalalo "
-            "chiaramente e rispondi con le tue conoscenze generali indicando che stai "
-            "integrando oltre il contenuto del documento.\n"
+            "chiaramente e indica che l'informazione richiesta non è presente nel documento. "
+            "NON rispondere con conoscenze generali proprie. Suggerisci allo studente di "
+            "consultare altri materiali del corso o della piattaforma.\n"
             "- Quando citi informazioni dal documento, indicalo naturalmente "
             "(es. 'Come descritto nel documento...', 'Il materiale spiega che...').\n"
             "- NON proporre di creare piani o lezioni: lo studente vuole chattare sul documento."
         )
     else:
         istruzioni_extra = (
-            "- Se il materiale disponibile copre l'argomento, basa la risposta su di esso "
-            "citando i concetti chiave.\n"
-            "- Se il materiale non copre completamente l'argomento, integra con le tue "
-            "conoscenze generali ma segnala chiaramente cosa viene dal materiale del corso "
-            "e cosa è una tua integrazione.\n"
+            "- Basa la risposta ESCLUSIVAMENTE sul materiale didattico fornito sopra "
+            "(contenuto del piano e/o materiale RAG). NON usare MAI conoscenze generali "
+            "o informazioni che non provengono dal materiale della piattaforma.\n"
+            "- Se il materiale disponibile non copre l'argomento richiesto o è insufficiente, "
+            "comunicalo chiaramente allo studente. Suggerisci di cercare materiale pertinente "
+            "tra i corsi o di caricare materiale proprio, oppure di chiedere al docente.\n"
+            "- Cita sempre la fonte delle informazioni (es. 'Secondo il materiale del corso...', "
+            "'Come riportato nel documento...').\n"
             "- NON proporre di creare piani o lezioni: lo studente vuole una risposta diretta."
         )
 
     prompt = f"""Sei Lea, tutor didattico della piattaforma LearnAI. Rispondi alla domanda dello
-studente in modo chiaro, esaustivo e coinvolgente, basandoti sul materiale didattico disponibile.
+studente in modo chiaro, esaustivo e coinvolgente, basandoti ESCLUSIVAMENTE sul materiale
+didattico fornito di seguito. NON usare MAI conoscenze generali proprie del modello AI.
+Se il materiale è insufficiente, dichiaralo esplicitamente.
 
 {info_contesto}
 
@@ -1146,6 +1191,186 @@ ISTRUZIONI PER LA RISPOSTA:
         return risposta.content
     except Exception as e:
         return f"Mi dispiace, ho avuto un problema nel rispondere alla tua domanda: {e}"
+
+
+@tool
+def tool_riscrivi_paragrafo(
+    piano_id: int,
+    paragrafo_id: int,
+    istruzioni: str,
+    materiale_id: int = 0,
+) -> str:
+    """
+    Riscrive il testo di un paragrafo di un piano personalizzato basandosi
+    ESCLUSIVAMENTE sul testo originale e sul materiale didattico della piattaforma.
+
+    Usa SEMPRE questo tool quando lo studente o il docente chiede di riscrivere,
+    modificare, semplificare, espandere, arricchire o migliorare il testo di un
+    paragrafo. NON generare MAI il testo riscritto direttamente nella conversazione:
+    delegalo SEMPRE a questo tool.
+
+    Parametro piano_id: ID del piano che contiene il paragrafo.
+    Parametro paragrafo_id: ID del paragrafo da riscrivere.
+    Parametro istruzioni: cosa fare col testo (es. "espandi", "semplifica",
+        "riscrivi in modo più chiaro", "arricchisci con più dettagli", "traduci in inglese").
+    Parametro materiale_id: (opzionale) ID di un materiale specifico da cui attingere
+        per arricchire il contenuto. Se 0, il tool cercherà automaticamente materiale
+        pertinente sulla piattaforma tramite RAG.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+    contesto = _CONTESTO_CORRENTE
+
+    # --- 1. Verifica proprietà del piano ---
+    piano = db.trova_uno("piani_personalizzati", {"id": piano_id, "studente_id": studente_id})
+    if not piano:
+        return f"Piano ID {piano_id} non trovato o non appartiene allo studente corrente."
+
+    # --- 2. Verifica che il paragrafo appartenga al piano ---
+    par = db.esegui(
+        "SELECT pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+        "WHERE pp.id = ? AND pc.piano_id = ?",
+        [paragrafo_id, piano_id],
+    )
+    if not par:
+        return f"Paragrafo ID {paragrafo_id} non trovato in questo piano."
+    titolo_paragrafo = par[0]["titolo"]
+
+    # --- 3. Leggi il testo attuale ---
+    contenuto = db.trova_uno("piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"})
+    if not contenuto or not contenuto.get("contenuto_json"):
+        return (
+            f"Nessun testo trovato per '{titolo_paragrafo}'. "
+            "Il paragrafo non ha ancora una lezione generata."
+        )
+    testo_originale = contenuto["contenuto_json"]
+
+    # --- 4. Recupera materiale didattico con RAG ---
+    contesto_rag = ""
+    chunk_ids_utilizzati: list[int] = []
+    corso_id = contesto.get("corso_id")
+
+    try:
+        if materiale_id and materiale_id > 0:
+            # Materiale specifico richiesto
+            risultato = cerca_chunk_rilevanti(
+                corso_id, titolo_paragrafo, top_k=8, materiale_id=materiale_id,
+            )
+        elif corso_id:
+            # Cerca nel corso associato
+            risultato = cerca_chunk_rilevanti(corso_id, titolo_paragrafo, top_k=6)
+        else:
+            # Cerca su tutta la piattaforma
+            risultato = cerca_chunk_piattaforma(titolo_paragrafo, top_k=6)
+
+        if risultato.chunks:
+            contesto_rag = formatta_contesto_rag(risultato.chunks)
+            chunk_ids_utilizzati = [c["id"] for c in risultato.chunks]
+    except Exception as e:
+        print(f"[DEBUG tool_riscrivi_paragrafo] Errore RAG: {e}")
+
+    # --- 5. Genera il testo riscritto con LLM vincolato ---
+    prompt = f"""Sei il Content Rewriting Engine della piattaforma LearnAI.
+Il tuo compito è riscrivere il testo di un paragrafo didattico seguendo le istruzioni fornite.
+
+VINCOLO FONDAMENTALE — RISPETTALO RIGOROSAMENTE:
+Puoi usare ESCLUSIVAMENTE:
+1. Il TESTO ORIGINALE del paragrafo fornito di seguito.
+2. Il MATERIALE DIDATTICO DELLA PIATTAFORMA recuperato tramite RAG (se disponibile).
+È SEVERAMENTE VIETATO aggiungere informazioni, concetti, esempi, definizioni o
+spiegazioni che non provengono da queste due fonti.
+Se le istruzioni richiedono di espandere o arricchire ma il materiale disponibile
+è insufficiente, riscrivi migliorando la struttura e la chiarezza del testo originale
+SENZA inventare nuovi contenuti. Segnala alla fine che il materiale disponibile non
+conteneva informazioni aggiuntive sull'argomento.
+
+ISTRUZIONI DELL'UTENTE:
+{istruzioni}
+
+TITOLO DEL PARAGRAFO:
+{titolo_paragrafo}
+
+TESTO ORIGINALE DA RISCRIVERE:
+{testo_originale}
+
+{"MATERIALE DIDATTICO DELLA PIATTAFORMA (fonte RAG):" + chr(10) + contesto_rag if contesto_rag else "MATERIALE DIDATTICO: Nessun materiale aggiuntivo trovato sulla piattaforma per questo argomento. Riscrivi basandoti SOLO sul testo originale."}
+
+REGOLE:
+- Scrivi sempre in italiano.
+- Il testo riscritto deve essere completo e autosufficiente (non un riassunto).
+- Usa formattazione Markdown (grassetto, elenchi, titoli) per rendere il testo leggibile.
+- NON aggiungere MAI informazioni che non provengono dal testo originale o dal materiale RAG.
+- Se hai usato informazioni dal materiale RAG, indica i Chunk ID utilizzati tra parentesi
+  alla fine (es. "[Fonti: Chunk 42, 55]").
+
+Riscrivi il testo ora:"""
+
+    try:
+        llm = get_llm(max_tokens=4096)
+        from langchain_core.messages import HumanMessage as HM
+        risposta = llm.invoke([HM(content=prompt)])
+        nuovo_testo = risposta.content
+    except Exception as e:
+        return f"Errore durante la riscrittura del paragrafo: {e}"
+
+    # --- 6. Salva il testo riscritto ---
+    try:
+        esistente = db.trova_uno("piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"})
+        aggiornamento = {"contenuto_json": nuovo_testo.strip()}
+
+        # Aggiorna chunk_ids_utilizzati
+        if chunk_ids_utilizzati:
+            chunk_ids_esistenti: list = []
+            try:
+                chunk_ids_esistenti = json.loads(esistente.get("chunk_ids_utilizzati") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            for cid in chunk_ids_utilizzati:
+                if cid not in chunk_ids_esistenti:
+                    chunk_ids_esistenti.append(cid)
+            aggiornamento["chunk_ids_utilizzati"] = json.dumps(chunk_ids_esistenti)
+
+        # Aggiungi chunk del materiale specifico se fornito
+        if materiale_id and materiale_id > 0:
+            nuovi_chunks = db.esegui(
+                "SELECT id FROM materiali_chunks WHERE materiale_id = ?",
+                [materiale_id],
+            )
+            try:
+                ids_esistenti = json.loads(aggiornamento.get("chunk_ids_utilizzati") or
+                                          esistente.get("chunk_ids_utilizzati") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                ids_esistenti = []
+            for c in nuovi_chunks:
+                if c["id"] not in ids_esistenti:
+                    ids_esistenti.append(c["id"])
+            aggiornamento["chunk_ids_utilizzati"] = json.dumps(ids_esistenti)
+
+        if esistente:
+            db.aggiorna(
+                "piano_contenuti",
+                {"paragrafo_id": paragrafo_id, "tipo": "lezione"},
+                aggiornamento,
+            )
+        else:
+            nuovo_record = {
+                "paragrafo_id": paragrafo_id,
+                "tipo": "lezione",
+                **aggiornamento,
+            }
+            db.inserisci("piano_contenuti", nuovo_record)
+
+        fonte_info = ""
+        if contesto_rag:
+            fonte_info = " Il testo è stato arricchito con materiale didattico della piattaforma."
+        else:
+            fonte_info = " Non è stato trovato materiale aggiuntivo: il testo è stato riscritto basandosi solo sul contenuto originale."
+
+        return (
+            f"✅ Paragrafo '{titolo_paragrafo}' riscritto e salvato nel piano.{fonte_info} "
+            "Lo studente vedrà la nuova versione al prossimo caricamento."
+        )
+    except Exception as e:
+        return f"Errore durante il salvataggio del paragrafo riscritto: {e}"
 
 
 @tool
@@ -1605,6 +1830,7 @@ def _get_orchestratore():
                     tool_genera_pratica,
                     tool_analizza_classe,
                     tool_modifica_piano,
+                    tool_riscrivi_paragrafo,
                     tool_analizza_coerenza_materiali,
                 ],
                 system_prompt=_SYSTEM_PROMPT_DOCENTE,
@@ -1624,6 +1850,7 @@ def _get_orchestratore():
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
+                tool_riscrivi_paragrafo,
                 tool_analizza_coerenza_materiali,
             ],
             system_prompt=_SYSTEM_PROMPT,
