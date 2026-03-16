@@ -1975,39 +1975,27 @@ def _render_raccomandazioni_slideshow(studente_id: int):
                 else {{ clearInterval(autoInterval); }}
             }}, 4000);
         }};
-
-        window.iscriviti = function(corsoId) {{
-            var url = new URL(window.parent.location.href);
-            url.searchParams.set("racc_iscrivi", corsoId);
-            window.parent.location.href = url.toString();
-        }};
-
         updateSlide();
     }})();
     </script>
-    """, height=270, scrolling=False)
+    """, height=230, scrolling=False)
 
-    # Gestione iscrizione da bottone carousel (via query param)
-    if "racc_iscrivi" in st.query_params:
-        corso_id_param = st.query_params["racc_iscrivi"]
-        del st.query_params["racc_iscrivi"]
-        try:
-            corso_id_int = int(corso_id_param)
-            corso_nome_found = None
-            for r in raccomandazioni:
-                if r.corso_id == corso_id_int:
-                    corso_nome_found = r.corso_nome
-                    break
-            db.inserisci("studenti_corsi", {
-                "studente_id": studente_id,
-                "corso_universitario_id": corso_id_int,
-                "anno_accademico": _anno_accademico_corrente(),
-                "stato": "iscritto",
-            })
-            st.session_state["_iscrizione_feedback"] = corso_nome_found or "Corso"
-        except Exception:
-            st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
-        st.rerun()
+    # Render Streamlit buttons for iscrizione (outside the HTML component)
+    btn_cols = st.columns(len(raccomandazioni))
+    for i, r in enumerate(raccomandazioni):
+        with btn_cols[i]:
+            if st.button("Iscriviti", key=f"racc_slide_{r.corso_id}", type="primary", use_container_width=True):
+                try:
+                    db.inserisci("studenti_corsi", {
+                        "studente_id": studente_id,
+                        "corso_universitario_id": r.corso_id,
+                        "anno_accademico": _anno_accademico_corrente(),
+                        "stato": "iscritto",
+                    })
+                    st.session_state["_iscrizione_feedback"] = r.corso_nome
+                except Exception:
+                    st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
+                st.rerun()
 
 
 # ---------------------------------------------------------------------------
