@@ -37,24 +37,6 @@ _CSS = """
     margin-bottom: 24px;
     border: 1px solid #DAEAFF;
 }
-.action-card {
-    border-radius: 14px;
-    padding: 24px 26px;
-    text-align: center;
-    border: 2px solid transparent;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-.action-card-primary {
-    background: linear-gradient(135deg, #003087, #0057B8);
-    color: white;
-}
-.action-card-secondary {
-    background: linear-gradient(135deg, #C5A028, #E8BA30);
-    color: white;
-}
-.action-card h3 { margin: 0 0 6px 0; font-size: 1.2rem; color: white; }
-.action-card p  { margin: 0; font-size: 0.88rem; color: rgba(255,255,255,0.88); }
 .section-label {
     font-size: 0.8rem;
     font-weight: 700;
@@ -71,6 +53,44 @@ _CSS = """
     border-left: 4px solid #0057B8;
     font-size: 0.95rem;
     color: #001A4D;
+}
+
+/* --- HACK UI: bottone Streamlit invisibile sovrapposto alla card --- */
+
+/* La colonna deve essere il punto di riferimento per il posizionamento assoluto */
+div[data-testid="column"]:has(.action-card-wrapper) {
+    position: relative !important;
+}
+
+/* Il bottone Streamlit copre tutta la colonna, invisibile */
+div[data-testid="column"]:has(.action-card-wrapper) .stButton {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 10 !important;
+    margin: 0 !important;
+}
+div[data-testid="column"]:has(.action-card-wrapper) .stButton > button {
+    width: 100% !important;
+    height: 100% !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+/* Nasconde il testo del bottone fantasma */
+div[data-testid="column"]:has(.action-card-wrapper) .stButton > button p {
+    display: none !important;
+}
+
+/* Effetto hover sulla card quando si passa sopra la colonna */
+div[data-testid="column"]:has(.action-card-wrapper):hover .action-card-wrapper {
+    filter: brightness(1.07);
+    transform: scale(1.02);
 }
 </style>
 """
@@ -151,30 +171,52 @@ def _render_home():
 
     st.markdown("---")
 
-    # Bottoni principali
+    # Action buttons
     st.markdown('<div class="section-label">🚀 Da dove vuoi iniziare?</div>', unsafe_allow_html=True)
 
     col_a, col_b = st.columns(2, gap="medium")
 
     with col_a:
+        # La card visiva con classe action-card-wrapper (usata dal CSS per il posizionamento)
         st.markdown("""
-        <div class="action-card action-card-primary">
-            <h3>📚 Esplora Corsi</h3>
-            <p>Sfoglia tutti i corsi di laurea disponibili con descrizioni e facoltà.</p>
+        <div class="action-card-wrapper" style="
+            background: linear-gradient(135deg, #003087, #0057B8);
+            border-radius: 14px;
+            padding: 24px 26px;
+            text-align: center;
+            transition: filter 0.2s, transform 0.2s;
+            cursor: pointer;
+        ">
+            <h3 style="margin: 0 0 6px 0; font-size: 1.2rem; color: white;">📚 Esplora Corsi</h3>
+            <p style="margin: 0; font-size: 0.88rem; color: rgba(255,255,255,0.88);">
+                Sfoglia tutti i corsi di laurea disponibili con descrizioni e facoltà.
+            </p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("📚 Esplora Corsi", use_container_width=True, type="primary", key="btn_catalogo_home"):
+        # Bottone Streamlit invisibile sovrapposto alla card tramite CSS
+        if st.button("Esplora Corsi", use_container_width=True, key="btn_catalogo_home_inv"):
             st.session_state["ospite_pagina"] = "catalogo"
             st.rerun()
 
     with col_b:
+        # La card visiva con classe action-card-wrapper (usata dal CSS per il posizionamento)
         st.markdown("""
-        <div class="action-card action-card-secondary">
-            <h3>🎯 Questionario</h3>
-            <p>30 domande per scoprire il percorso di studi più adatto al tuo profilo.</p>
+        <div class="action-card-wrapper" style="
+            background: linear-gradient(135deg, #C5A028, #E8BA30);
+            border-radius: 14px;
+            padding: 24px 26px;
+            text-align: center;
+            transition: filter 0.2s, transform 0.2s;
+            cursor: pointer;
+        ">
+            <h3 style="margin: 0 0 6px 0; font-size: 1.2rem; color: white;">🎯 Questionario</h3>
+            <p style="margin: 0; font-size: 0.88rem; color: rgba(255,255,255,0.88);">
+                30 domande per scoprire il percorso di studi più adatto al tuo profilo.
+            </p>
         </div>
         """, unsafe_allow_html=True)
-        if st.button("🎯 Fai il Questionario", use_container_width=True, key="btn_questionario_home"):
+        # Bottone Streamlit invisibile sovrapposto alla card tramite CSS
+        if st.button("Fai il Questionario", use_container_width=True, key="btn_questionario_home_inv"):
             st.session_state["ospite_pagina"] = "questionario"
             st.rerun()
 
