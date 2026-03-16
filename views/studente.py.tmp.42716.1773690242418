@@ -164,6 +164,88 @@ _CSS = """
 .app-header .header-brand-text strong span {
     color: #f0a500;
 }
+.app-header .header-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.app-header .header-home-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255,255,255,0.10);
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.20);
+    border-radius: 8px;
+    padding: 7px 18px;
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+    text-decoration: none;
+}
+.app-header .header-home-btn:hover {
+    background: rgba(255,255,255,0.18);
+    border-color: rgba(255,255,255,0.35);
+}
+.app-header .header-right {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+}
+.app-header .header-user {
+    color: rgba(255,255,255,0.45);
+    font-size: 0.82rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: color 0.2s;
+}
+.app-header .header-user:hover { color: #fff; }
+.app-header .header-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: #C5A028;
+    color: #1a2340;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.app-header .header-logout {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+.app-header .header-logout:hover {
+    background: rgba(200,16,46,0.25);
+    border-color: rgba(200,16,46,0.5);
+}
+.app-header .header-logout .logout-icon {
+    font-size: 1.1rem;
+    line-height: 1;
+}
+/* Hide the helper Streamlit buttons used by header JS */
+.header-hidden-btns {
+    position: absolute !important;
+    width: 1px !important; height: 1px !important;
+    overflow: hidden !important;
+    clip: rect(0,0,0,0) !important;
+    border: 0 !important;
+    padding: 0 !important;
+    margin: -1px !important;
+}
+.header-hidden-btns .stButton { margin: 0 !important; padding: 0 !important; }
+.header-hidden-btns button { width: 1px !important; height: 1px !important; }
 
 /* ---- SIDEBAR CORSI ---- */
 .corso-item {
@@ -890,13 +972,13 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 }
 .slideshow-track {
     display: flex;
-    gap: 17px;
+    gap: 20px;
     transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
     will-change: transform;
 }
 .slideshow-track .slide-card {
-    min-width: 268px;
-    max-width: 320px;
+    min-width: 290px;
+    max-width: 340px;
     flex-shrink: 0;
     background: #fff;
     border-radius: 10px;
@@ -1132,11 +1214,21 @@ def _get_struttura_piano(piano_id: int) -> list[dict]:
 
 def _render_header(utente: dict):
     """Renderizza l'header istituzionale fisso in alto (puro HTML, come il footer)."""
+    iniziali = f"{utente['nome'][0]}{utente['cognome'][0]}".upper()
+    nome_safe = _esc(utente['nome'])
+    cognome_safe = _esc(utente['cognome'])
     logo_b64 = _get_logo_base64()
     logo_html = (
         f'<img src="data:image/png;base64,{logo_b64}" alt="Federico360">'
         if logo_b64 else ''
     )
+
+    view_mode = st.session_state.get("_view_mode")
+
+    # Bottone "Torna alla home" visibile solo quando si è in una vista corso/piano
+    home_btn_html = ""
+    if view_mode:
+        home_btn_html = '<div class="header-home-btn" id="hdr-home-btn" title="Torna alla home">&#x1F3E0; Torna alla home</div>'
 
     # Costruisci header come stringa compatta (evita che il markdown parser
     # di Streamlit interpreti newline+indentazione come blocco codice)
@@ -1148,10 +1240,62 @@ def _render_header(utente: dict):
         '&copy; 2026 <strong>Federico<span>360</span></strong>',
         '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
         '</div></div>',
+        '<div class="header-center">',
+        home_btn_html,
+        '</div>',
+        '<div class="header-right">',
+        '<div class="header-user">',
+        f'<span>{nome_safe} {cognome_safe}</span>',
+        f'<div class="header-avatar">{iniziali}</div>',
+        '</div>',
+        '<div class="header-logout" id="hdr-logout-btn" title="Esci">&#x1F6AA;</div>',
+        '</div>',
         '</div>',
     ]
     st.markdown("".join(header_parts), unsafe_allow_html=True)
 
+    # JS bridge: components.html esegue in un iframe che PUÒ eseguire script.
+    # Clicca i bottoni Streamlit nascosti nel documento parent.
+    _js_bridge = """<script>
+    function clickStBtn(text) {
+        var buttons = window.parent.document.querySelectorAll('button');
+        for (var i = 0; i < buttons.length; i++) {
+            if (buttons[i].textContent.trim() === text) { buttons[i].click(); return; }
+        }
+    }
+    var parentDoc = window.parent.document;
+    var homeBtn = parentDoc.getElementById('hdr-home-btn');
+    if (homeBtn && !homeBtn._bound) {
+        homeBtn._bound = true;
+        homeBtn.addEventListener('click', function() { clickStBtn('__hdr_home__'); });
+    }
+    var logoutBtn = parentDoc.getElementById('hdr-logout-btn');
+    if (logoutBtn && !logoutBtn._bound) {
+        logoutBtn._bound = true;
+        logoutBtn.addEventListener('click', function() { clickStBtn('Logout'); });
+    }
+    // Hide the __hdr_home__ bridge button
+    var allBtns = parentDoc.querySelectorAll('button');
+    for (var i = 0; i < allBtns.length; i++) {
+        if (allBtns[i].textContent.trim().indexOf('__hdr_') === 0) {
+            var el = allBtns[i].closest('.stElementContainer') || allBtns[i].parentElement;
+            if (el) { el.style.position='absolute'; el.style.width='1px'; el.style.height='1px'; el.style.overflow='hidden'; el.style.clip='rect(0,0,0,0)'; }
+        }
+    }
+    </script>"""
+    components.html(_js_bridge, height=0, width=0)
+
+    # Bottone Streamlit nascosto per Home — attivato dal JS nell'header
+    # (reso invisibile dal JS bridge sopra)
+    hidden = st.container()
+    with hidden:
+        if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
+            st.session_state["_view_mode"] = None
+            st.session_state["_corso_sel"] = None
+            st.session_state["_piano_sel"] = None
+            st.session_state["_corso_nome"] = ""
+            st.session_state["_search_results"] = None
+            st.rerun()
 
 
 def _render_footer():
@@ -1859,9 +2003,9 @@ def _render_raccomandazioni_slideshow(studente_id: int):
     @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600&display=swap');
     * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Source Sans 3', sans-serif; }}
     .slideshow-wrapper {{ position: relative; overflow: hidden; padding: 0 6px; }}
-    .slideshow-track {{ display: flex; gap: 17px; }}
+    .slideshow-track {{ display: flex; gap: 18px; }}
     .slide-card {{
-        min-width: 268px; max-width: 312px; flex-shrink: 0;
+        min-width: 275px; max-width: 320px; flex-shrink: 0;
         background: #fff; border-radius: 10px; padding: 14px 16px;
         border-left: 4px solid #C5A028;
         box-shadow: 0 2px 8px rgba(0,48,135,0.07);
@@ -1907,7 +2051,7 @@ def _render_raccomandazioni_slideshow(studente_id: int):
     </div>
     <script>
     (function() {{
-        var N = {n}, GAP = 17;
+        var N = {n}, GAP = 18;
         var track = document.getElementById("{uid}_track");
         var dots  = document.querySelectorAll("#{uid}_dots .dot-indicator");
         var orig  = Array.from(track.children);
@@ -2929,13 +3073,8 @@ def mostra_homepage_studente():
                 <div class="section-sub">Corso universitario · Sola lettura</div>
                 """, unsafe_allow_html=True)
 
-            col_mat, col_unsub, _ = st.columns([1, 1, 4])
-            with col_mat:
-                if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=True):
-                    _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-            with col_unsub:
-                if st.button("🚪 Cancella iscrizione", key="btn_cancella_iscrizione", use_container_width=True):
-                    _dialog_cancella_iscrizione(studente_id, corso_sel_id, corso_sel_nome)
+            if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=False):
+                _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
 
             # — Contenuto ufficiale del docente (se pubblicato) —
             with st.container(height=600, border=False):
@@ -2962,25 +3101,24 @@ def mostra_homepage_studente():
             <div class="section-sub">{sub_label}</div>
             """, unsafe_allow_html=True)
 
-            if corso_sel_id:
-                col_back, col_del_piano, col_mat_piano, _ = st.columns([1, 1, 1.5, 2.5])
-                with col_back:
-                    if st.button("← Corso"):
+            col_back, col_del_piano, col_mat_piano, _ = st.columns([1, 1, 1.5, 2.5])
+            with col_back:
+                back_label = "← Corso" if corso_sel_id else "← Home"
+                if st.button(back_label):
+                    if corso_sel_id:
                         st.session_state["_view_mode"] = "corso"
-                        st.session_state["_piano_sel"] = None
-                        st.rerun()
-                with col_del_piano:
-                    if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
-                        _dialog_elimina_piano(piano_sel_id, titolo_piano)
-                with col_mat_piano:
+                    else:
+                        st.session_state["_view_mode"] = None
+                    st.session_state["_piano_sel"] = None
+                    st.rerun()
+            with col_del_piano:
+                if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
+                    _dialog_elimina_piano(piano_sel_id, titolo_piano)
+            with col_mat_piano:
+                if corso_sel_id:
                     if st.button("📚 Materiale del corso", key="btn_mat_piano"):
                         _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-            else:
-                col_del_piano, col_mat_piano, _ = st.columns([1, 1.5, 3.5])
-                with col_del_piano:
-                    if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
-                        _dialog_elimina_piano(piano_sel_id, titolo_piano)
-                with col_mat_piano:
+                else:
                     if st.button("📚 Materiale del piano", key="btn_mat_piano_libero"):
                         _dialog_materiale_piano_libero(piano_sel_id)
 

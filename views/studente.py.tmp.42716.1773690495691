@@ -890,12 +890,12 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 }
 .slideshow-track {
     display: flex;
-    gap: 17px;
+    gap: 16px;
     transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
     will-change: transform;
 }
 .slideshow-track .slide-card {
-    min-width: 268px;
+    min-width: 260px;
     max-width: 320px;
     flex-shrink: 0;
     background: #fff;
@@ -1907,7 +1907,7 @@ def _render_raccomandazioni_slideshow(studente_id: int):
     </div>
     <script>
     (function() {{
-        var N = {n}, GAP = 17;
+        var N = {n}, GAP = 16;
         var track = document.getElementById("{uid}_track");
         var dots  = document.querySelectorAll("#{uid}_dots .dot-indicator");
         var orig  = Array.from(track.children);
@@ -2929,13 +2929,8 @@ def mostra_homepage_studente():
                 <div class="section-sub">Corso universitario · Sola lettura</div>
                 """, unsafe_allow_html=True)
 
-            col_mat, col_unsub, _ = st.columns([1, 1, 4])
-            with col_mat:
-                if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=True):
-                    _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-            with col_unsub:
-                if st.button("🚪 Cancella iscrizione", key="btn_cancella_iscrizione", use_container_width=True):
-                    _dialog_cancella_iscrizione(studente_id, corso_sel_id, corso_sel_nome)
+            if st.button("📚 Materiale del corso", key="btn_materiale_corso", use_container_width=False):
+                _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
 
             # — Contenuto ufficiale del docente (se pubblicato) —
             with st.container(height=600, border=False):
