@@ -88,32 +88,14 @@ _CSS = """
     font-family: 'Source Sans 3', sans-serif !important;
 }
 #MainMenu, footer, header { visibility: hidden; }
-.block-container {
-    padding-top: 74px !important;
-    padding-bottom: 60px !important;
-    padding-left: 1rem !important;
-    padding-right: 1rem !important;
-    max-height: 100vh !important;
-    overflow: hidden !important;
-}
-/* Vincola il layout colonne all'altezza disponibile */
-[data-testid="stMain"] {
-    overflow: hidden !important;
-}
+.block-container { padding-top: 74px !important; padding-bottom: 60px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
 /* ---- COLONNA SINISTRA (scoped via .st-key-sidebar) ---- */
 .st-key-sidebar {
     background: #E2E8F0;
     border-radius: 12px;
     padding: 12px 8px;
-    max-height: calc(100vh - 140px) !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
 }
-.st-key-sidebar::-webkit-scrollbar { width: 5px; }
-.st-key-sidebar::-webkit-scrollbar-track { background: transparent; }
-.st-key-sidebar::-webkit-scrollbar-thumb { background: #C8D5E3; border-radius: 3px; }
-.st-key-sidebar::-webkit-scrollbar-thumb:hover { background: #003087; }
 
 /* ---- EXPANDER SIDEBAR (corsi e piani) ---- */
 .st-key-sidebar [data-testid="stExpander"] {
@@ -462,6 +444,31 @@ _CSS = """
     color: #C8102E !important;
 }
 
+/* ---- CONTENUTO LEZIONE SCROLLABILE (sticky header, scroll solo corpo) ---- */
+.st-key-corso_scroll, .st-key-piano_scroll {
+    max-height: calc(100vh - 300px);
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    padding-right: 4px;
+}
+.st-key-corso_scroll::-webkit-scrollbar,
+.st-key-piano_scroll::-webkit-scrollbar {
+    width: 6px;
+}
+.st-key-corso_scroll::-webkit-scrollbar-track,
+.st-key-piano_scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+.st-key-corso_scroll::-webkit-scrollbar-thumb,
+.st-key-piano_scroll::-webkit-scrollbar-thumb {
+    background: #C8D5E3;
+    border-radius: 3px;
+}
+.st-key-corso_scroll::-webkit-scrollbar-thumb:hover,
+.st-key-piano_scroll::-webkit-scrollbar-thumb:hover {
+    background: #003087;
+}
+
 /* ---- SEZIONE CENTRALE — CONTENUTO ---- */
 .section-header {
     font-family: 'Playfair Display', serif;
@@ -669,49 +676,24 @@ div[data-testid="stModal"] > div:first-child {
 }
 
 /* ---- PANNELLO CONTENUTO SCROLLABILE (centro — corsi e piani) ---- */
+/* Il contenuto si apre in un riquadro scrollabile fissato alla pagina */
 .st-key-corso_scroll,
 .st-key-piano_scroll {
-    height: calc(100vh - 330px) !important;
-    max-height: calc(100vh - 330px) !important;
+    height: calc(100vh - 270px) !important;
+    max-height: calc(100vh - 270px) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
-    display: block !important;           /* rompe il flex di Streamlit */
     border-radius: 12px !important;
     border: 1px solid #E0E8F2 !important;
     background: #FAFBFD !important;
     scroll-behavior: smooth;
 }
-/* Figli interni: altezza naturale, nessun vincolo flex */
+/* Override Streamlit internal wrapper height */
 .st-key-corso_scroll > div,
-.st-key-corso_scroll > div > div,
-.st-key-corso_scroll [data-testid="stVerticalBlock"],
-.st-key-piano_scroll > div,
-.st-key-piano_scroll > div > div,
-.st-key-piano_scroll [data-testid="stVerticalBlock"] {
+.st-key-piano_scroll > div {
     height: auto !important;
     max-height: none !important;
     overflow: visible !important;
-    flex-shrink: 0 !important;
-    min-height: min-content !important;
-}
-/* Custom scrollbar contenuto lezioni */
-.st-key-corso_scroll::-webkit-scrollbar,
-.st-key-piano_scroll::-webkit-scrollbar {
-    width: 6px;
-}
-.st-key-corso_scroll::-webkit-scrollbar-track,
-.st-key-piano_scroll::-webkit-scrollbar-track {
-    background: transparent;
-    border-radius: 3px;
-}
-.st-key-corso_scroll::-webkit-scrollbar-thumb,
-.st-key-piano_scroll::-webkit-scrollbar-thumb {
-    background: #C8D5E3;
-    border-radius: 3px;
-}
-.st-key-corso_scroll::-webkit-scrollbar-thumb:hover,
-.st-key-piano_scroll::-webkit-scrollbar-thumb:hover {
-    background: #003087;
 }
 
 /* ---- RACCOMANDAZIONI ---- */
@@ -1172,52 +1154,6 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     background: #003087;
 }
 </style>
-"""
-
-# ---------------------------------------------------------------------------
-# JS — Fix scroll container (opera sul parent document dall'iframe)
-# ---------------------------------------------------------------------------
-_JS_SCROLL_FIX = """
-<script>
-(function() {
-    var doc = window.parent.document;
-    function fix() {
-        var keys = ['corso_scroll', 'piano_scroll'];
-        for (var k = 0; k < keys.length; k++) {
-            var el = doc.querySelector('.st-key-' + keys[k]);
-            if (!el) continue;
-            el.style.setProperty('height', 'calc(100vh - 330px)', 'important');
-            el.style.setProperty('max-height', 'calc(100vh - 330px)', 'important');
-            el.style.setProperty('overflow-y', 'auto', 'important');
-            el.style.setProperty('overflow-x', 'hidden', 'important');
-            el.style.setProperty('display', 'block', 'important');
-            el.style.setProperty('border-radius', '12px', 'important');
-            el.style.setProperty('border', '1px solid #E0E8F2', 'important');
-            el.style.setProperty('background', '#FAFBFD', 'important');
-            el.style.setProperty('scroll-behavior', 'smooth');
-            // Sblocca tutti i wrapper interni di Streamlit
-            var inners = el.querySelectorAll('div');
-            for (var i = 0; i < inners.length; i++) {
-                var d = inners[i];
-                // Non toccare gli expander/widget interni, solo i wrapper strutturali
-                if (d.getAttribute('data-testid') === 'stVerticalBlockBorderWrapper'
-                    || d.getAttribute('data-testid') === 'stVerticalBlock'
-                    || (!d.getAttribute('data-testid') && d.parentElement === el)) {
-                    d.style.setProperty('height', 'auto', 'important');
-                    d.style.setProperty('max-height', 'none', 'important');
-                    d.style.setProperty('overflow', 'visible', 'important');
-                    d.style.setProperty('flex-shrink', '0', 'important');
-                    d.style.setProperty('min-height', 'min-content', 'important');
-                }
-            }
-        }
-    }
-    // Esegui subito e dopo breve delay (Streamlit potrebbe ri-renderizzare)
-    fix();
-    setTimeout(fix, 300);
-    setTimeout(fix, 800);
-})();
-</script>
 """
 
 
@@ -3198,8 +3134,6 @@ def mostra_homepage_studente():
                         "Il docente non ha ancora pubblicato il contenuto di questo corso.",
                         icon=":material/school:",
                     )
-            # JS fallback: forza scroll sul container dopo render Streamlit
-            components.html(_JS_SCROLL_FIX, height=0)
 
 
         elif view_mode == "piano" and piano_sel_id:
@@ -3234,8 +3168,6 @@ def mostra_homepage_studente():
 
             with st.container(border=False, key="piano_scroll"):
                 _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
-            # JS fallback: forza scroll sul container dopo render Streamlit
-            components.html(_JS_SCROLL_FIX, height=0)
 
     # -------------------------------------------------------------------------
     # COLONNA DESTRA — Chatbot Lea (con contesto completo corso + piano)

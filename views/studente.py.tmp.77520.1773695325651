@@ -671,8 +671,8 @@ div[data-testid="stModal"] > div:first-child {
 /* ---- PANNELLO CONTENUTO SCROLLABILE (centro — corsi e piani) ---- */
 .st-key-corso_scroll,
 .st-key-piano_scroll {
-    height: calc(100vh - 330px) !important;
-    max-height: calc(100vh - 330px) !important;
+    height: calc(100vh - 270px) !important;
+    max-height: calc(100vh - 270px) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;           /* rompe il flex di Streamlit */
@@ -1172,52 +1172,6 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     background: #003087;
 }
 </style>
-"""
-
-# ---------------------------------------------------------------------------
-# JS — Fix scroll container (opera sul parent document dall'iframe)
-# ---------------------------------------------------------------------------
-_JS_SCROLL_FIX = """
-<script>
-(function() {
-    var doc = window.parent.document;
-    function fix() {
-        var keys = ['corso_scroll', 'piano_scroll'];
-        for (var k = 0; k < keys.length; k++) {
-            var el = doc.querySelector('.st-key-' + keys[k]);
-            if (!el) continue;
-            el.style.setProperty('height', 'calc(100vh - 330px)', 'important');
-            el.style.setProperty('max-height', 'calc(100vh - 330px)', 'important');
-            el.style.setProperty('overflow-y', 'auto', 'important');
-            el.style.setProperty('overflow-x', 'hidden', 'important');
-            el.style.setProperty('display', 'block', 'important');
-            el.style.setProperty('border-radius', '12px', 'important');
-            el.style.setProperty('border', '1px solid #E0E8F2', 'important');
-            el.style.setProperty('background', '#FAFBFD', 'important');
-            el.style.setProperty('scroll-behavior', 'smooth');
-            // Sblocca tutti i wrapper interni di Streamlit
-            var inners = el.querySelectorAll('div');
-            for (var i = 0; i < inners.length; i++) {
-                var d = inners[i];
-                // Non toccare gli expander/widget interni, solo i wrapper strutturali
-                if (d.getAttribute('data-testid') === 'stVerticalBlockBorderWrapper'
-                    || d.getAttribute('data-testid') === 'stVerticalBlock'
-                    || (!d.getAttribute('data-testid') && d.parentElement === el)) {
-                    d.style.setProperty('height', 'auto', 'important');
-                    d.style.setProperty('max-height', 'none', 'important');
-                    d.style.setProperty('overflow', 'visible', 'important');
-                    d.style.setProperty('flex-shrink', '0', 'important');
-                    d.style.setProperty('min-height', 'min-content', 'important');
-                }
-            }
-        }
-    }
-    // Esegui subito e dopo breve delay (Streamlit potrebbe ri-renderizzare)
-    fix();
-    setTimeout(fix, 300);
-    setTimeout(fix, 800);
-})();
-</script>
 """
 
 
@@ -3198,8 +3152,6 @@ def mostra_homepage_studente():
                         "Il docente non ha ancora pubblicato il contenuto di questo corso.",
                         icon=":material/school:",
                     )
-            # JS fallback: forza scroll sul container dopo render Streamlit
-            components.html(_JS_SCROLL_FIX, height=0)
 
 
         elif view_mode == "piano" and piano_sel_id:
@@ -3234,8 +3186,6 @@ def mostra_homepage_studente():
 
             with st.container(border=False, key="piano_scroll"):
                 _render_contenuto_piano(piano_sel_id, studente_id=studente_id)
-            # JS fallback: forza scroll sul container dopo render Streamlit
-            components.html(_JS_SCROLL_FIX, height=0)
 
     # -------------------------------------------------------------------------
     # COLONNA DESTRA — Chatbot Lea (con contesto completo corso + piano)

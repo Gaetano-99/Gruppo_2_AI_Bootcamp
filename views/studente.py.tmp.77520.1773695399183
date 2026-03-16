@@ -671,8 +671,8 @@ div[data-testid="stModal"] > div:first-child {
 /* ---- PANNELLO CONTENUTO SCROLLABILE (centro — corsi e piani) ---- */
 .st-key-corso_scroll,
 .st-key-piano_scroll {
-    height: calc(100vh - 330px) !important;
-    max-height: calc(100vh - 330px) !important;
+    height: calc(100vh - 270px) !important;
+    max-height: calc(100vh - 270px) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     display: block !important;           /* rompe il flex di Streamlit */
@@ -1186,8 +1186,8 @@ _JS_SCROLL_FIX = """
         for (var k = 0; k < keys.length; k++) {
             var el = doc.querySelector('.st-key-' + keys[k]);
             if (!el) continue;
-            el.style.setProperty('height', 'calc(100vh - 330px)', 'important');
-            el.style.setProperty('max-height', 'calc(100vh - 330px)', 'important');
+            el.style.setProperty('height', 'calc(100vh - 270px)', 'important');
+            el.style.setProperty('max-height', 'calc(100vh - 270px)', 'important');
             el.style.setProperty('overflow-y', 'auto', 'important');
             el.style.setProperty('overflow-x', 'hidden', 'important');
             el.style.setProperty('display', 'block', 'important');
