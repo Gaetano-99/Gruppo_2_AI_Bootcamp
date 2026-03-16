@@ -268,6 +268,31 @@ _CSS = """
     background: #4FE886;
     flex-shrink: 0;
 }
+.chat-doc-banner {
+    background: linear-gradient(135deg, #E8F0FE 0%, #D4E4FC 100%);
+    border: 1px solid #A8C7F0;
+    border-top: none;
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #001A4D;
+}
+.chat-doc-banner .doc-icon { font-size: 1.1rem; }
+.chat-doc-banner .doc-name {
+    font-weight: 600;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.chat-doc-banner .doc-label {
+    font-size: 0.7rem;
+    color: #405580;
+    margin-right: 2px;
+}
 .chat-container {
     background: #fff;
     border: 1px solid #C8D5E3;
@@ -428,6 +453,86 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     flex: 1;
     height: 1px;
     background: #C8D5E3;
+}
+
+/* ---- TOOLTIP ---- */
+.tooltip-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: help;
+    flex-shrink: 0;
+}
+.tooltip-icon {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid #003087;
+    color: #003087;
+    font-size: 0.68rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #EEF4FF;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+.tooltip-wrap:hover .tooltip-icon {
+    background: #003087;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0,48,135,0.25);
+}
+.tooltip-box {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(100% + 8px);
+    background: #001A4D;
+    color: #fff;
+    font-size: 0.76rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    line-height: 1.5;
+    padding: 10px 14px;
+    border-radius: 8px;
+    width: 230px;
+    box-shadow: 0 4px 16px rgba(0,26,77,0.35);
+    z-index: 9999;
+    transition: opacity 0.18s, visibility 0.18s;
+    pointer-events: none;
+}
+.tooltip-box::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #001A4D;
+}
+.tooltip-wrap:hover .tooltip-box {
+    visibility: visible;
+    opacity: 1;
+}
+/* Per tooltip che si apre verso il basso (es. chat-header) */
+.tooltip-box-bottom {
+    bottom: auto;
+    top: calc(100% + 8px);
+    left: auto;
+    right: 0;
+    transform: none;
+}
+.tooltip-box-bottom::after {
+    top: auto;
+    bottom: 100%;
+    left: auto;
+    right: 14px;
+    transform: none;
+    border: 6px solid transparent;
+    border-bottom-color: #001A4D;
+    border-top-color: transparent;
 }
 
 /* ---- TOPBAR LOGOUT BG (col_esci a sinistra) ---- */
@@ -841,7 +946,17 @@ def _render_topbar(utente: dict) -> bool:
 
 def _render_sidebar_corsi(corsi: list[dict]):
     """Renderizza la lista corsi nella colonna sinistra (sola lettura per lo studente)."""
-    st.markdown('<div class="divider-label">I tuoi corsi</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="divider-label">I tuoi corsi'
+        '<span class="tooltip-wrap">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">I corsi sono creati e gestiti dai <strong>docenti</strong> '
+        'con il loro materiale didattico ufficiale. I quiz presenti nei corsi '
+        '<strong>concorrono alle analytics</strong> del docente, che pu\u00f2 monitorare '
+        'i tuoi progressi e risultati.</span>'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
 
     if not corsi:
         st.caption("Nessun corso trovato.")
@@ -886,7 +1001,18 @@ def _render_sidebar_corsi(corsi: list[dict]):
 def _render_sidebar_piani(studente_id: int):
     """Renderizza la sezione 'I Tuoi Piani Personalizzati' nella colonna sinistra."""
     piani = _get_tutti_piani_studente(studente_id)
-    st.markdown('<div class="divider-label">I tuoi piani personalizzati</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="divider-label">I tuoi piani personalizzati'
+        '<span class="tooltip-wrap">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">I piani sono <strong>generati da Lea</strong>, la tua tutor AI. '
+        'Puoi crearli a partire dai corsi, dal <strong>tuo materiale</strong> caricato '
+        'o da qualsiasi contenuto sulla piattaforma. '
+        'I quiz nei piani <strong>non concorrono</strong> alle analytics del docente: '
+        'sono solo per il tuo studio personale.</span>'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
 
     if not piani:
         st.markdown(
@@ -1265,7 +1391,15 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
 def _render_raccomandazioni(studente_id: int):
     """Renderizza le raccomandazioni corsi basate sull'algoritmo AI."""
     raccomanda_corsi = _import_recommender()
-    st.markdown('<div class="divider-label">Consigliati per te</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="divider-label">Consigliati per te'
+        '<span class="tooltip-wrap">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">Corsi suggeriti dall\'AI in base al tuo percorso di laurea '
+        'e ai tuoi interessi. Clicca <strong>Iscriviti</strong> per aggiungerli ai tuoi corsi.</span>'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
 
     # Feedback iscrizione da raccomandazione
     corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
@@ -1346,7 +1480,15 @@ def _anno_accademico_corrente() -> str:
 
 def _render_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
     """Sezione di ricerca corsi disponibili nella piattaforma."""
-    st.markdown("### 🔍 Cerca un corso")
+    st.markdown(
+        '### 🔍 Cerca un corso'
+        '&nbsp;<span class="tooltip-wrap" style="vertical-align:middle">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">Cerca tra tutti i corsi disponibili nella piattaforma. '
+        'Puoi filtrare per nome, docente, CFU o corso di laurea.</span>'
+        '</span>',
+        unsafe_allow_html=True,
+    )
 
     tutti_cdl = _get_tutti_cdl()
     docenti = _get_docenti()
@@ -1470,16 +1612,74 @@ def _render_chatbot(
             st.session_state["_search_results"] = None
             st.rerun()
 
+    # Stato chat con documento
+    doc_chat = st.session_state.get("_lea_chat_documento")
+
+    # Auto-clear document chat se l'utente ha navigato altrove
+    if doc_chat:
+        _saved_nav = st.session_state.get("_lea_doc_chat_nav")
+        _current_nav = (view_mode, corso_id)
+        if _saved_nav is not None and _saved_nav != _current_nav:
+            st.session_state.pop("_lea_chat_documento", None)
+            st.session_state.pop("_lea_doc_chat_nav", None)
+            if aggiorna_contesto is not None:
+                aggiorna_contesto(clear_materiale=True)
+            doc_chat = None
+
     # Header
     st.markdown("""
-    <div class="chat-header">
-        <div class="chat-online"></div>
-        <div>
-            <div class="chat-title">Lea — Tutor AI</div>
-            <div class="chat-sub">Il tuo assistente personale di studio</div>
+    <div class="chat-header" style="justify-content:space-between;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <div class="chat-online"></div>
+            <div>
+                <div class="chat-title">Lea — Tutor AI</div>
+                <div class="chat-sub">Il tuo assistente personale di studio</div>
+            </div>
         </div>
+        <span class="tooltip-wrap">
+            <span class="tooltip-icon" style="border-color:rgba(255,255,255,0.5);color:#fff;background:rgba(255,255,255,0.15);">?</span>
+            <span class="tooltip-box tooltip-box-bottom" style="width:260px;">Con Lea puoi: <strong>generare piani di studio</strong> personalizzati a partire dai corsi o dal tuo materiale, <strong>creare quiz e flashcard</strong> per esercitarti, e <strong>fare domande</strong> su qualsiasi argomento. Usa i pulsanti rapidi in basso oppure scrivi direttamente nella chat!</span>
+        </span>
     </div>
     """, unsafe_allow_html=True)
+
+    # ---- Banner documento chat (sotto l'header) ----
+    if doc_chat:
+        doc_titolo_safe = doc_chat["titolo"].replace("<", "&lt;").replace(">", "&gt;")
+        doc_tipo_label = doc_chat.get("tipo", "").upper()
+        st.markdown(f"""
+        <div class="chat-doc-banner">
+            <span class="doc-icon">📄</span>
+            <div style="flex:1;min-width:0;">
+                <span class="doc-label">Stai chattando su:</span><br>
+                <span class="doc-name">{doc_titolo_safe}</span>
+                {f' <span style="font-size:0.65rem;opacity:0.7;">({doc_tipo_label})</span>' if doc_tipo_label else ''}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        # Bottone per chiudere la modalità documento
+        if st.button("✕ Esci dalla chat documento", key="btn_esci_doc_chat", use_container_width=True, disabled=is_processing):
+            st.session_state.pop("_lea_chat_documento", None)
+            st.session_state.pop("_lea_doc_chat_nav", None)
+            if aggiorna_contesto is not None:
+                aggiorna_contesto(clear_materiale=True)
+            st.rerun()
+
+    # ---- Messaggio di benvenuto per chat documento (appena attivato) ----
+    if st.session_state.pop("_lea_chat_doc_appena_attivato", False) and doc_chat:
+        msg_doc = (
+            f"Perfetto! Ora sto lavorando sul documento **{doc_chat['titolo']}**. 📄\n\n"
+            "Puoi farmi qualsiasi domanda su questo documento:\n"
+            "- **Spiegami** un concetto o un paragrafo\n"
+            "- **Riassumi** una sezione o l'intero documento\n"
+            "- **Fammi degli esempi** su un argomento trattato\n"
+            "- **Chiarisci un dubbio** su qualcosa che hai letto\n\n"
+            "Cosa vorresti sapere?"
+        )
+        if "chat_history_display" in st.session_state:
+            st.session_state["chat_history_display"].append(
+                {"role": "assistant", "content": msg_doc}
+            )
 
     # Cronologia messaggi
     if "chat_history_display" not in st.session_state:
@@ -1588,6 +1788,17 @@ def _render_chatbot(
                         piano_id=piano_id,
                         piano_titolo=piano_titolo,
                     )
+                # Se siamo in modalità chat documento, passa il documento al contesto
+                _p2_doc_chat = st.session_state.get("_lea_chat_documento")
+                if _p2_doc_chat and aggiorna_contesto is not None:
+                    aggiorna_contesto(
+                        materiale_selezionato={
+                            "id": _p2_doc_chat["id"],
+                            "titolo": _p2_doc_chat["titolo"],
+                            "corso_id": _p2_doc_chat.get("corso_id"),
+                        },
+                        extra={"documento_chat": _p2_doc_chat},
+                    )
                 try:
                     risposta = chat_con_orchestratore(
                         messaggio_utente=pending_msg,
@@ -1682,22 +1893,34 @@ def _render_chatbot(
             messaggio_da_materiale = f"Genera una lezione separata per ciascuno di questi documenti: {titoli_str}"
 
     # ---- Suggerimenti rapidi — compatti, sopra l'input ----
-    suggerimenti = [
-        ("📚", "Genera un piano"),
-        ("❓", "Crea un quiz"),
-        ("🃏", "Flashcard"),
-    ]
+    if doc_chat:
+        # Suggerimenti specifici per chat documento
+        _doc_titolo_breve = doc_chat["titolo"][:30] + ("..." if len(doc_chat["titolo"]) > 30 else "")
+        suggerimenti = [
+            ("📝", f"Riassumi il documento"),
+            ("🔍", f"Spiega i concetti chiave"),
+            ("💡", f"Fammi degli esempi"),
+        ]
+    else:
+        suggerimenti = [
+            ("📚", "Genera un piano"),
+            ("❓", "Crea un quiz"),
+            ("🃏", "Flashcard"),
+        ]
     messaggio_da_suggerimento: str | None = None
     with st.container(horizontal=True):
         for sug_i, (icona, testo) in enumerate(suggerimenti):
             if st.button(f"{icona} {testo}", key=f"sug_{sug_i}", disabled=is_processing):
-                if corso_id and corso_nome:
+                if doc_chat:
+                    messaggio_da_suggerimento = f"{testo} del documento '{doc_chat['titolo']}'"
+                elif corso_id and corso_nome:
                     messaggio_da_suggerimento = f"{testo} per il corso di {corso_nome}"
                 else:
                     messaggio_da_suggerimento = testo
 
     # ---- Input chat nativo (pulizia automatica dopo invio) ----
-    user_input = st.chat_input("Chiedi a Lea...", key="lea_chat_input", disabled=is_processing)
+    _placeholder_chat = f"Chiedimi qualcosa su '{doc_chat['titolo']}'..." if doc_chat else "Chiedi a Lea..."
+    user_input = st.chat_input(_placeholder_chat, key="lea_chat_input", disabled=is_processing)
 
     # Unifica input da campo libero, da suggerimento e da selezione materiale
     messaggio_finale: str | None = user_input or messaggio_da_suggerimento or messaggio_da_materiale
@@ -1914,7 +2137,7 @@ def _dialog_materiale_piano_libero(piano_id: int):
 @st.dialog("Materiale del corso")
 def _dialog_materiale_corso(corso_id: int, corso_nome: str):
     st.markdown(f"**Materiale disponibile per {corso_nome}**")
-    st.caption("Clicca 'Scarica' per scaricare il materiale del corso.")
+    st.caption("Scarica il materiale o chatta con Lea su un documento specifico.")
     try:
         materiali = db.trova_tutti("materiali_didattici", {"corso_universitario_id": corso_id})
     except Exception:
@@ -1933,10 +2156,29 @@ def _dialog_materiale_corso(corso_id: int, corso_nome: str):
                 stato_label = "✅ Elaborato" if elaborato else "⏳ Non elaborato"
                 st.caption(f"{m.get('tipo', '').upper()} · {stato_label} · {(m.get('caricato_il') or '')[:10]}")
             with c2:
+                if elaborato:
+                    if st.button(
+                        "💬 Chatta",
+                        key=f"chat_mat_corso_{m['id']}",
+                        use_container_width=True,
+                        help="Chatta con Lea su questo documento",
+                    ):
+                        st.session_state["_lea_chat_documento"] = {
+                            "id": m["id"],
+                            "titolo": m["titolo"],
+                            "tipo": m.get("tipo", ""),
+                            "corso_id": corso_id,
+                        }
+                        st.session_state["_lea_chat_doc_appena_attivato"] = True
+                        st.session_state["_lea_doc_chat_nav"] = (
+                            st.session_state.get("_view_mode"),
+                            st.session_state.get("_corso_sel"),
+                        )
+                        st.rerun()
                 file_data, file_name, mime = _prepara_download_materiale(m)
                 if file_data:
                     st.download_button(
-                        "📥 Scarica materiale",
+                        "📥 Scarica",
                         data=file_data,
                         file_name=file_name,
                         mime=mime,
@@ -1981,8 +2223,8 @@ def _dialog_upload_materiale_libero():
 
 @st.dialog("Materiale didattico")
 def _dialog_view_materiale_libero(user_id: int):
-    st.markdown("**Materiale disponibile per generare la lezione**")
-    st.caption("Seleziona uno o più documenti e clicca il pulsante per generare la lezione.")
+    st.markdown("**Il tuo materiale didattico**")
+    st.caption("Seleziona un documento per chattare con Lea su di esso, oppure genera una lezione strutturata.")
     try:
         # docente_id contiene l'ID dell'utente che ha caricato il materiale
         # (anche quando l'uploader è uno studente)
@@ -2020,17 +2262,43 @@ def _dialog_view_materiale_libero(user_id: int):
         if st.session_state.get(f"mat_libero_check_{m['id']}", False)
     ]
 
-    if st.button(
-        "📖 Genera lezione sui documenti selezionati",
-        type="primary",
-        use_container_width=True,
-        disabled=not selezionati,
-    ):
-        # Salva i materiali selezionati e pulisce i checkbox
-        st.session_state["_materiali_liberi_selezionati"] = selezionati
-        for m in materiali:
-            st.session_state.pop(f"mat_libero_check_{m['id']}", None)
-        st.rerun()
+    col_chat, col_gen = st.columns(2)
+    with col_chat:
+        if st.button(
+            "💬 Chatta sul documento",
+            use_container_width=True,
+            disabled=len(selezionati) != 1,
+            help="Seleziona un documento per chattare con Lea su di esso",
+        ):
+            doc = selezionati[0]
+            st.session_state["_lea_chat_documento"] = {
+                "id": doc["id"],
+                "titolo": doc["titolo"],
+                "tipo": doc.get("tipo", ""),
+                "corso_id": None,
+            }
+            # Aggiungi messaggio di benvenuto per la chat documento
+            st.session_state["_lea_chat_doc_appena_attivato"] = True
+            st.session_state["_lea_doc_chat_nav"] = (
+                st.session_state.get("_view_mode"),
+                st.session_state.get("_corso_sel"),
+            )
+            for m in materiali:
+                st.session_state.pop(f"mat_libero_check_{m['id']}", None)
+            st.rerun()
+
+    with col_gen:
+        if st.button(
+            "📖 Genera lezione",
+            type="primary",
+            use_container_width=True,
+            disabled=not selezionati,
+        ):
+            # Salva i materiali selezionati e pulisce i checkbox
+            st.session_state["_materiali_liberi_selezionati"] = selezionati
+            for m in materiali:
+                st.session_state.pop(f"mat_libero_check_{m['id']}", None)
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------

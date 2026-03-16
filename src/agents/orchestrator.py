@@ -48,8 +48,10 @@ from src.agents.practice_gen import esegui_generazione_pratica
 from src.agents.gap_analysis import analizza_gap
 from src.tools.rag_engine import (
     recupera_sommari_materiali,
+    cerca_chunk_rilevanti,
     cerca_chunk_piattaforma,
     conta_chunk_piattaforma,
+    formatta_contesto_rag,
     formatta_riferimenti_materiali,
 )
 
@@ -193,8 +195,49 @@ COSA SAI FARE (tool a tua disposizione):
                                   (modalità "Lea sceglie"). Lea cerca autonomamente il materiale più
                                   pertinente tra tutto ciò che è disponibile nel sistema.
                                   Il piano generato include automaticamente i riferimenti bibliografici.
+9. tool_rispondi_domanda        → RISPONDERE a domande, dubbi e curiosità dello studente su argomenti,
+                                  concetti, paragrafi o capitoli SENZA creare piani o lezioni.
+                                  Cerca materiale rilevante con RAG e risponde in modo conversazionale.
+
+REGOLA FONDAMENTALE — RISPONDERE vs GENERARE:
+Non tutte le richieste richiedono la creazione di un piano o una lezione!
+Quando lo studente fa una DOMANDA o chiede una SPIEGAZIONE, usa tool_rispondi_domanda.
+Quando lo studente chiede di CREARE, GENERARE o STUDIARE un argomento in modo strutturato,
+usa tool_genera_corso o tool_genera_corso_libero.
+
+Usa tool_rispondi_domanda quando lo studente:
+- Fa una domanda su un argomento ("Cos'è il Deep Learning?", "Parlami delle reti neurali")
+- Chiede di spiegare un concetto ("Spiegami la normalizzazione", "Come funziona il backpropagation?")
+- Chiede esempi ("Fammi un esempio di SQL JOIN")
+- Vuole un riassunto ("Riassumi il capitolo X", "Riassumi brevemente questo argomento")
+- Ha un dubbio su un paragrafo specifico ("Nel paragrafo X si parla di Y, spiega meglio")
+- Chiede chiarimenti ("Non ho capito la differenza tra...", "Cosa si intende per...")
+- Fa domande generiche di cultura ("Parlami delle imprese commerciali", "Cos'è il machine learning?")
+
+Se lo studente menziona un paragrafo o capitolo specifico, passa il nome come contesto_aggiuntivo
+a tool_rispondi_domanda per recuperare il contenuto esatto dal piano.
+
+MODALITÀ CHAT CON DOCUMENTO:
+Quando tool_leggi_contesto riporta "MODALITÀ CHAT CON DOCUMENTO ATTIVA", lo studente
+sta chattando su un documento specifico. In questa modalità:
+- Usa SEMPRE tool_rispondi_domanda per TUTTE le richieste (anche riassunti, spiegazioni, esempi).
+- Passa sempre il nome del documento come contesto_aggiuntivo.
+- NON proporre mai di generare piani o lezioni: lo studente vuole interagire col documento.
+- NON chiedere su quale corso o materiale vuole lavorare: il documento è già selezionato.
+- Se lo studente chiede qualcosa che il documento non copre, rispondi comunque ma segnala
+  che l'informazione non proviene dal documento selezionato.
+
+Usa tool_genera_corso / tool_genera_corso_libero SOLO quando lo studente:
+- Chiede ESPLICITAMENTE di generare un piano, un corso o una lezione strutturata
+- Usa parole come "genera", "crea un piano", "prepara una lezione"
+- Vuole materiale di studio organizzato da salvare nel proprio piano personalizzato
 
 REGOLE DI COMPORTAMENTO:
+- Ogni messaggio dell'utente è preceduto da un tag [CONTESTO NAVIGAZIONE: ...] che indica
+  il contesto ATTUALE della sessione. Questo tag ha SEMPRE la priorità su qualsiasi contesto
+  precedente nella cronologia della conversazione. Se il tag dice "Corso 'X'" ma nella cronologia
+  precedente eri in modalità chat documento, ignora il vecchio contesto e considera il contesto
+  attuale come unica verità. Chiama comunque tool_leggi_contesto per i dettagli completi.
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
 - I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
   chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
@@ -253,9 +296,9 @@ REGOLE DI COMPORTAMENTO:
   NON creare mai capitoli vuoti senza paragrafi. Ogni capitolo DEVE avere almeno un paragrafo con contenuto.
   Se il piano ha già capitoli sugli stessi argomenti, arricchisci quelli esistenti invece di duplicarli.
 - MODALITÀ "LEA SCEGLIE" (ricerca su tutta la piattaforma):
-  Quando lo studente chiede una lezione su un argomento generico SENZA riferimento a un corso
-  specifico o a un materiale specifico, e tool_leggi_contesto NON riporta un corso o materiale
-  già selezionato nel contesto:
+  Quando lo studente chiede di GENERARE una lezione su un argomento generico SENZA riferimento
+  a un corso specifico o a un materiale specifico, e tool_leggi_contesto NON riporta un corso
+  o materiale già selezionato nel contesto:
   1. Offri allo studente 3 opzioni:
      a) Riferirsi a un corso specifico tra quelli a cui è iscritto
      b) Usare il proprio materiale didattico caricato
@@ -272,6 +315,8 @@ REGOLE DI COMPORTAMENTO:
      con l'elenco dei materiali della piattaforma usati come fonte.
   4. NON attivare questo flusso se c'è già un corso o materiale nel contesto (in quel caso
      usa tool_genera_corso come di consueto).
+  5. ATTENZIONE: se lo studente fa solo una DOMANDA (es. "Parlami del Deep Learning") senza
+     chiedere di generare un piano, usa tool_rispondi_domanda invece di questo flusso.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
 - Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
@@ -384,12 +429,23 @@ def tool_leggi_contesto() -> str:
         )
     elif mat:
         corso_id_mat = mat.get("corso_id") or 0  # 0 = nessun corso associato
-        parti.append(
-            f"Materiale selezionato dallo studente: '{mat['titolo']}' "
-            f"(materiale_id={mat['id']}, corso_id={corso_id_mat}). "
-            f"Genera una lezione su questo materiale chiamando tool_genera_corso "
-            f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
-        )
+        # Controlla se siamo in modalità "chat con documento"
+        doc_chat = contesto.get("documento_chat")
+        if doc_chat:
+            parti.append(
+                f"⚠️ MODALITÀ CHAT CON DOCUMENTO ATTIVA: lo studente sta chattando sul documento "
+                f"'{mat['titolo']}' (materiale_id={mat['id']}). "
+                f"NON generare piani o lezioni. Usa SEMPRE tool_rispondi_domanda per rispondere "
+                f"alle domande, passando la domanda e il nome del documento come contesto_aggiuntivo. "
+                f"Ogni risposta deve basarsi sul contenuto di questo documento specifico."
+            )
+        else:
+            parti.append(
+                f"Materiale selezionato dallo studente: '{mat['titolo']}' "
+                f"(materiale_id={mat['id']}, corso_id={corso_id_mat}). "
+                f"Genera una lezione su questo materiale chiamando tool_genera_corso "
+                f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
+            )
 
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
@@ -828,6 +884,200 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_
         f"Il piano include un capitolo 'Riferimenti bibliografici' con le fonti.\n"
         f"Suggerisci all'utente di consultare il piano e di esercitarsi con quiz o flashcard."
     )
+
+
+@tool
+def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
+    """
+    Rispondi a una domanda dello studente su un argomento, concetto o contenuto
+    del corso/piano, SENZA generare un piano o una lezione completa.
+
+    Usa questo tool quando lo studente:
+    - Chiede una spiegazione su un argomento (es. "Parlami del Deep Learning")
+    - Vuole capire meglio un concetto (es. "Spiegami le reti neurali")
+    - Chiede di riassumere un capitolo o paragrafo
+    - Ha un dubbio su qualcosa che sta studiando
+    - Chiede esempi su un argomento
+    - Fa domande di tipo "cos'è", "come funziona", "perché", "qual è la differenza tra..."
+
+    NON usare questo tool per generare piani di studio, quiz o flashcard.
+
+    Parametro domanda: la domanda o richiesta dello studente.
+    Parametro contesto_aggiuntivo: eventuale contesto extra (es. nome del paragrafo,
+    capitolo specifico, testo da approfondire). Se lo studente fa riferimento a un
+    paragrafo o capitolo specifico del piano, includi qui il titolo.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+    contesto = _CONTESTO_CORRENTE
+
+    # --- 1. Raccogli contesto dal piano personalizzato (se attivo) ---
+    contenuto_piano = ""
+    if contesto.get("piano_id"):
+        piano_id = contesto["piano_id"]
+        # Se c'è un riferimento a un paragrafo/capitolo specifico nel contesto_aggiuntivo,
+        # cerca il contenuto di quel paragrafo
+        if contesto_aggiuntivo:
+            # Cerca paragrafi il cui titolo corrisponde parzialmente
+            paragrafi = db.esegui(
+                """SELECT pp.id, pp.titolo, pc.contenuto_json
+                   FROM piano_paragrafi pp
+                   JOIN piano_capitoli cap ON pp.capitolo_id = cap.id
+                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                   WHERE cap.piano_id = ?""",
+                [piano_id],
+            )
+            # Cerca anche i capitoli
+            capitoli = db.esegui(
+                "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
+                [piano_id],
+            )
+
+            contesto_lower = contesto_aggiuntivo.lower()
+            parti_piano = []
+
+            # Match su capitoli
+            for cap in capitoli:
+                if cap["titolo"].lower() in contesto_lower or contesto_lower in cap["titolo"].lower():
+                    # Recupera tutti i paragrafi di questo capitolo
+                    par_cap = db.esegui(
+                        """SELECT pp.titolo, pc.contenuto_json
+                           FROM piano_paragrafi pp
+                           LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                           WHERE pp.capitolo_id = ? ORDER BY pp.ordine""",
+                        [cap["id"]],
+                    )
+                    for p in par_cap:
+                        if p.get("contenuto_json"):
+                            parti_piano.append(f"### {p['titolo']}\n{p['contenuto_json'][:3000]}")
+
+            # Match su paragrafi
+            for par in paragrafi:
+                if par["titolo"].lower() in contesto_lower or contesto_lower in par["titolo"].lower():
+                    if par.get("contenuto_json"):
+                        parti_piano.append(f"### {par['titolo']}\n{par['contenuto_json'][:5000]}")
+
+            if parti_piano:
+                contenuto_piano = "\n\n".join(parti_piano[:3])  # max 3 sezioni
+
+        # Se non c'è match specifico, prendi un sommario del piano
+        if not contenuto_piano:
+            paragrafi_piano = db.esegui(
+                """SELECT pp.titolo, SUBSTR(pc.contenuto_json, 1, 500) AS anteprima
+                   FROM piano_paragrafi pp
+                   JOIN piano_capitoli cap ON pp.capitolo_id = cap.id
+                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                   WHERE cap.piano_id = ? ORDER BY cap.ordine, pp.ordine""",
+                [piano_id],
+            )
+            if paragrafi_piano:
+                sommario_parti = []
+                for p in paragrafi_piano[:8]:
+                    anteprima = (p.get("anteprima") or "(non ancora generato)")[:300]
+                    sommario_parti.append(f"- {p['titolo']}: {anteprima}")
+                contenuto_piano = "Sommario del piano attivo:\n" + "\n".join(sommario_parti)
+
+    # --- 2. Cerca materiale rilevante con RAG ---
+    contesto_rag = ""
+    corso_id = contesto.get("corso_id")
+    doc_chat = contesto.get("documento_chat")
+    mat_sel = contesto.get("materiale_selezionato")
+
+    # Costruisci la query di ricerca combinando domanda e contesto
+    query_ricerca = domanda
+    if contesto_aggiuntivo:
+        query_ricerca = f"{domanda} {contesto_aggiuntivo}"
+
+    try:
+        if doc_chat or mat_sel:
+            # Modalità chat documento o materiale selezionato: cerca SOLO in quel documento
+            mat_id = (doc_chat or mat_sel)["id"]
+            mat_corso_id = (doc_chat or mat_sel).get("corso_id")
+            risultato = cerca_chunk_rilevanti(
+                mat_corso_id, query_ricerca, top_k=8,
+                materiale_id=mat_id,
+            )
+        elif corso_id:
+            # Cerca nel corso specifico
+            risultato = cerca_chunk_rilevanti(corso_id, query_ricerca, top_k=6)
+        else:
+            # Cerca su tutta la piattaforma
+            risultato = cerca_chunk_piattaforma(query_ricerca, top_k=6)
+
+        if risultato.chunks:
+            contesto_rag = formatta_contesto_rag(risultato.chunks)
+    except Exception as e:
+        print(f"[DEBUG tool_rispondi_domanda] Errore RAG: {e}")
+
+    # --- 3. Costruisci il prompt per la risposta ---
+    parti_contesto = []
+    if contenuto_piano:
+        parti_contesto.append(f"CONTENUTO DAL PIANO PERSONALIZZATO DELLO STUDENTE:\n{contenuto_piano}")
+    if contesto_rag:
+        parti_contesto.append(f"MATERIALE DIDATTICO RILEVANTE (da RAG):\n{contesto_rag}")
+
+    contesto_completo = "\n\n---\n\n".join(parti_contesto) if parti_contesto else "(Nessun materiale specifico trovato)"
+
+    corso_nome = contesto.get("corso_nome", "")
+    piano_titolo = contesto.get("piano_titolo", "")
+    info_contesto = ""
+    if doc_chat:
+        info_contesto += f"MODALITÀ CHAT DOCUMENTO: lo studente sta chattando sul documento '{doc_chat['titolo']}'. "
+    if corso_nome:
+        info_contesto += f"Corso attivo: {corso_nome}. "
+    if piano_titolo:
+        info_contesto += f"Piano attivo: {piano_titolo}. "
+
+    # Istruzioni specifiche per modalità documento
+    if doc_chat:
+        istruzioni_extra = (
+            "- Lo studente sta chattando su un DOCUMENTO SPECIFICO. Basa la risposta "
+            "PRINCIPALMENTE sul contenuto del documento fornito.\n"
+            "- Se la domanda riguarda qualcosa che il documento non tratta, segnalalo "
+            "chiaramente e rispondi con le tue conoscenze generali indicando che stai "
+            "integrando oltre il contenuto del documento.\n"
+            "- Quando citi informazioni dal documento, indicalo naturalmente "
+            "(es. 'Come descritto nel documento...', 'Il materiale spiega che...').\n"
+            "- NON proporre di creare piani o lezioni: lo studente vuole chattare sul documento."
+        )
+    else:
+        istruzioni_extra = (
+            "- Se il materiale disponibile copre l'argomento, basa la risposta su di esso "
+            "citando i concetti chiave.\n"
+            "- Se il materiale non copre completamente l'argomento, integra con le tue "
+            "conoscenze generali ma segnala chiaramente cosa viene dal materiale del corso "
+            "e cosa è una tua integrazione.\n"
+            "- NON proporre di creare piani o lezioni: lo studente vuole una risposta diretta."
+        )
+
+    prompt = f"""Sei Lea, tutor didattico della piattaforma LearnAI. Rispondi alla domanda dello
+studente in modo chiaro, esaustivo e coinvolgente, basandoti sul materiale didattico disponibile.
+
+{info_contesto}
+
+DOMANDA DELLO STUDENTE:
+{domanda}
+
+{f"CONTESTO AGGIUNTIVO: {contesto_aggiuntivo}" if contesto_aggiuntivo else ""}
+
+MATERIALE DI RIFERIMENTO:
+{contesto_completo}
+
+ISTRUZIONI PER LA RISPOSTA:
+- Rispondi in italiano con tono caldo e motivante.
+- Spiega in modo chiaro, usando esempi concreti quando possibile.
+{istruzioni_extra}
+- Se appropriato, alla fine suggerisci domande di approfondimento o argomenti correlati.
+- Usa formattazione Markdown (grassetto, elenchi, titoli) per rendere la risposta leggibile.
+- Se lo studente chiede un riassunto, sii sintetico ma completo sui punti chiave.
+- Se lo studente chiede esempi, fornisci esempi pratici e concreti."""
+
+    try:
+        llm = get_llm(max_tokens=4096)
+        from langchain_core.messages import HumanMessage as HM
+        risposta = llm.invoke([HM(content=prompt)])
+        return risposta.content
+    except Exception as e:
+        return f"Mi dispiace, ho avuto un problema nel rispondere alla tua domanda: {e}"
 
 
 @tool
@@ -1270,6 +1520,7 @@ def _get_orchestratore():
                 tool_esplora_catalogo,
                 tool_genera_corso,
                 tool_genera_corso_libero,
+                tool_rispondi_domanda,
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
@@ -1356,6 +1607,7 @@ def aggiorna_contesto_sessione(
     if clear_materiale:
         contesto.pop("materiale_selezionato", None)
         contesto.pop("materiali_selezionati", None)
+        contesto.pop("documento_chat", None)
     if extra:
         contesto.update(extra)
     st.session_state[_SK_CONTESTO] = contesto
@@ -1400,6 +1652,25 @@ def chat_con_orchestratore(
     # l'agente. I tool girano in thread background dove session_state
     # non è accessibile — leggono _STUDENTE_ID_CORRENTE dal modulo.
     _aggiorna_studente_corrente()
+
+    # Inietta il contesto di navigazione corrente nel messaggio.
+    # Il thread LangGraph mantiene la memoria delle conversazioni precedenti,
+    # e l'agente potrebbe non richiamare tool_leggi_contesto se crede di
+    # conoscere già il contesto. Prefissando il contesto attuale evitiamo
+    # che la memoria stantia (es. "chat documento" chiusa) prevalga.
+    contesto = _CONTESTO_CORRENTE
+    if contesto:
+        _ctx_parts: list[str] = []
+        doc_chat = contesto.get("documento_chat")
+        if doc_chat:
+            _ctx_parts.append(f"Chat documento '{doc_chat.get('titolo', '')}'")
+        else:
+            if contesto.get("corso_nome"):
+                _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
+            if contesto.get("piano_titolo"):
+                _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        if _ctx_parts:
+            messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 
     try:
         return esegui_agente(
