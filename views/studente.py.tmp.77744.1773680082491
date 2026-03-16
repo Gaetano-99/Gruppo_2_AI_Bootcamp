@@ -1272,30 +1272,35 @@ def _render_header(utente: dict):
     var logoutBtn = parentDoc.getElementById('hdr-logout-btn');
     if (logoutBtn && !logoutBtn._bound) {
         logoutBtn._bound = true;
-        logoutBtn.addEventListener('click', function() { clickStBtn('Logout'); });
-    }
-    // Hide the __hdr_home__ bridge button
-    var allBtns = parentDoc.querySelectorAll('button');
-    for (var i = 0; i < allBtns.length; i++) {
-        if (allBtns[i].textContent.trim().indexOf('__hdr_') === 0) {
-            var el = allBtns[i].closest('.stElementContainer') || allBtns[i].parentElement;
-            if (el) { el.style.position='absolute'; el.style.width='1px'; el.style.height='1px'; el.style.overflow='hidden'; el.style.clip='rect(0,0,0,0)'; }
-        }
+        logoutBtn.addEventListener('click', function() { clickStBtn('__hdr_logout__'); });
     }
     </script>"""
     components.html(_js_bridge, height=0, width=0)
 
-    # Bottone Streamlit nascosto per Home — attivato dal JS nell'header
-    # (reso invisibile dal JS bridge sopra)
+    # Bottoni Streamlit nascosti — attivati dal JS nell'header
     hidden = st.container()
+    hidden.markdown('<div class="header-hidden-btns">', unsafe_allow_html=True)
     with hidden:
-        if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
-            st.session_state["_view_mode"] = None
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_corso_nome"] = ""
-            st.session_state["_search_results"] = None
-            st.rerun()
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
+                st.session_state["_view_mode"] = None
+                st.session_state["_corso_sel"] = None
+                st.session_state["_piano_sel"] = None
+                st.session_state["_corso_nome"] = ""
+                st.session_state["_search_results"] = None
+                st.rerun()
+        with col_h2:
+            if st.button("__hdr_logout__", key="hdr_logout_action"):
+                _, _, reset_fn = _import_orchestratore()
+                if reset_fn:
+                    try:
+                        reset_fn()
+                    except Exception:
+                        pass
+                st.session_state.clear()
+                st.rerun()
+    hidden.markdown('</div>', unsafe_allow_html=True)
 
 
 def _render_footer():
@@ -2986,6 +2991,17 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
+        # Logout
+        if st.button("Esci", key="logout_btn", use_container_width=True):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
+            st.rerun()
+
         # Pulsante ricerca corsi (apre dialog)
         if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
             _dialog_ricerca_corsi(corsi, studente_id)
@@ -3004,17 +3020,6 @@ def mostra_homepage_studente():
         # Sezione 2: Piani personalizzati dello studente
         _render_sidebar_piani(studente_id)
         # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
-
-        # Logout — in fondo alla sidebar
-        if st.button("Logout", key="logout_btn", use_container_width=True):
-            _, _, reset_fn = _import_orchestratore()
-            if reset_fn:
-                try:
-                    reset_fn()
-                except Exception:
-                    pass
-            st.session_state.clear()
-            st.rerun()
 
     # -------------------------------------------------------------------------
     # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)

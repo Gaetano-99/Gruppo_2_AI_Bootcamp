@@ -164,32 +164,6 @@ _CSS = """
 .app-header .header-brand-text strong span {
     color: #f0a500;
 }
-.app-header .header-center {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.app-header .header-home-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    background: rgba(255,255,255,0.10);
-    color: #fff;
-    border: 1px solid rgba(255,255,255,0.20);
-    border-radius: 8px;
-    padding: 7px 18px;
-    font-family: 'Source Sans 3', sans-serif;
-    font-size: 0.82rem;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
-    text-decoration: none;
-}
-.app-header .header-home-btn:hover {
-    background: rgba(255,255,255,0.18);
-    border-color: rgba(255,255,255,0.35);
-}
 .app-header .header-right {
     display: flex;
     align-items: center;
@@ -215,37 +189,6 @@ _CSS = """
     align-items: center;
     justify-content: center;
 }
-.app-header .header-logout {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px; height: 34px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.15);
-    cursor: pointer;
-    transition: background 0.2s, border-color 0.2s;
-}
-.app-header .header-logout:hover {
-    background: rgba(200,16,46,0.25);
-    border-color: rgba(200,16,46,0.5);
-}
-.app-header .header-logout .logout-icon {
-    font-size: 1.1rem;
-    line-height: 1;
-}
-/* Hide the helper Streamlit buttons used by header JS */
-.header-hidden-btns {
-    position: absolute !important;
-    width: 1px !important; height: 1px !important;
-    overflow: hidden !important;
-    clip: rect(0,0,0,0) !important;
-    border: 0 !important;
-    padding: 0 !important;
-    margin: -1px !important;
-}
-.header-hidden-btns .stButton { margin: 0 !important; padding: 0 !important; }
-.header-hidden-btns button { width: 1px !important; height: 1px !important; }
 
 /* ---- SIDEBAR CORSI ---- */
 .corso-item {
@@ -1223,79 +1166,23 @@ def _render_header(utente: dict):
         if logo_b64 else ''
     )
 
-    view_mode = st.session_state.get("_view_mode")
-
-    # Bottone "Torna alla home" visibile solo quando si è in una vista corso/piano
-    home_btn_html = ""
-    if view_mode:
-        home_btn_html = '<div class="header-home-btn" id="hdr-home-btn" title="Torna alla home">&#x1F3E0; Torna alla home</div>'
-
-    # Costruisci header come stringa compatta (evita che il markdown parser
-    # di Streamlit interpreti newline+indentazione come blocco codice)
-    header_parts = [
-        '<div class="app-header">',
-        '<div class="header-brand">',
-        logo_html,
-        '<div class="header-brand-text">',
-        '&copy; 2026 <strong>Federico<span>360</span></strong>',
-        '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
-        '</div></div>',
-        '<div class="header-center">',
-        home_btn_html,
-        '</div>',
-        '<div class="header-right">',
-        '<div class="header-user">',
-        f'<span>{nome_safe} {cognome_safe}</span>',
-        f'<div class="header-avatar">{iniziali}</div>',
-        '</div>',
-        '<div class="header-logout" id="hdr-logout-btn" title="Esci">&#x1F6AA;</div>',
-        '</div>',
-        '</div>',
-    ]
-    st.markdown("".join(header_parts), unsafe_allow_html=True)
-
-    # JS bridge: components.html esegue in un iframe che PUÒ eseguire script.
-    # Clicca i bottoni Streamlit nascosti nel documento parent.
-    _js_bridge = """<script>
-    function clickStBtn(text) {
-        var buttons = window.parent.document.querySelectorAll('button');
-        for (var i = 0; i < buttons.length; i++) {
-            if (buttons[i].textContent.trim() === text) { buttons[i].click(); return; }
-        }
-    }
-    var parentDoc = window.parent.document;
-    var homeBtn = parentDoc.getElementById('hdr-home-btn');
-    if (homeBtn && !homeBtn._bound) {
-        homeBtn._bound = true;
-        homeBtn.addEventListener('click', function() { clickStBtn('__hdr_home__'); });
-    }
-    var logoutBtn = parentDoc.getElementById('hdr-logout-btn');
-    if (logoutBtn && !logoutBtn._bound) {
-        logoutBtn._bound = true;
-        logoutBtn.addEventListener('click', function() { clickStBtn('Logout'); });
-    }
-    // Hide the __hdr_home__ bridge button
-    var allBtns = parentDoc.querySelectorAll('button');
-    for (var i = 0; i < allBtns.length; i++) {
-        if (allBtns[i].textContent.trim().indexOf('__hdr_') === 0) {
-            var el = allBtns[i].closest('.stElementContainer') || allBtns[i].parentElement;
-            if (el) { el.style.position='absolute'; el.style.width='1px'; el.style.height='1px'; el.style.overflow='hidden'; el.style.clip='rect(0,0,0,0)'; }
-        }
-    }
-    </script>"""
-    components.html(_js_bridge, height=0, width=0)
-
-    # Bottone Streamlit nascosto per Home — attivato dal JS nell'header
-    # (reso invisibile dal JS bridge sopra)
-    hidden = st.container()
-    with hidden:
-        if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
-            st.session_state["_view_mode"] = None
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_corso_nome"] = ""
-            st.session_state["_search_results"] = None
-            st.rerun()
+    st.markdown(f"""
+    <div class="app-header">
+        <div class="header-brand">
+            {logo_html}
+            <div class="header-brand-text">
+                &copy; 2026 <strong>Federico<span>360</span></strong>
+                &mdash; Universit&agrave; degli Studi di Napoli Federico II
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="header-user">
+                <span>{nome_safe} {cognome_safe}</span>
+                <div class="header-avatar">{iniziali}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _render_footer():
@@ -2003,7 +1890,10 @@ def _render_raccomandazioni_slideshow(studente_id: int):
     @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600&display=swap');
     * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Source Sans 3', sans-serif; }}
     .slideshow-wrapper {{ position: relative; overflow: hidden; }}
-    .slideshow-track {{ display: flex; gap: 16px; }}
+    .slideshow-track {{
+        display: flex; gap: 16px;
+        transition: transform 0.45s cubic-bezier(0.4,0,0.2,1);
+    }}
     .slide-card {{
         min-width: 260px; max-width: 300px; flex-shrink: 0;
         background: #fff; border-radius: 10px; padding: 14px 16px;
@@ -2025,10 +1915,11 @@ def _render_raccomandazioni_slideshow(studente_id: int):
         transition: background 0.15s, opacity 0.15s;
     }}
     .slideshow-nav button:hover {{ background: #001A4D; }}
+    .slideshow-nav button:disabled {{ opacity: 0.3; cursor: default; }}
     .slideshow-dots {{ display: flex; gap: 6px; align-items: center; }}
     .dot-indicator {{
         width: 8px; height: 8px; border-radius: 50%; background: #C8D5E3;
-        transition: background 0.2s; cursor: pointer;
+        transition: background 0.2s;
     }}
     .dot-indicator.active {{ background: #003087; }}
     .btn-iscriviti {{
@@ -2044,70 +1935,54 @@ def _render_raccomandazioni_slideshow(studente_id: int):
             {slides_html}
         </div>
         <div class="slideshow-nav">
-            <button onclick="go(-1)">&#8249;</button>
+            <button id="{uid}_prev" onclick="slide_{uid}(-1)">&#8249;</button>
             <div class="slideshow-dots" id="{uid}_dots">{dots_html}</div>
-            <button onclick="go(1)">&#8250;</button>
+            <button id="{uid}_next" onclick="slide_{uid}(1)">&#8250;</button>
         </div>
     </div>
     <script>
     (function() {{
-        var N = {n}, GAP = 16;
+        var current = 0;
+        var total = {n};
         var track = document.getElementById("{uid}_track");
-        var dots  = document.querySelectorAll("#{uid}_dots .dot-indicator");
-        var orig  = Array.from(track.children);
-        var busy  = false, idx = 0, rp = 0;
+        var dots = document.querySelectorAll("#{uid}_dots .dot-indicator");
+        var prevBtn = document.getElementById("{uid}_prev");
+        var nextBtn = document.getElementById("{uid}_next");
 
-        /* duplicate slides: [orig][clone] so we can scroll past the end seamlessly */
-        orig.forEach(function(c) {{ track.appendChild(c.cloneNode(true)); }});
+        // Auto-scroll interval
+        var autoInterval = setInterval(function() {{ slide_{uid}(1); }}, 4000);
 
-        function cw() {{ return orig[0].offsetWidth + GAP; }}
-
-        function mv(pos, anim) {{
-            track.style.transition = anim ? "transform 0.45s cubic-bezier(0.4,0,0.2,1)" : "none";
-            track.style.transform  = "translateX(" + (-pos * cw()) + "px)";
+        function updateSlide() {{
+            var card = track.children[0];
+            var style = window.getComputedStyle(card);
+            var cardWidth = card.offsetWidth + parseInt(style.marginRight || 0) + 16;
+            track.style.transform = "translateX(-" + (current * cardWidth) + "px)";
+            dots.forEach(function(d, i) {{
+                d.classList.toggle("active", i === current);
+            }});
+            prevBtn.disabled = (current === 0);
+            nextBtn.disabled = (current === total - 1);
         }}
 
-        function upDots() {{
-            dots.forEach(function(d, i) {{ d.classList.toggle("active", i === idx); }});
-        }}
-
-        function step(dir) {{
-            if (busy) return;
-            busy = true;
-            rp  += dir;
-            idx  = ((idx + dir) % N + N) % N;
-            mv(rp, true);
-            upDots();
-            setTimeout(function() {{
-                if (rp >= N)  {{ rp -= N; mv(rp, false); }}
-                if (rp < 0)   {{ rp += N; mv(rp, false); }}
-                busy = false;
-            }}, 470);
-        }}
-
-        window.go = function(d) {{ clearInterval(aid); step(d); startA(); }};
-
-        window.iscriviti = function(id) {{
-            var u = new URL(window.parent.location.href);
-            u.searchParams.set("racc_iscrivi", id);
-            window.parent.location.href = u.toString();
+        window.slide_{uid} = function(dir) {{
+            clearInterval(autoInterval);
+            current += dir;
+            if (current < 0) current = 0;
+            if (current >= total) current = total - 1;
+            updateSlide();
+            autoInterval = setInterval(function() {{
+                if (current < total - 1) {{ current++; updateSlide(); }}
+                else {{ clearInterval(autoInterval); }}
+            }}, 4000);
         }};
 
-        dots.forEach(function(d, i) {{
-            d.addEventListener("click", function() {{
-                if (busy) return;
-                clearInterval(aid);
-                var diff = i - idx;
-                if (diff) {{ busy=true; rp+=diff; idx=i; mv(rp,true); upDots();
-                    setTimeout(function(){{ if(rp>=N){{rp-=N;mv(rp,false);}} if(rp<0){{rp+=N;mv(rp,false);}} busy=false; }},470);
-                }}
-                startA();
-            }});
-        }});
+        window.iscriviti = function(corsoId) {{
+            var url = new URL(window.parent.location.href);
+            url.searchParams.set("racc_iscrivi", corsoId);
+            window.parent.location.href = url.toString();
+        }};
 
-        var aid;
-        function startA() {{ aid = setInterval(function() {{ step(1); }}, 4000); }}
-        startA(); mv(0,false); upDots();
+        updateSlide();
     }})();
     </script>
     """, height=270, scrolling=False)
@@ -2986,6 +2861,17 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
+        # Logout
+        if st.button("Esci", key="logout_btn", use_container_width=True):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
+            st.rerun()
+
         # Pulsante ricerca corsi (apre dialog)
         if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
             _dialog_ricerca_corsi(corsi, studente_id)
@@ -3004,17 +2890,6 @@ def mostra_homepage_studente():
         # Sezione 2: Piani personalizzati dello studente
         _render_sidebar_piani(studente_id)
         # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
-
-        # Logout — in fondo alla sidebar
-        if st.button("Logout", key="logout_btn", use_container_width=True):
-            _, _, reset_fn = _import_orchestratore()
-            if reset_fn:
-                try:
-                    reset_fn()
-                except Exception:
-                    pass
-            st.session_state.clear()
-            st.rerun()
 
     # -------------------------------------------------------------------------
     # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)

@@ -1228,74 +1228,86 @@ def _render_header(utente: dict):
     # Bottone "Torna alla home" visibile solo quando si è in una vista corso/piano
     home_btn_html = ""
     if view_mode:
-        home_btn_html = '<div class="header-home-btn" id="hdr-home-btn" title="Torna alla home">&#x1F3E0; Torna alla home</div>'
+        home_btn_html = (
+            '<div class="header-home-btn" id="hdr-home-btn" title="Torna alla home">'
+            '&#x1F3E0; Torna alla home'
+            '</div>'
+        )
 
-    # Costruisci header come stringa compatta (evita che il markdown parser
-    # di Streamlit interpreti newline+indentazione come blocco codice)
-    header_parts = [
-        '<div class="app-header">',
-        '<div class="header-brand">',
-        logo_html,
-        '<div class="header-brand-text">',
-        '&copy; 2026 <strong>Federico<span>360</span></strong>',
-        '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
-        '</div></div>',
-        '<div class="header-center">',
-        home_btn_html,
-        '</div>',
-        '<div class="header-right">',
-        '<div class="header-user">',
-        f'<span>{nome_safe} {cognome_safe}</span>',
-        f'<div class="header-avatar">{iniziali}</div>',
-        '</div>',
-        '<div class="header-logout" id="hdr-logout-btn" title="Esci">&#x1F6AA;</div>',
-        '</div>',
-        '</div>',
-    ]
-    st.markdown("".join(header_parts), unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="app-header">
+        <div class="header-brand">
+            {logo_html}
+            <div class="header-brand-text">
+                &copy; 2026 <strong>Federico<span>360</span></strong>
+                &mdash; Universit&agrave; degli Studi di Napoli Federico II
+            </div>
+        </div>
+        <div class="header-center">
+            {home_btn_html}
+        </div>
+        <div class="header-right">
+            <div class="header-user">
+                <span>{nome_safe} {cognome_safe}</span>
+                <div class="header-avatar">{iniziali}</div>
+            </div>
+            <div class="header-logout" id="hdr-logout-btn" title="Esci">
+                <span class="logout-icon">&#x1F6AA;</span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    # JS bridge: components.html esegue in un iframe che PUÒ eseguire script.
-    # Clicca i bottoni Streamlit nascosti nel documento parent.
-    _js_bridge = """<script>
+    # JS bridge: components.html runs in an iframe that CAN execute scripts.
+    # It clicks the hidden Streamlit buttons in the parent document.
+    _js_bridge = """
+    <script>
     function clickStBtn(text) {
-        var buttons = window.parent.document.querySelectorAll('button');
-        for (var i = 0; i < buttons.length; i++) {
-            if (buttons[i].textContent.trim() === text) { buttons[i].click(); return; }
+        const buttons = window.parent.document.querySelectorAll('button');
+        for (const btn of buttons) {
+            if (btn.textContent.trim() === text) { btn.click(); return; }
         }
     }
-    var parentDoc = window.parent.document;
-    var homeBtn = parentDoc.getElementById('hdr-home-btn');
+    // Attach click handlers to header elements in the parent
+    const parentDoc = window.parent.document;
+    const homeBtn = parentDoc.getElementById('hdr-home-btn');
     if (homeBtn && !homeBtn._bound) {
         homeBtn._bound = true;
         homeBtn.addEventListener('click', function() { clickStBtn('__hdr_home__'); });
     }
-    var logoutBtn = parentDoc.getElementById('hdr-logout-btn');
+    const logoutBtn = parentDoc.getElementById('hdr-logout-btn');
     if (logoutBtn && !logoutBtn._bound) {
         logoutBtn._bound = true;
-        logoutBtn.addEventListener('click', function() { clickStBtn('Logout'); });
+        logoutBtn.addEventListener('click', function() { clickStBtn('__hdr_logout__'); });
     }
-    // Hide the __hdr_home__ bridge button
-    var allBtns = parentDoc.querySelectorAll('button');
-    for (var i = 0; i < allBtns.length; i++) {
-        if (allBtns[i].textContent.trim().indexOf('__hdr_') === 0) {
-            var el = allBtns[i].closest('.stElementContainer') || allBtns[i].parentElement;
-            if (el) { el.style.position='absolute'; el.style.width='1px'; el.style.height='1px'; el.style.overflow='hidden'; el.style.clip='rect(0,0,0,0)'; }
-        }
-    }
-    </script>"""
+    </script>
+    """
     components.html(_js_bridge, height=0, width=0)
 
-    # Bottone Streamlit nascosto per Home — attivato dal JS nell'header
-    # (reso invisibile dal JS bridge sopra)
+    # Hidden Streamlit buttons triggered by the header JS
     hidden = st.container()
+    hidden.markdown('<div class="header-hidden-btns">', unsafe_allow_html=True)
     with hidden:
-        if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
-            st.session_state["_view_mode"] = None
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_corso_nome"] = ""
-            st.session_state["_search_results"] = None
-            st.rerun()
+        col_h1, col_h2 = st.columns(2)
+        with col_h1:
+            if view_mode and st.button("__hdr_home__", key="hdr_home_action"):
+                st.session_state["_view_mode"] = None
+                st.session_state["_corso_sel"] = None
+                st.session_state["_piano_sel"] = None
+                st.session_state["_corso_nome"] = ""
+                st.session_state["_search_results"] = None
+                st.rerun()
+        with col_h2:
+            if st.button("__hdr_logout__", key="hdr_logout_action"):
+                _, _, reset_fn = _import_orchestratore()
+                if reset_fn:
+                    try:
+                        reset_fn()
+                    except Exception:
+                        pass
+                st.session_state.clear()
+                st.rerun()
+    hidden.markdown('</div>', unsafe_allow_html=True)
 
 
 def _render_footer():
@@ -2044,70 +2056,55 @@ def _render_raccomandazioni_slideshow(studente_id: int):
             {slides_html}
         </div>
         <div class="slideshow-nav">
-            <button onclick="go(-1)">&#8249;</button>
+            <button id="{uid}_prev" onclick="slide_{uid}(-1)">&#8249;</button>
             <div class="slideshow-dots" id="{uid}_dots">{dots_html}</div>
-            <button onclick="go(1)">&#8250;</button>
+            <button id="{uid}_next" onclick="slide_{uid}(1)">&#8250;</button>
         </div>
     </div>
     <script>
     (function() {{
-        var N = {n}, GAP = 16;
+        var current = 0;
+        var total = {n};
         var track = document.getElementById("{uid}_track");
-        var dots  = document.querySelectorAll("#{uid}_dots .dot-indicator");
-        var orig  = Array.from(track.children);
-        var busy  = false, idx = 0, rp = 0;
+        var dots = document.querySelectorAll("#{uid}_dots .dot-indicator");
+        var prevBtn = document.getElementById("{uid}_prev");
+        var nextBtn = document.getElementById("{uid}_next");
 
-        /* duplicate slides: [orig][clone] so we can scroll past the end seamlessly */
-        orig.forEach(function(c) {{ track.appendChild(c.cloneNode(true)); }});
-
-        function cw() {{ return orig[0].offsetWidth + GAP; }}
-
-        function mv(pos, anim) {{
-            track.style.transition = anim ? "transform 0.45s cubic-bezier(0.4,0,0.2,1)" : "none";
-            track.style.transform  = "translateX(" + (-pos * cw()) + "px)";
+        function updateSlide() {{
+            var card = track.children[0];
+            var cardWidth = card.offsetWidth + 16;
+            track.style.transform = "translateX(-" + (current * cardWidth) + "px)";
+            dots.forEach(function(d, i) {{
+                d.classList.toggle("active", i === current);
+            }});
+            prevBtn.disabled = false;
+            nextBtn.disabled = false;
         }}
 
-        function upDots() {{
-            dots.forEach(function(d, i) {{ d.classList.toggle("active", i === idx); }});
-        }}
-
-        function step(dir) {{
-            if (busy) return;
-            busy = true;
-            rp  += dir;
-            idx  = ((idx + dir) % N + N) % N;
-            mv(rp, true);
-            upDots();
-            setTimeout(function() {{
-                if (rp >= N)  {{ rp -= N; mv(rp, false); }}
-                if (rp < 0)   {{ rp += N; mv(rp, false); }}
-                busy = false;
-            }}, 470);
-        }}
-
-        window.go = function(d) {{ clearInterval(aid); step(d); startA(); }};
-
-        window.iscriviti = function(id) {{
-            var u = new URL(window.parent.location.href);
-            u.searchParams.set("racc_iscrivi", id);
-            window.parent.location.href = u.toString();
+        window.slide_{uid} = function(dir) {{
+            clearInterval(autoInterval);
+            current = (current + dir + total) % total;
+            updateSlide();
+            startAuto();
         }};
 
-        dots.forEach(function(d, i) {{
-            d.addEventListener("click", function() {{
-                if (busy) return;
-                clearInterval(aid);
-                var diff = i - idx;
-                if (diff) {{ busy=true; rp+=diff; idx=i; mv(rp,true); upDots();
-                    setTimeout(function(){{ if(rp>=N){{rp-=N;mv(rp,false);}} if(rp<0){{rp+=N;mv(rp,false);}} busy=false; }},470);
-                }}
-                startA();
-            }});
-        }});
+        function startAuto() {{
+            autoInterval = setInterval(function() {{
+                current = (current + 1) % total;
+                updateSlide();
+            }}, 4000);
+        }}
 
-        var aid;
-        function startA() {{ aid = setInterval(function() {{ step(1); }}, 4000); }}
-        startA(); mv(0,false); upDots();
+        var autoInterval;
+        startAuto();
+
+        window.iscriviti = function(corsoId) {{
+            var url = new URL(window.parent.location.href);
+            url.searchParams.set("racc_iscrivi", corsoId);
+            window.parent.location.href = url.toString();
+        }};
+
+        updateSlide();
     }})();
     </script>
     """, height=270, scrolling=False)
@@ -2986,6 +2983,17 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
+        # Logout
+        if st.button("Esci", key="logout_btn", use_container_width=True):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
+            st.rerun()
+
         # Pulsante ricerca corsi (apre dialog)
         if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
             _dialog_ricerca_corsi(corsi, studente_id)
@@ -3004,17 +3012,6 @@ def mostra_homepage_studente():
         # Sezione 2: Piani personalizzati dello studente
         _render_sidebar_piani(studente_id)
         # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
-
-        # Logout — in fondo alla sidebar
-        if st.button("Logout", key="logout_btn", use_container_width=True):
-            _, _, reset_fn = _import_orchestratore()
-            if reset_fn:
-                try:
-                    reset_fn()
-                except Exception:
-                    pass
-            st.session_state.clear()
-            st.rerun()
 
     # -------------------------------------------------------------------------
     # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)
