@@ -1529,7 +1529,7 @@ def _render_contenuto_piano(piano_id: int, studente_id: int = 0, is_corso_docent
         f'</a></li>'
         for i, cap in enumerate(capitoli)
     )
-    toc_height = 60 + len(capitoli) * 34
+    toc_height = 60 + len(capitoli) * 52
     components.html(f"""
     <style>
         * {{ margin:0; padding:0; box-sizing:border-box; }}

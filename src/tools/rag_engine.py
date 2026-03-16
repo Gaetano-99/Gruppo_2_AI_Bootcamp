@@ -137,13 +137,29 @@ def cerca_chunk_rilevanti(
     elif materiale_id:
         ids_effettivi = [materiale_id]
 
+    # --- Determina la collection corretta per la ricerca semantica ---
+    # Quando è specificato un materiale_id, il corso_id dal contesto di navigazione
+    # potrebbe non corrispondere alla collection in cui i chunks sono stati indicizzati.
+    # Es: materiale personale (corso_id=NULL) ma l'utente sta navigando un corso (corso_id=106).
+    # In questo caso, la collection corretta è quella del materiale, non del contesto.
+    corso_id_per_collection = corso_id
+    if ids_effettivi:
+        # Lookup del corso_universitario_id reale del primo materiale
+        _mat_info = db.esegui(
+            "SELECT corso_universitario_id FROM materiali_didattici WHERE id = ?",
+            [ids_effettivi[0]],
+        )
+        if _mat_info:
+            corso_id_per_collection = _mat_info[0].get("corso_universitario_id")
+            # None = materiale personale → collection piattaforma
+
     # --- Ricerca semantica (prioritaria, salvo forza_keyword) ---
     if not forza_keyword:
         try:
             from src.tools.vector_store import cerca_simili, RicercaSemanticaFallita
             chunk_ids_semantici = cerca_simili(
                 query=query,
-                corso_id=corso_id,
+                corso_id=corso_id_per_collection,
                 top_k=top_k,
                 materiale_id=ids_effettivi[0] if ids_effettivi and len(ids_effettivi) == 1 else None,
                 materiale_ids=ids_effettivi if ids_effettivi and len(ids_effettivi) > 1 else None,
