@@ -456,10 +456,6 @@ div[data-testid="stVerticalBlock"] {
     border-left: 4px solid #C5A028;
     box-shadow: 0 2px 8px rgba(0,48,135,0.07);
     margin-bottom: 10px;
-    min-height: 160px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
 }
 .raccomandazione-card h5 {
     color: #001A4D;
@@ -472,7 +468,6 @@ div[data-testid="stVerticalBlock"] {
     font-size: 0.8rem;
     margin: 0;
     line-height: 1.5;
-    flex: 1;
 }
 .score-bar-outer {
     height: 4px;
@@ -1067,10 +1062,10 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
         meta_parts.append(stato.capitalize())
         meta_line = " · ".join(meta_parts)
 
-        marker = "card-click card-corso-active" if attivo else "card-click card-corso"
-        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
         col_card, col_del = st.columns([6, 1])
         with col_card:
+            marker = "card-click-corso-active" if attivo else "card-click-corso"
+            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
             if st.button(f"{corso['nome']}\n{meta_line}", key=f"btn_corso_{cid}", use_container_width=True):
                 st.session_state["_corso_sel"]  = cid
                 st.session_state["_corso_nome"] = corso["nome"]
@@ -1115,12 +1110,13 @@ def _render_sidebar_piani(studente_id: int):
         )
         corso_nome_breve = (piano.get("corso_nome") or "")[:22]
         titolo_breve = (piano["titolo"] or "")[:42]
+        meta_line = f"AI · {corso_nome_breve} · {piano.get('created_at', '')[:10]}"
 
-        marker = "card-click card-piano-active" if attivo else "card-click card-piano"
-        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
         col_card, col_del = st.columns([6, 1])
         with col_card:
-            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
+            marker = "card-click-piano-active" if attivo else "card-click-piano"
+            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
+            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}\n{meta_line}"
             if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
                 st.session_state["_piano_sel"]  = pid
                 st.session_state["_view_mode"]  = "piano"
@@ -1578,87 +1574,6 @@ def _render_raccomandazioni(studente_id: int):
             except Exception:
                 st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
             st.rerun()
-
-
-def _render_raccomandazioni_orizzontale(studente_id: int):
-    """Renderizza le raccomandazioni corsi in layout orizzontale (home)."""
-    raccomanda_corsi = _import_recommender()
-    st.markdown(
-        '<div class="divider-label">Consigliati per te'
-        '<span class="tooltip-wrap">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">Corsi suggeriti dall\'AI in base al tuo percorso di laurea '
-        'e ai tuoi interessi. Clicca <strong>Iscriviti</strong> per aggiungerli ai tuoi corsi.</span>'
-        '</span></div>',
-        unsafe_allow_html=True,
-    )
-
-    # Feedback iscrizione da raccomandazione
-    corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
-    if corso_appena_iscritto:
-        st.success(f"Iscrizione a **{corso_appena_iscritto}** completata!")
-
-    def _fallback(msg: str):
-        st.markdown(
-            f'<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">{msg}</p>',
-            unsafe_allow_html=True,
-        )
-
-    if raccomanda_corsi is None:
-        _fallback("Raccomandazioni non disponibili.")
-        return
-
-    try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
-    except Exception:
-        raccomandazioni = []
-
-    if not raccomandazioni:
-        candidati = db.esegui("""
-            SELECT COUNT(*) as n FROM corsi_universitari cu
-            WHERE cu.attivo = 1
-              AND cu.id NOT IN (
-                  SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?
-              )
-        """, [studente_id])
-        if candidati and candidati[0]["n"] == 0:
-            _fallback("Sei già iscritto a tutti i corsi disponibili. Nuovi corsi verranno aggiunti presto! 🎓")
-        else:
-            _fallback("Nessuna raccomandazione disponibile al momento.")
-        return
-
-    cols = st.columns(len(raccomandazioni))
-    for i, r in enumerate(raccomandazioni):
-        with cols[i]:
-            score_pct = int(r.score_totale * 100)
-            tags_html = " ".join(
-                f'<span style="background:#E8F0FE;color:#003087;font-size:0.65rem;'
-                f'padding:2px 6px;border-radius:10px;margin-right:4px;">{t}</span>'
-                for t in (r.tag or [])
-            )
-            motivazione = (r.motivazione or "")[:100]
-            st.markdown(f"""
-            <div class="raccomandazione-card">
-                <h5>{r.corso_nome}</h5>
-                <div style="margin:4px 0">{tags_html}</div>
-                <p>{motivazione}{'…' if len(r.motivazione or '') > 100 else ''}</p>
-                <div class="score-bar-outer">
-                    <div class="score-bar-inner" style="width:{score_pct}%"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button("Iscriviti", key=f"racc_iscriviti_{r.corso_id}", type="primary", use_container_width=True):
-                try:
-                    db.inserisci("studenti_corsi", {
-                        "studente_id": studente_id,
-                        "corso_universitario_id": r.corso_id,
-                        "anno_accademico": _anno_accademico_corrente(),
-                        "stato": "iscritto",
-                    })
-                    st.session_state["_iscrizione_feedback"] = r.corso_nome
-                except Exception:
-                    st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
-                st.rerun()
 
 
 # ---------------------------------------------------------------------------
@@ -2555,7 +2470,8 @@ def mostra_homepage_studente():
         _render_sidebar_corsi(corsi, studente_id)
         # Sezione 2: Piani personalizzati dello studente
         _render_sidebar_piani(studente_id)
-        # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
+        # Sezione 3: Raccomandazioni AI
+        _render_raccomandazioni(studente_id)
 
     # -------------------------------------------------------------------------
     # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)
@@ -2663,9 +2579,3 @@ def mostra_homepage_studente():
             piano_id=piano_sel_id if view_mode == "piano" else None,
             piano_titolo=piano_titolo_chat,
         )
-
-    # -------------------------------------------------------------------------
-    # RACCOMANDAZIONI — full-width, solo nella home
-    # -------------------------------------------------------------------------
-    if not view_mode:
-        _render_raccomandazioni_orizzontale(studente_id)

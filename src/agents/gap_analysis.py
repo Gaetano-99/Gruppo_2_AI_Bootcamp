@@ -173,12 +173,17 @@ Argomenti chiave delle sezioni con errori: {', '.join(argomenti) if argomenti el
 Sezioni del materiale da rivedere: {', '.join(sezioni) if sezioni else 'Non disponibili'}"""
 
     istruzioni = (
-        "Sei Lea, il tutor di LearnAI. Analizza i risultati del quiz dello studente e:\n"
-        "1. Elenca in modo chiaro gli argomenti che non sono stati padroneggiati.\n"
-        "2. Per ogni argomento, spiega brevemente cosa rivedere e perché è importante.\n"
+        "Sei Lea, il tutor di LearnAI. Analizza i risultati del quiz dello studente.\n"
+        "IMPORTANTE: Lo studente NON può rispondere direttamente a questa analisi, "
+        "quindi NON fare domande e NON chiedere conferme.\n"
+        "Struttura la risposta così:\n"
+        "1. Elenca in modo chiaro le aree di miglioramento (argomenti non padroneggiati).\n"
+        "2. Per ogni area, spiega brevemente cosa rivedere e perché è importante.\n"
         "3. Se ci sono sezioni specifiche del materiale, citale.\n"
-        "4. Concludi con un incoraggiamento e offri di ottimizzare il piano di studio "
-        "in base a questi risultati.\n"
+        "4. Suggerisci 2-3 domande concrete che lo studente può fare a Lea in chat "
+        "per approfondire le lacune (es. 'Puoi spiegarmi meglio...', "
+        "'Fammi un riassunto di...', 'Generami un nuovo quiz su...').\n"
+        "5. Concludi con un breve incoraggiamento.\n"
         "Usa un tono empatico e motivante. Usa elenchi puntati. Massimo 250 parole."
     )
 

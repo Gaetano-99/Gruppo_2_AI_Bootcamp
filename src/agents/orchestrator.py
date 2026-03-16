@@ -321,6 +321,23 @@ REGOLE DI COMPORTAMENTO:
 - Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
 - Gestisci gli errori con empatia e suggerisci il passo successivo.
+
+REGOLA QUIZ E FLASHCARD — ASSOCIAZIONE OBBLIGATORIA A UN PIANO PERSONALIZZATO:
+Quiz e flashcard possono essere generati SOLO per sezioni (paragrafi) di un piano personalizzato.
+NON è possibile creare quiz o flashcard "liberi" senza un piano associato.
+Quando lo studente chiede di creare quiz, flashcard o strumenti pratici:
+1. Chiama tool_leggi_contesto per verificare il contesto attuale.
+2. Se lo studente NON ha nessun piano personalizzato:
+   - NON generare quiz o flashcard.
+   - Spiega che per creare quiz e flashcard è necessario prima generare un piano personalizzato.
+   - Proponi di creare un piano personalizzato sull'argomento di interesse.
+3. Se lo studente HA piani personalizzati ma NON sta visualizzando un piano specifico
+   (tipo_vista ≠ "piano" oppure piano_id è assente nel contesto):
+   - NON generare quiz o flashcard direttamente.
+   - Chiedi a quale piano personalizzato vuole associare quiz e flashcard.
+   - Elenca i piani disponibili (li trovi nell'output di tool_leggi_contesto) per facilitare la scelta.
+4. Se lo studente sta visualizzando un piano specifico (tipo_vista="piano" con piano_id presente):
+   - Procedi normalmente con tool_genera_pratica per le sezioni del piano attivo.
 """
 
 
@@ -338,7 +355,32 @@ def tool_leggi_contesto() -> str:
     # background di LangGraph (warning "missing ScriptRunContext").
     contesto = _CONTESTO_CORRENTE
     if not contesto:
-        return "Nessun contesto attivo. L'utente non ha ancora selezionato un corso."
+        # Anche senza contesto attivo, verifica se lo studente ha piani personalizzati
+        parti = ["Nessun contesto attivo. L'utente non ha ancora selezionato un corso."]
+        studente_id = _STUDENTE_ID_CORRENTE
+        if studente_id:
+            try:
+                piani_studente = db.esegui(
+                    "SELECT id, titolo, stato FROM piani_personalizzati "
+                    "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                    [studente_id],
+                )
+                if piani_studente:
+                    elenco_piani = "\n".join(
+                        f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                        for p in piani_studente
+                    )
+                    parti.append(
+                        f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente NON ha ancora nessun piano personalizzato. "
+                        "Per generare quiz o flashcard è necessario prima creare un piano."
+                    )
+            except Exception:
+                pass
+        return "\n".join(parti)
 
     parti = []
     tipo = contesto.get("tipo_vista")
@@ -446,6 +488,32 @@ def tool_leggi_contesto() -> str:
                 f"Genera una lezione su questo materiale chiamando tool_genera_corso "
                 f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
             )
+
+    # Elenco piani personalizzati dello studente (utile per quiz/flashcard)
+    tipo = contesto.get("tipo_vista")
+    if tipo != "docente":
+        studente_id = _STUDENTE_ID_CORRENTE
+        try:
+            piani_studente = db.esegui(
+                "SELECT id, titolo, stato FROM piani_personalizzati "
+                "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                [studente_id],
+            )
+            if piani_studente:
+                elenco_piani = "\n".join(
+                    f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                    for p in piani_studente
+                )
+                parti.append(
+                    f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                )
+            else:
+                parti.append(
+                    "Lo studente NON ha ancora nessun piano personalizzato. "
+                    "Per generare quiz o flashcard è necessario prima creare un piano."
+                )
+        except Exception:
+            pass
 
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
@@ -1085,8 +1153,40 @@ def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     """
     Genera strumenti pratici (quiz, flashcard, schema) per una sezione studiata.
     strumenti: lista con uno o più tra "quiz", "flashcard", "schema".
+    IMPORTANTE: quiz e flashcard possono essere generati SOLO per sezioni di un
+    piano personalizzato dello studente. Se lo studente non ha piani, suggerisci
+    di crearne uno prima.
     """
     studente_id = _STUDENTE_ID_CORRENTE
+
+    # Verifica che il paragrafo appartenga a un piano dello studente
+    verifica = db.esegui(
+        "SELECT pp.id FROM piano_paragrafi pp "
+        "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+        "JOIN piani_personalizzati p ON pc.piano_id = p.id "
+        "WHERE pp.id = ? AND p.studente_id = ?",
+        [paragrafo_id, studente_id],
+    )
+    if not verifica:
+        # Controlla se lo studente ha almeno un piano
+        piani = db.esegui(
+            "SELECT id, titolo FROM piani_personalizzati "
+            "WHERE studente_id = ? AND stato = 'attivo'",
+            [studente_id],
+        )
+        if not piani:
+            return (
+                "Non puoi generare quiz o flashcard perché non hai ancora nessun piano personalizzato. "
+                "Crea prima un piano personalizzato sull'argomento che ti interessa, "
+                "poi potrai generare quiz e flashcard per le sue sezioni."
+            )
+        elenco = ", ".join(f"'{p['titolo']}'" for p in piani)
+        return (
+            f"La sezione indicata non appartiene a un tuo piano personalizzato. "
+            f"Quiz e flashcard possono essere generati solo per sezioni di un tuo piano. "
+            f"I tuoi piani attivi sono: {elenco}. "
+            f"Indica a quale piano vuoi associare quiz o flashcard."
+        )
 
     contenuti = db.trova_tutti(
         "piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"}

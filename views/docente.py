@@ -510,6 +510,67 @@ def _dialog_crea_corso(docente_id: int):
         st.session_state["_doc_refresh"] = True
 
 
+def _elimina_corso_completo(corso_id: int) -> None:
+    """Elimina un corso e TUTTI i record dipendenti nell'ordine corretto."""
+
+    # 1. Elimina contenuto piani docente (capitoli, paragrafi, contenuti, quiz interni)
+    _cancella_contenuto_piano_corso(corso_id)
+
+    # 2. Elimina piano_materiali_utilizzati per chunk di questo corso
+    chunk_ids_rows = db.esegui(
+        "SELECT id FROM materiali_chunks WHERE corso_universitario_id = ?", [corso_id]
+    )
+    chunk_ids = [r["id"] for r in chunk_ids_rows]
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM piano_materiali_utilizzati WHERE chunk_id IN ({ph})", chunk_ids)
+
+    # 3. Elimina catena quiz: risposte → tentativi → domande → quiz
+    quiz_ids_rows = db.esegui(
+        "SELECT id FROM quiz WHERE corso_universitario_id = ?", [corso_id]
+    )
+    quiz_ids = [r["id"] for r in quiz_ids_rows]
+    if quiz_ids:
+        qph = ",".join("?" * len(quiz_ids))
+        domande_ids_rows = db.esegui(
+            f"SELECT id FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids
+        )
+        domande_ids = [r["id"] for r in domande_ids_rows]
+        if domande_ids:
+            dph = ",".join("?" * len(domande_ids))
+            db.esegui(f"DELETE FROM risposte_domande WHERE domanda_id IN ({dph})", domande_ids)
+        db.esegui(f"DELETE FROM tentativi_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+        db.esegui(f"DELETE FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+        db.esegui(f"DELETE FROM quiz WHERE id IN ({qph})", quiz_ids)
+
+    # 4. Elimina lezioni del corso
+    db.esegui("DELETE FROM lezioni_corso WHERE corso_universitario_id = ?", [corso_id])
+
+    # 5. Elimina materiali: chunks → didattici (+ file fisici)
+    materiali = db.esegui(
+        "SELECT id, s3_key FROM materiali_didattici WHERE corso_universitario_id = ?", [corso_id]
+    )
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM materiali_chunks WHERE id IN ({ph})", chunk_ids)
+    for m in materiali:
+        db.elimina("materiali_didattici", {"id": m["id"]})
+        if m.get("s3_key"):
+            try:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                file_path = os.path.join(base_dir, m["s3_key"])
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+
+    # 6. Elimina iscrizioni studenti
+    db.esegui("DELETE FROM studenti_corsi WHERE corso_universitario_id = ?", [corso_id])
+
+    # 7. Elimina il corso (corsi_laurea_universitari CASCADE, piani SET NULL automatici)
+    db.elimina("corsi_universitari", {"id": corso_id})
+
+
 def _dialog_elimina_corso(corso_id: int):
     st.warning("Eliminerai definitivamente il corso e i relativi materiali.")
     c1, c2 = st.columns(2)
@@ -519,10 +580,12 @@ def _dialog_elimina_corso(corso_id: int):
     with c2:
         if st.button("Elimina", type="primary"):
             try:
-                db.elimina("corsi_universitari", {"id": corso_id})
+                _elimina_corso_completo(corso_id)
                 st.session_state["_doc_refresh"] = True
                 st.session_state["_corso_doc_sel"] = None
+                st.session_state["_doc_delete_confirm"] = None
                 st.success("Corso eliminato.")
+                st.rerun()
             except Exception as e:
                 st.error(f"Impossibile eliminare: {e}")
 
