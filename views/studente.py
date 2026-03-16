@@ -1671,16 +1671,12 @@ def _anno_accademico_corrente() -> str:
     return f"{oggi.year}-{oggi.year + 1}" if oggi.month >= 9 else f"{oggi.year - 1}-{oggi.year}"
 
 
-def _render_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
-    """Sezione di ricerca corsi disponibili nella piattaforma."""
+@st.dialog("🔍 Cerca un corso", width="large")
+def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
+    """Dialog di ricerca corsi disponibili nella piattaforma."""
     st.markdown(
-        '### 🔍 Cerca un corso'
-        '&nbsp;<span class="tooltip-wrap" style="vertical-align:middle">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">Cerca tra tutti i corsi disponibili nella piattaforma. '
-        'Puoi filtrare per nome, docente, CFU o corso di laurea.</span>'
-        '</span>',
-        unsafe_allow_html=True,
+        'Cerca tra tutti i corsi disponibili nella piattaforma. '
+        'Puoi filtrare per nome, docente, CFU o corso di laurea.',
     )
 
     tutti_cdl = _get_tutti_cdl()
@@ -2534,13 +2530,9 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
-        # Pulsante ricerca corsi
+        # Pulsante ricerca corsi (apre dialog)
         if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
-            st.session_state["_view_mode"] = "ricerca"
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_search_results"] = None
-            st.rerun()
+            _dialog_ricerca_corsi(corsi, studente_id)
 
         # Bottoni materiale personale (sempre visibili, sempre dialog liberi)
         _sidebar_user_id = utente.get("user_id", utente.get("id", 0))
@@ -2566,25 +2558,34 @@ def mostra_homepage_studente():
             nome = _esc(utente["nome"])
             st.markdown(f"""
             <div class="empty-state" style="padding-top:24px; padding-bottom:8px">
-                <div class="icon">🎓</div>
-                <h3>Benvenuto, {nome}!</h3>
-                <p style="max-width:360px; margin:0 auto; line-height:1.7">
-                    Seleziona un <strong>corso</strong> per consultarlo,
-                    o apri un <strong>piano personalizzato</strong> per studiare.
-                    Chiedi a <strong>Lea</strong> di creare un nuovo piano su qualsiasi argomento.
+                <div class="icon"></div>
+                <h3>Ciao, {nome}!</h3>
+            </div>
+            <div style="max-width:560px; margin:0 auto; color:#2D3A4A; font-size:0.9rem; line-height:1.8; text-align:left; padding: 0 12px;">
+                <p>
+                    Questa &egrave; la tua piattaforma di studio intelligente, potenziata dall'AI.
+                    Nella colonna a sinistra trovi i tuoi <strong>corsi universitari</strong> e i tuoi
+                    <strong>piani personalizzati</strong>.
+                </p>
+                <p>
+                    I <strong>corsi</strong> sono quelli ufficiali del tuo percorso di laurea: puoi consultare
+                    le lezioni e i materiali caricati dal docente in modalit&agrave; di sola lettura.
+                    Per trovare e iscriverti a nuovi corsi, clicca su <strong>🔍 Cerca corsi</strong> in alto a sinistra.
+                </p>
+                <p>
+                    I <strong>piani personalizzati</strong>, invece, sono spazi di studio creati su misura per te.
+                    Chiedi a <strong>Lea</strong>, il tuo tutor AI, di generarne uno su qualsiasi argomento:
+                    Lea creer&agrave; capitoli, lezioni e contenuti pensati per le tue esigenze.
+                    Puoi anche caricare i tuoi appunti, slide o PDF e Lea generer&agrave; una lezione a partire
+                    dal tuo materiale.
+                </p>
+                <p>
+                    Nella chat a destra puoi interagire con <strong>Lea</strong> in qualsiasi momento:
+                    chiedile di creare <strong>lezioni personalizzate</strong> e <strong>informazioni sul tuo materiale didattico</strong> per verificare
+                    le tue conoscenze.
                 </p>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("---")
-            _render_ricerca_corsi(corsi, studente_id)
-
-        elif view_mode == "ricerca":
-            # ── VISTA RICERCA ─────────────────────────────────────────────
-            if st.button("← Torna alla home", key="btn_back_from_search"):
-                st.session_state["_view_mode"] = None
-                st.session_state["_search_results"] = None
-                st.rerun()
-            _render_ricerca_corsi(corsi, studente_id)
 
         elif view_mode == "corso" and corso_sel_id:
             # ── VISTA CORSO — sola lettura ─────────────────────────────────
