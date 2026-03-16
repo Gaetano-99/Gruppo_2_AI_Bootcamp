@@ -90,21 +90,15 @@ _CSS = """
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding-top: 74px !important; padding-bottom: 60px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
-/* ---- COLONNA SINISTRA (solo sidebar principale, NON colonne annidate) ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+/* ---- COLONNA SINISTRA (scoped via .st-key-sidebar) ---- */
+.st-key-sidebar {
     background: #E2E8F0;
     border-radius: 12px;
     padding: 12px 8px;
 }
-/* Reset: rimuovi sfondo grigio dalle colonne annidate dentro altre colonne */
-[data-testid="stColumn"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
-    background: transparent !important;
-    border-radius: 0 !important;
-    padding: 0 !important;
-}
 
 /* ---- EXPANDER SIDEBAR (corsi e piani) ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] {
+.st-key-sidebar [data-testid="stExpander"] {
     border: none !important;
     border-radius: 10px !important;
     margin-bottom: 10px !important;
@@ -112,11 +106,11 @@ _CSS = """
     transition: box-shadow 0.2s, border-color 0.2s !important;
     border: 1px solid transparent !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:hover {
+.st-key-sidebar [data-testid="stExpander"]:hover {
     box-shadow: 0 2px 10px rgba(0,48,135,0.10) !important;
     border-color: #C8D5E3 !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] summary {
+.st-key-sidebar [data-testid="stExpander"] summary {
     font-weight: 600 !important;
     color: #001A4D !important;
     font-size: 0.92rem !important;
@@ -128,32 +122,32 @@ _CSS = """
     transition: background 0.2s !important;
 }
 /* Icona freccia a destra */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] summary svg {
+.st-key-sidebar [data-testid="stExpander"] summary svg {
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
     color: #003087 !important;
     opacity: 0.6;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:hover summary svg {
+.st-key-sidebar [data-testid="stExpander"]:hover summary svg {
     opacity: 1;
     color: #1351A8 !important;
 }
 /* Corsi — primo expander: bianco */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(1) {
+.st-key-sidebar [data-testid="stExpander"]:nth-of-type(1) {
     background: #FFFFFF !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(1) summary {
+.st-key-sidebar [data-testid="stExpander"]:nth-of-type(1) summary {
     background: #FFFFFF !important;
 }
 /* Piani — secondo expander: azzurro chiaro */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(2) {
+.st-key-sidebar [data-testid="stExpander"]:nth-of-type(2) {
     background: #EEF4FF !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(2) summary {
+.st-key-sidebar [data-testid="stExpander"]:nth-of-type(2) summary {
     background: #EEF4FF !important;
 }
 
 /* ---- BOTTONI NAVIGAZIONE SIDEBAR ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button {
+.st-key-sidebar .stButton > button {
     background: #FFFFFF !important;
     border: 1px solid #C8D5E3 !important;
     border-left: 3px solid transparent !important;
@@ -172,21 +166,21 @@ _CSS = """
     box-shadow: 0 1px 3px rgba(0,48,135,0.04) !important;
     cursor: pointer !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:hover {
+.st-key-sidebar .stButton > button:hover {
     border-left-color: #003087 !important;
     background: #F8FAFF !important;
     box-shadow: 0 2px 8px rgba(0,48,135,0.10) !important;
     transform: translateX(2px) !important;
     color: #003087 !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:active {
+.st-key-sidebar .stButton > button:active {
     transform: translateX(2px) scale(0.98) !important;
     box-shadow: 0 1px 4px rgba(0,48,135,0.08) !important;
     background: #EEF4FF !important;
 }
 
 /* ---- ICONE MATERIAL SIDEBAR ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button [data-testid="stIconMaterial"] {
+.st-key-sidebar .stButton > button [data-testid="stIconMaterial"] {
     font-size: 1.1rem !important;
     line-height: 1 !important;
     display: inline-flex !important;
@@ -198,12 +192,12 @@ _CSS = """
     color: #003087 !important;
     transition: color 0.2s !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child .stButton > button:hover [data-testid="stIconMaterial"] {
+.st-key-sidebar .stButton > button:hover [data-testid="stIconMaterial"] {
     color: #1351A8 !important;
 }
 
 /* ---- LOGOUT BUTTON ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child > [data-testid="stVerticalBlock"] > div:last-child .stButton > button {
+.st-key-sidebar > [data-testid="stVerticalBlock"] > div:last-child .stButton > button {
     background: transparent !important;
     border: 1px solid #C8D5E3 !important;
     border-left: 3px solid transparent !important;
@@ -212,7 +206,7 @@ _CSS = """
     font-size: 0.82rem !important;
     margin-top: 8px !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child > [data-testid="stVerticalBlock"] > div:last-child .stButton > button:hover {
+.st-key-sidebar > [data-testid="stVerticalBlock"] > div:last-child .stButton > button:hover {
     border-left-color: #C8102E !important;
     color: #C8102E !important;
     background: #FDE8EA !important;
@@ -220,10 +214,10 @@ _CSS = """
 }
 
 /* ---- FIX CONTAINER ORIZZONTALE SIDEBAR ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stHorizontalBlock"] {
+.st-key-sidebar [data-testid="stHorizontalBlock"] {
     gap: 4px !important;
 }
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stHorizontalBlock"] .stButton > button {
+.st-key-sidebar [data-testid="stHorizontalBlock"] .stButton > button {
     font-size: 0.78rem !important;
     padding: 8px 8px !important;
 }
@@ -448,31 +442,6 @@ _CSS = """
 }
 .element-container:has(.card-click) + .element-container [data-testid="stColumn"]:last-child button:hover {
     color: #C8102E !important;
-}
-
-/* ---- BOTTONI AZIONE COLONNA CENTRALE ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button {
-    background: transparent !important;
-    border: 1.5px solid #C8D5E3 !important;
-    border-radius: 10px !important;
-    color: #003087 !important;
-    font-family: 'Source Sans 3', sans-serif !important;
-    font-weight: 600 !important;
-    font-size: 0.88rem !important;
-    padding: 10px 18px !important;
-    transition: all 0.2s ease !important;
-    box-shadow: none !important;
-    cursor: pointer !important;
-}
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button:hover {
-    background: #EEF4FF !important;
-    border-color: #003087 !important;
-    color: #001A4D !important;
-    box-shadow: 0 2px 8px rgba(0,48,135,0.10) !important;
-}
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:nth-child(2) .stButton > button:active {
-    background: #DDE6F8 !important;
-    transform: scale(0.98) !important;
 }
 
 /* ---- SEZIONE CENTRALE — CONTENUTO ---- */
@@ -3029,6 +2998,7 @@ def mostra_homepage_studente():
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
+      with st.container(key="sidebar"):
         # Pulsante Home — riporta alla schermata principale
         if st.button(":material/home: Home", use_container_width=True, key="btn_home_sidebar"):
             st.session_state["_view_mode"] = None
@@ -3153,26 +3123,22 @@ def mostra_homepage_studente():
             """, unsafe_allow_html=True)
 
             if corso_sel_id:
-                col_back, col_del_piano, col_mat_piano, _ = st.columns([1, 1, 1.5, 2.5])
-                with col_back:
-                    if st.button("← Corso"):
-                        st.session_state["_view_mode"] = "corso"
-                        st.session_state["_piano_sel"] = None
-                        st.rerun()
-                with col_del_piano:
-                    if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
-                        _dialog_elimina_piano(piano_sel_id, titolo_piano)
-                with col_mat_piano:
-                    if st.button("📚 Materiale del corso", key="btn_mat_piano"):
+                if st.button("← Torna al corso", key="btn_back_corso"):
+                    st.session_state["_view_mode"] = "corso"
+                    st.session_state["_piano_sel"] = None
+                    st.rerun()
+
+            col_mat_piano, col_del_piano = st.columns(2)
+            with col_mat_piano:
+                if corso_sel_id:
+                    if st.button("📚 Materiale del corso", key="btn_mat_piano", use_container_width=True):
                         _dialog_materiale_corso(corso_sel_id, corso_sel_nome)
-            else:
-                col_del_piano, col_mat_piano, _ = st.columns([1, 1.5, 3.5])
-                with col_del_piano:
-                    if st.button("🗑 Elimina piano", key="btn_del_piano_cx"):
-                        _dialog_elimina_piano(piano_sel_id, titolo_piano)
-                with col_mat_piano:
-                    if st.button("📚 Materiale del piano", key="btn_mat_piano_libero"):
+                else:
+                    if st.button("📚 Materiale del piano", key="btn_mat_piano_libero", use_container_width=True):
                         _dialog_materiale_piano_libero(piano_sel_id)
+            with col_del_piano:
+                if st.button("🗑 Elimina piano", key="btn_del_piano_cx", use_container_width=True):
+                    _dialog_elimina_piano(piano_sel_id, titolo_piano)
 
 
             with st.container(border=False, key="piano_scroll"):
