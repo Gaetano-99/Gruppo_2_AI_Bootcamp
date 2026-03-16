@@ -97,35 +97,6 @@ _CSS = """
     padding: 12px 8px;
 }
 
-/* ---- EXPANDER SIDEBAR (corsi e piani) ---- */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] {
-    border: none !important;
-    border-radius: 10px !important;
-    margin-bottom: 10px !important;
-    overflow: hidden;
-}
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"] summary {
-    font-weight: 600 !important;
-    color: #001A4D !important;
-    font-size: 0.92rem !important;
-    padding: 10px 14px !important;
-    border-radius: 10px !important;
-}
-/* Corsi — primo expander: bianco */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(1) {
-    background: #FFFFFF !important;
-}
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(1) summary {
-    background: #FFFFFF !important;
-}
-/* Piani — secondo expander: azzurro chiaro */
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(2) {
-    background: #EEF4FF !important;
-}
-[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stExpander"]:nth-of-type(2) summary {
-    background: #EEF4FF !important;
-}
-
 /* ---- HEADER (position:fixed, coerente col footer) ---- */
 .app-header {
     position: fixed;
@@ -906,81 +877,6 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 .app-footer .footer-links a:hover {
     color: #fff;
 }
-
-/* ---- SLIDESHOW RACCOMANDAZIONI ---- */
-.slideshow-wrapper {
-    position: relative;
-    overflow: hidden;
-    margin: 18px 0 10px;
-}
-.slideshow-track {
-    display: flex;
-    gap: 16px;
-    transition: transform 0.45s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: transform;
-}
-.slideshow-track .slide-card {
-    min-width: 280px;
-    max-width: 320px;
-    flex-shrink: 0;
-    background: #fff;
-    border-radius: 10px;
-    padding: 14px 16px;
-    border-left: 4px solid #C5A028;
-    box-shadow: 0 2px 8px rgba(0,48,135,0.07);
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-}
-.slideshow-track .slide-card h5 {
-    color: #001A4D;
-    font-weight: 600;
-    font-size: 0.88rem;
-    margin: 0 0 4px 0;
-}
-.slideshow-track .slide-card p {
-    color: #5A6A7E;
-    font-size: 0.8rem;
-    margin: 0;
-    line-height: 1.5;
-    flex: 1;
-}
-.slideshow-nav {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 10px;
-}
-.slideshow-nav button {
-    background: #003087;
-    color: #fff;
-    border: none;
-    border-radius: 50%;
-    width: 30px; height: 30px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s, opacity 0.15s;
-}
-.slideshow-nav button:hover { background: #001A4D; }
-.slideshow-nav button:disabled { opacity: 0.3; cursor: default; }
-.slideshow-dots {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-}
-.slideshow-dots .dot-indicator {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #C8D5E3;
-    transition: background 0.2s;
-}
-.slideshow-dots .dot-indicator.active {
-    background: #003087;
-}
 </style>
 """
 
@@ -1207,7 +1103,7 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
     """Renderizza la lista corsi nella colonna sinistra (sola lettura per lo studente)."""
     with st.expander(
         "I tuoi corsi",
-        expanded=False,
+        expanded=True,
     ):
 
         if not corsi:
@@ -1251,7 +1147,7 @@ def _render_sidebar_piani(studente_id: int):
     piani = _get_tutti_piani_studente(studente_id)
     with st.expander(
         "I tuoi piani personalizzati",
-        expanded=False,
+        expanded=True,
     ):
 
         if not piani:
@@ -1269,14 +1165,19 @@ def _render_sidebar_piani(studente_id: int):
 
             marker = "card-click card-piano-active" if attivo else "card-click card-piano"
             st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
-            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
-            if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
-                st.session_state["_piano_sel"]  = pid
-                st.session_state["_view_mode"]  = "piano"
-                st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
-                st.session_state["_corso_nome"] = piano.get("corso_nome", "")
-                st.session_state["_chat_history"] = []
-                st.rerun()
+            col_card, col_del = st.columns([6, 1])
+            with col_card:
+                card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
+                if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
+                    st.session_state["_piano_sel"]  = pid
+                    st.session_state["_view_mode"]  = "piano"
+                    st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
+                    st.session_state["_corso_nome"] = piano.get("corso_nome", "")
+                    st.session_state["_chat_history"] = []
+                    st.rerun()
+            with col_del:
+                if st.button("🗑", key=f"btn_del_piano_{pid}", use_container_width=True, help="Elimina piano"):
+                    _dialog_elimina_piano(pid, piano["titolo"] or "Piano")
 
 
 
@@ -1794,196 +1695,6 @@ def _render_raccomandazioni_orizzontale(studente_id: int):
             </div>
             """, unsafe_allow_html=True)
             if st.button("Iscriviti", key=f"racc_iscriviti_{r.corso_id}", type="primary", use_container_width=True):
-                try:
-                    db.inserisci("studenti_corsi", {
-                        "studente_id": studente_id,
-                        "corso_universitario_id": r.corso_id,
-                        "anno_accademico": _anno_accademico_corrente(),
-                        "stato": "iscritto",
-                    })
-                    st.session_state["_iscrizione_feedback"] = r.corso_nome
-                except Exception:
-                    st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
-                st.rerun()
-
-
-def _render_raccomandazioni_slideshow(studente_id: int):
-    """Renderizza le raccomandazioni come slideshow/carousel nella colonna centrale."""
-    raccomanda_corsi = _import_recommender()
-
-    # Feedback iscrizione da raccomandazione
-    corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
-    if corso_appena_iscritto:
-        st.success(f"Iscrizione a **{corso_appena_iscritto}** completata!")
-
-    def _fallback(msg: str):
-        st.markdown(
-            f'<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">{msg}</p>',
-            unsafe_allow_html=True,
-        )
-
-    if raccomanda_corsi is None:
-        _fallback("Raccomandazioni non disponibili.")
-        return
-
-    try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
-    except Exception:
-        raccomandazioni = []
-
-    if not raccomandazioni:
-        candidati = db.esegui("""
-            SELECT COUNT(*) as n FROM corsi_universitari cu
-            WHERE cu.attivo = 1
-              AND cu.id NOT IN (
-                  SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?
-              )
-        """, [studente_id])
-        if candidati and candidati[0]["n"] == 0:
-            _fallback("Sei già iscritto a tutti i corsi disponibili.")
-        else:
-            _fallback("Nessuna raccomandazione disponibile al momento.")
-        return
-
-    # Build slide cards HTML
-    slides_html = ""
-    for r in raccomandazioni:
-        score_pct = int(r.score_totale * 100)
-        tags_html = " ".join(
-            f'<span style="background:#E8F0FE;color:#003087;font-size:0.65rem;'
-            f'padding:2px 6px;border-radius:10px;margin-right:4px;">{t}</span>'
-            for t in (r.tag or [])
-        )
-        motivazione = (r.motivazione or "")[:100]
-        ellipsis = "…" if len(r.motivazione or "") > 100 else ""
-        slides_html += f"""
-        <div class="slide-card" data-corso-id="{r.corso_id}">
-            <h5>{r.corso_nome}</h5>
-            <div style="margin:4px 0">{tags_html}</div>
-            <p>{motivazione}{ellipsis}</p>
-            <div class="score-bar-outer">
-                <div class="score-bar-inner" style="width:{score_pct}%"></div>
-            </div>
-        </div>"""
-
-    n = len(raccomandazioni)
-    dots_html = "".join(
-        f'<span class="dot-indicator{"" if i > 0 else " active"}" data-idx="{i}"></span>'
-        for i in range(n)
-    )
-
-    uid = f"slideshow_{studente_id}"
-
-    st.markdown(
-        '<div class="divider-label">Consigliati per te'
-        '<span class="tooltip-wrap">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">Corsi suggeriti dall\'AI in base al tuo percorso di laurea '
-        'e ai tuoi interessi. Clicca <strong>Iscriviti</strong> per aggiungerli ai tuoi corsi.</span>'
-        '</span></div>',
-        unsafe_allow_html=True,
-    )
-
-    components.html(f"""
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600&display=swap');
-    * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: 'Source Sans 3', sans-serif; }}
-    .slideshow-wrapper {{ position: relative; overflow: hidden; }}
-    .slideshow-track {{
-        display: flex; gap: 16px;
-        transition: transform 0.45s cubic-bezier(0.4,0,0.2,1);
-    }}
-    .slide-card {{
-        min-width: 260px; max-width: 300px; flex-shrink: 0;
-        background: #fff; border-radius: 10px; padding: 14px 16px;
-        border-left: 4px solid #C5A028;
-        box-shadow: 0 2px 8px rgba(0,48,135,0.07);
-        display: flex; flex-direction: column; justify-content: space-between;
-    }}
-    .slide-card h5 {{ color: #001A4D; font-weight: 600; font-size: 0.88rem; margin: 0 0 4px 0; }}
-    .slide-card p {{ color: #5A6A7E; font-size: 0.8rem; margin: 0; line-height: 1.5; flex: 1; }}
-    .score-bar-outer {{ height: 4px; background: #E8EEF6; border-radius: 4px; margin-top: 8px; }}
-    .score-bar-inner {{ height: 4px; border-radius: 4px; background: linear-gradient(90deg, #003087, #C5A028); }}
-    .slideshow-nav {{
-        display: flex; align-items: center; justify-content: space-between; margin-top: 10px;
-    }}
-    .slideshow-nav button {{
-        background: #003087; color: #fff; border: none; border-radius: 50%;
-        width: 30px; height: 30px; cursor: pointer; font-size: 0.85rem;
-        display: inline-flex; align-items: center; justify-content: center;
-        transition: background 0.15s, opacity 0.15s;
-    }}
-    .slideshow-nav button:hover {{ background: #001A4D; }}
-    .slideshow-nav button:disabled {{ opacity: 0.3; cursor: default; }}
-    .slideshow-dots {{ display: flex; gap: 6px; align-items: center; }}
-    .dot-indicator {{
-        width: 8px; height: 8px; border-radius: 50%; background: #C8D5E3;
-        transition: background 0.2s;
-    }}
-    .dot-indicator.active {{ background: #003087; }}
-    .btn-iscriviti {{
-        display: block; width: 100%; margin-top: 10px; padding: 8px 0;
-        background: #003087; color: #fff; border: none; border-radius: 8px;
-        font-size: 0.82rem; font-weight: 600; cursor: pointer;
-        transition: background 0.15s;
-    }}
-    .btn-iscriviti:hover {{ background: #001A4D; }}
-    </style>
-    <div class="slideshow-wrapper" id="{uid}">
-        <div class="slideshow-track" id="{uid}_track">
-            {slides_html}
-        </div>
-        <div class="slideshow-nav">
-            <button id="{uid}_prev" onclick="slide_{uid}(-1)">&#8249;</button>
-            <div class="slideshow-dots" id="{uid}_dots">{dots_html}</div>
-            <button id="{uid}_next" onclick="slide_{uid}(1)">&#8250;</button>
-        </div>
-    </div>
-    <script>
-    (function() {{
-        var current = 0;
-        var total = {n};
-        var track = document.getElementById("{uid}_track");
-        var dots = document.querySelectorAll("#{uid}_dots .dot-indicator");
-        var prevBtn = document.getElementById("{uid}_prev");
-        var nextBtn = document.getElementById("{uid}_next");
-
-        // Auto-scroll interval
-        var autoInterval = setInterval(function() {{ slide_{uid}(1); }}, 4000);
-
-        function updateSlide() {{
-            var card = track.children[0];
-            var style = window.getComputedStyle(card);
-            var cardWidth = card.offsetWidth + parseInt(style.marginRight || 0) + 16;
-            track.style.transform = "translateX(-" + (current * cardWidth) + "px)";
-            dots.forEach(function(d, i) {{
-                d.classList.toggle("active", i === current);
-            }});
-            prevBtn.disabled = (current === 0);
-            nextBtn.disabled = (current === total - 1);
-        }}
-
-        window.slide_{uid} = function(dir) {{
-            clearInterval(autoInterval);
-            current += dir;
-            if (current < 0) current = 0;
-            if (current >= total) current = total - 1;
-            updateSlide();
-            autoInterval = setInterval(function() {{
-                if (current < total - 1) {{ current++; updateSlide(); }}
-                else {{ clearInterval(autoInterval); }}
-            }}, 4000);
-        }};
-        updateSlide();
-    }})();
-    </script>
-    """, height=230, scrolling=False)
-
-    # Render Streamlit buttons for iscrizione (outside the HTML component)
-    btn_cols = st.columns(len(raccomandazioni))
-    for i, r in enumerate(raccomandazioni):
-        with btn_cols[i]:
-            if st.button("Iscriviti", key=f"racc_slide_{r.corso_id}", type="primary", use_container_width=True):
                 try:
                     db.inserisci("studenti_corsi", {
                         "studente_id": studente_id,
@@ -2926,9 +2637,6 @@ def mostra_homepage_studente():
             </div>
             """, unsafe_allow_html=True)
 
-            # Slideshow raccomandazioni corsi AI
-            _render_raccomandazioni_slideshow(studente_id)
-
         elif view_mode == "corso" and corso_sel_id:
             # ── VISTA CORSO — sola lettura ─────────────────────────────────
             st.markdown(f"""
@@ -3006,6 +2714,12 @@ def mostra_homepage_studente():
             piano_id=piano_sel_id if view_mode == "piano" else None,
             piano_titolo=piano_titolo_chat,
         )
+
+    # -------------------------------------------------------------------------
+    # RACCOMANDAZIONI — full-width, solo nella home
+    # -------------------------------------------------------------------------
+    if not view_mode:
+        _render_raccomandazioni_orizzontale(studente_id)
 
     # Footer istituzionale fisso in basso
     _render_footer()
