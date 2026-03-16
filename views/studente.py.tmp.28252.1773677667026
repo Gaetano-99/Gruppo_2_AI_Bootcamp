@@ -13,6 +13,7 @@
 #   src.services.recommender    → raccomandazioni corsi
 # ============================================================================
 
+import base64
 import json
 import re
 import sys
@@ -29,6 +30,17 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+
+
+def _get_logo_base64() -> str:
+    """Carica il logo Federico e lo restituisce come stringa base64 per uso in HTML."""
+    logo_path = os.path.join(_ROOT, "static", "views", "logo", "LOGO_FEDERICO.png")
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
 
 # Import lazy degli agenti AI (solo se necessario, evita errori se AWS non configurato)
 def _import_orchestratore():
@@ -75,43 +87,15 @@ _CSS = """
     background: #F0F4F8 !important;
     font-family: 'Source Sans 3', sans-serif !important;
 }
-#MainMenu, footer { visibility: hidden; }
-.block-container { padding-top: 0 !important; padding-bottom: 0 !important; }
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 80px !important; padding-bottom: 70px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
-/* ---- TOPBAR ---- */
-.topbar {
-    background: linear-gradient(135deg, #001A4D 0%, #003087 60%, #1351A8 100%);
-    border-bottom: 3px solid #C5A028;
-    padding: 14px 32px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin: -1rem -1rem 24px -1rem;
-}
-.topbar-brand {
-    font-family: 'Playfair Display', serif;
-    color: #fff;
-    font-size: 1.25rem;
-    font-weight: 700;
-}
-.topbar-brand span { color: #C5A028; }
-.topbar-user {
-    color: rgba(255,255,255,0.85);
-    font-size: 0.88rem;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-.topbar-avatar {
-    width: 34px; height: 34px;
-    border-radius: 50%;
-    background: #C5A028;
-    color: #001A4D;
-    font-weight: 700;
-    font-size: 0.85rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
+
+/* ---- COLONNA SINISTRA ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+    background: #E2E8F0;
+    border-radius: 12px;
+    padding: 12px 8px;
 }
 
 /* ---- SIDEBAR CORSI ---- */
@@ -456,6 +440,10 @@ div[data-testid="stVerticalBlock"] {
     border-left: 4px solid #C5A028;
     box-shadow: 0 2px 8px rgba(0,48,135,0.07);
     margin-bottom: 10px;
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
 }
 .raccomandazione-card h5 {
     color: #001A4D;
@@ -468,6 +456,7 @@ div[data-testid="stVerticalBlock"] {
     font-size: 0.8rem;
     margin: 0;
     line-height: 1.5;
+    flex: 1;
 }
 .score-bar-outer {
     height: 4px;
@@ -532,6 +521,47 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     flex: 1;
     height: 1px;
     background: #C8D5E3;
+}
+
+/* ---- SIDEBAR DROPDOWN TOGGLE ---- */
+/* Hide the marker div */
+.dropdown-toggle-marker { display: none; }
+.element-container:has(.dropdown-toggle-marker) {
+    margin: 0 !important; padding: 0 !important;
+    height: 0 !important; overflow: hidden !important;
+}
+/* Style the button immediately after the marker as a dropdown header */
+.element-container:has(.dropdown-toggle-marker) + .element-container button {
+    background: transparent !important;
+    border: none !important;
+    border-bottom: 1px solid #C8D5E3 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    color: #5A6A7E !important;
+    font-size: 0.78rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    text-align: left !important;
+    padding: 10px 10px 8px !important;
+    margin-top: 12px !important;
+    transition: background 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease !important;
+}
+.element-container:has(.dropdown-toggle-marker) + .element-container button:hover {
+    background: #E8F0FE !important;
+    color: #003087 !important;
+    border-bottom-color: #003087 !important;
+    box-shadow: 0 2px 8px rgba(0,48,135,0.08) !important;
+    border-radius: 8px 8px 0 0 !important;
+}
+.element-container:has(.dropdown-toggle-marker) + .element-container button:active {
+    background: #D4E4FC !important;
+    transform: scale(0.99);
+}
+/* When dropdown is open, show an accent underline */
+.element-container:has(.dropdown-toggle-marker.open) + .element-container button {
+    color: #003087 !important;
+    border-bottom-color: #003087 !important;
 }
 
 /* ---- TOOLTIP ---- */
@@ -614,33 +644,92 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     border-top-color: transparent;
 }
 
-/* ---- TOPBAR LOGOUT BG (col_esci a sinistra) ---- */
-.topbar-logout-bg {
-    background: linear-gradient(135deg, #001A4D 0%, #003087 100%);
+/* ---- HEADER (position:fixed — stesso pattern del footer) ---- */
+.app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #001A4D 0%, #003087 55%, #1351A8 100%);
+    padding: 14px 40px;
+    display: flex;
+    align-items: center;
+    gap: 18px;
     border-bottom: 3px solid #C5A028;
-    height: 66px;
-    margin: -1rem 0 0 -1rem;
+    z-index: 9999;
+    font-family: 'Source Sans 3', sans-serif;
 }
-/* Bottone Esci: primo stHorizontalBlock → prima column */
-[data-testid="stHorizontalBlock"]:first-of-type
-    [data-testid="column"]:first-child
-    .stButton > button {
-    background: transparent !important;
-    border: 1.5px solid rgba(255,255,255,0.55) !important;
-    color: #C5A028 !important;
-    font-weight: 700 !important;
-    font-size: 0.80rem !important;
-    border-radius: 6px !important;
-    margin-top: -52px !important;
-    position: relative !important;
-    z-index: 200 !important;
+.app-header .header-logo {
+    color: #fff;
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.1;
 }
-[data-testid="stHorizontalBlock"]:first-of-type
-    [data-testid="column"]:first-child
-    .stButton > button:hover {
-    background: rgba(197,160,40,0.18) !important;
-    border-color: #C5A028 !important;
+.app-header .header-logo span { color: #C5A028; }
+.app-header .header-sub {
+    color: rgba(255,255,255,0.7);
+    font-size: 0.75rem;
+    font-weight: 300;
+    letter-spacing: 0.5px;
+    margin-top: 2px;
 }
+.app-header .header-badge {
+    background: #C5A028;
+    color: #001A4D;
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+.app-header .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.app-header .header-user-name {
+    color: rgba(255,255,255,0.85);
+    font-size: 0.88rem;
+}
+.app-header .header-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: #C5A028;
+    color: #001A4D;
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ---- FOOTER ---- */
+.app-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: #1e293b;
+    padding: 14px 40px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Source Sans 3', sans-serif;
+    font-size: 0.78rem;
+    color: rgba(255,255,255,0.6);
+    z-index: 9999;
+}
+.app-footer a {
+    color: rgba(255,255,255,0.6);
+    text-decoration: none;
+    margin-left: 28px;
+    transition: color 0.2s;
+}
+.app-footer a:hover { color: #fff; }
+.app-footer .copy-text span { color: #C8102E; font-weight: 700; }
 
 /* ---- NAV TOC ---- */
 .nav-toc {
@@ -812,6 +901,36 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 }
 .qa-toggle:checked ~ .qa-answer { display: block; }
 .qa-toggle:checked ~ .qa-reveal-btn { display: none; }
+
+/* ---- CAROUSEL RACCOMANDAZIONI (slideshow orizzontale) ---- */
+.racc-card-marker { display: none; }
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker) {
+    overflow-x: auto !important;
+    flex-wrap: nowrap !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 16px !important;
+    padding: 4px 4px 14px !important;
+    scrollbar-width: thin;
+    scrollbar-color: #003087 #E8EEF6;
+}
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker)::-webkit-scrollbar {
+    height: 6px;
+}
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker)::-webkit-scrollbar-track {
+    background: #E8EEF6;
+    border-radius: 3px;
+}
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker)::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, #003087, #C5A028);
+    border-radius: 3px;
+}
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker) > div[data-testid="column"],
+[data-testid="stHorizontalBlock"]:has(.racc-card-marker) > div[data-testid="stColumn"] {
+    min-width: 280px !important;
+    flex: 0 0 280px !important;
+    scroll-snap-align: start;
+}
 </style>
 """
 
@@ -986,47 +1105,67 @@ def _get_struttura_piano(piano_id: int) -> list[dict]:
 # Componenti UI riutilizzabili
 # ---------------------------------------------------------------------------
 
-def _render_topbar(utente: dict) -> bool:
-    """Renderizza la topbar istituzionale con logout integrato.
-    Ritorna True se il logout è stato richiesto.
-    Struttura: [col_esci | col_brand] — bottone a sinistra, brand a destra."""
+def _render_header(utente: dict):
+    """Renderizza l'header istituzionale fisso in alto (position:fixed, come il footer).
+    Puro HTML — nessun widget Streamlit dentro."""
     iniziali = f"{utente['nome'][0]}{utente['cognome'][0]}".upper()
+    nome_safe = _esc(utente['nome'])
+    cognome_safe = _esc(utente['cognome'])
 
-    # col_esci PRIMA (sinistra) così non viene coperto dal topbar HTML
-    col_esci, col_brand = st.columns([1, 10])
-
-    logout_richiesto = False
-    with col_esci:
-        # Sfondo identico alla topbar per continuità visiva
-        st.markdown("""
-        <div class="topbar-logout-bg"></div>
-        """, unsafe_allow_html=True)
-        logout_richiesto = st.button("Esci", key="logout_btn", use_container_width=True)
-
-    with col_brand:
-        nome_safe = _esc(utente['nome'])
-        cognome_safe = _esc(utente['cognome'])
-        st.markdown(f"""
-        <div class="topbar">
-            <div class="topbar-brand">Learn<span>AI</span> &nbsp;·&nbsp;
-                <span style="font-size:0.82rem; font-weight:300; color:rgba(255,255,255,0.7)">
-                    Università Federico II di Napoli
-                </span>
-            </div>
-            <div class="topbar-user">
-                <span>{nome_safe} {cognome_safe}</span>
-                <div class="topbar-avatar">{iniziali}</div>
-            </div>
+    st.markdown(f"""
+    <div class="app-header">
+        <div>
+            <div class="header-logo">🎓 Learn<span>AI</span></div>
+            <div class="header-sub">Universit&agrave; degli Studi di Napoli Federico II</div>
         </div>
-        """, unsafe_allow_html=True)
+        <span class="header-badge">AI Platform</span>
+        <div class="header-right">
+            <span class="header-user-name">{nome_safe} {cognome_safe}</span>
+            <div class="header-avatar">{iniziali}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    return logout_richiesto
+
+def _render_footer():
+    """Renderizza il footer istituzionale fisso in basso (coerente con login.py)."""
+    st.markdown("""
+    <div class="app-footer">
+        <div class="copy-text">&copy; 2026 <span>Federico</span>360 &mdash; Universit&agrave; degli Studi di Napoli Federico II</div>
+        <div>
+            <a href="#">Aiuto</a>
+            <a href="#">Termini e Condizioni</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Accessibilit&agrave;</a>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
-    """Renderizza la lista corsi nella colonna sinistra (sola lettura per lo studente)."""
+    """Renderizza la lista corsi nella colonna sinistra con dropdown animato."""
+    # Inizializza stato dropdown (aperto di default)
+    if "_dropdown_corsi_open" not in st.session_state:
+        st.session_state["_dropdown_corsi_open"] = True
+
+    is_open = st.session_state["_dropdown_corsi_open"]
+    arrow = "▾" if is_open else "▸"
+    open_cls = "open" if is_open else ""
+    count_label = f" ({len(corsi)})" if corsi else ""
+
+    # Marker per styling CSS del bottone toggle
+    st.markdown(f'<div class="dropdown-toggle-marker {open_cls}"></div>', unsafe_allow_html=True)
+    if st.button(
+        f"{arrow}  I TUOI CORSI{count_label}",
+        key="_toggle_corsi",
+        use_container_width=True,
+    ):
+        st.session_state["_dropdown_corsi_open"] = not is_open
+        st.rerun()
+
+    # Tooltip informativo
     st.markdown(
-        '<div class="divider-label">I tuoi corsi'
+        '<div style="margin:-8px 0 6px 10px;">'
         '<span class="tooltip-wrap">'
         '<span class="tooltip-icon">?</span>'
         '<span class="tooltip-box">I corsi sono creati e gestiti dai <strong>docenti</strong> '
@@ -1036,6 +1175,9 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
         '</span></div>',
         unsafe_allow_html=True,
     )
+
+    if not is_open:
+        return
 
     if not corsi:
         st.caption("Nessun corso trovato.")
@@ -1062,10 +1204,10 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
         meta_parts.append(stato.capitalize())
         meta_line = " · ".join(meta_parts)
 
+        marker = "card-click card-corso-active" if attivo else "card-click card-corso"
+        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
         col_card, col_del = st.columns([6, 1])
         with col_card:
-            marker = "card-click-corso-active" if attivo else "card-click-corso"
-            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
             if st.button(f"{corso['nome']}\n{meta_line}", key=f"btn_corso_{cid}", use_container_width=True):
                 st.session_state["_corso_sel"]  = cid
                 st.session_state["_corso_nome"] = corso["nome"]
@@ -1079,10 +1221,31 @@ def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
 
 
 def _render_sidebar_piani(studente_id: int):
-    """Renderizza la sezione 'I Tuoi Piani Personalizzati' nella colonna sinistra."""
+    """Renderizza la sezione 'I Tuoi Piani Personalizzati' con dropdown animato."""
     piani = _get_tutti_piani_studente(studente_id)
+
+    # Inizializza stato dropdown (aperto di default)
+    if "_dropdown_piani_open" not in st.session_state:
+        st.session_state["_dropdown_piani_open"] = True
+
+    is_open = st.session_state["_dropdown_piani_open"]
+    arrow = "▾" if is_open else "▸"
+    open_cls = "open" if is_open else ""
+    count_label = f" ({len(piani)})" if piani else ""
+
+    # Marker per styling CSS del bottone toggle
+    st.markdown(f'<div class="dropdown-toggle-marker {open_cls}"></div>', unsafe_allow_html=True)
+    if st.button(
+        f"{arrow}  I TUOI PIANI PERSONALIZZATI{count_label}",
+        key="_toggle_piani",
+        use_container_width=True,
+    ):
+        st.session_state["_dropdown_piani_open"] = not is_open
+        st.rerun()
+
+    # Tooltip informativo
     st.markdown(
-        '<div class="divider-label">I tuoi piani personalizzati'
+        '<div style="margin:-8px 0 6px 10px;">'
         '<span class="tooltip-wrap">'
         '<span class="tooltip-icon">?</span>'
         '<span class="tooltip-box">I piani sono <strong>generati da Lea</strong>, la tua tutor AI. '
@@ -1093,6 +1256,9 @@ def _render_sidebar_piani(studente_id: int):
         '</span></div>',
         unsafe_allow_html=True,
     )
+
+    if not is_open:
+        return
 
     if not piani:
         st.markdown(
@@ -1110,13 +1276,12 @@ def _render_sidebar_piani(studente_id: int):
         )
         corso_nome_breve = (piano.get("corso_nome") or "")[:22]
         titolo_breve = (piano["titolo"] or "")[:42]
-        meta_line = f"AI · {corso_nome_breve} · {piano.get('created_at', '')[:10]}"
 
+        marker = "card-click card-piano-active" if attivo else "card-click card-piano"
+        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
         col_card, col_del = st.columns([6, 1])
         with col_card:
-            marker = "card-click-piano-active" if attivo else "card-click-piano"
-            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
-            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}\n{meta_line}"
+            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
             if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
                 st.session_state["_piano_sel"]  = pid
                 st.session_state["_view_mode"]  = "piano"
@@ -1576,6 +1741,168 @@ def _render_raccomandazioni(studente_id: int):
             st.rerun()
 
 
+def _render_raccomandazioni_orizzontale(studente_id: int):
+    """Renderizza le raccomandazioni corsi in layout orizzontale (home)."""
+    raccomanda_corsi = _import_recommender()
+    st.markdown(
+        '<div class="divider-label">Consigliati per te'
+        '<span class="tooltip-wrap">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">Corsi suggeriti dall\'AI in base al tuo percorso di laurea '
+        'e ai tuoi interessi. Clicca <strong>Iscriviti</strong> per aggiungerli ai tuoi corsi.</span>'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Feedback iscrizione da raccomandazione
+    corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
+    if corso_appena_iscritto:
+        st.success(f"Iscrizione a **{corso_appena_iscritto}** completata!")
+
+    def _fallback(msg: str):
+        st.markdown(
+            f'<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">{msg}</p>',
+            unsafe_allow_html=True,
+        )
+
+    if raccomanda_corsi is None:
+        _fallback("Raccomandazioni non disponibili.")
+        return
+
+    try:
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+    except Exception:
+        raccomandazioni = []
+
+    if not raccomandazioni:
+        candidati = db.esegui("""
+            SELECT COUNT(*) as n FROM corsi_universitari cu
+            WHERE cu.attivo = 1
+              AND cu.id NOT IN (
+                  SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?
+              )
+        """, [studente_id])
+        if candidati and candidati[0]["n"] == 0:
+            _fallback("Sei già iscritto a tutti i corsi disponibili. Nuovi corsi verranno aggiunti presto! 🎓")
+        else:
+            _fallback("Nessuna raccomandazione disponibile al momento.")
+        return
+
+    cols = st.columns(len(raccomandazioni))
+    for i, r in enumerate(raccomandazioni):
+        with cols[i]:
+            score_pct = int(r.score_totale * 100)
+            tags_html = " ".join(
+                f'<span style="background:#E8F0FE;color:#003087;font-size:0.65rem;'
+                f'padding:2px 6px;border-radius:10px;margin-right:4px;">{t}</span>'
+                for t in (r.tag or [])
+            )
+            motivazione = (r.motivazione or "")[:100]
+            st.markdown(f"""
+            <div class="raccomandazione-card">
+                <h5>{r.corso_nome}</h5>
+                <div style="margin:4px 0">{tags_html}</div>
+                <p>{motivazione}{'…' if len(r.motivazione or '') > 100 else ''}</p>
+                <div class="score-bar-outer">
+                    <div class="score-bar-inner" style="width:{score_pct}%"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Iscriviti", key=f"racc_iscriviti_{r.corso_id}", type="primary", use_container_width=True):
+                try:
+                    db.inserisci("studenti_corsi", {
+                        "studente_id": studente_id,
+                        "corso_universitario_id": r.corso_id,
+                        "anno_accademico": _anno_accademico_corrente(),
+                        "stato": "iscritto",
+                    })
+                    st.session_state["_iscrizione_feedback"] = r.corso_nome
+                except Exception:
+                    st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
+                st.rerun()
+
+
+def _render_raccomandazioni_carousel(studente_id: int):
+    """Renderizza le raccomandazioni come slideshow orizzontale scrollabile nella colonna centrale."""
+    raccomanda_corsi = _import_recommender()
+    st.markdown(
+        '<div class="divider-label">Consigliati per te'
+        '<span class="tooltip-wrap">'
+        '<span class="tooltip-icon">?</span>'
+        '<span class="tooltip-box">Corsi suggeriti dall\'AI in base al tuo percorso di laurea '
+        'e ai tuoi interessi. Clicca <strong>Iscriviti</strong> per aggiungerli ai tuoi corsi.</span>'
+        '</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    corso_appena_iscritto = st.session_state.pop("_iscrizione_feedback", None)
+    if corso_appena_iscritto:
+        st.success(f"Iscrizione a **{corso_appena_iscritto}** completata!")
+
+    def _fallback(msg: str):
+        st.markdown(
+            f'<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">{msg}</p>',
+            unsafe_allow_html=True,
+        )
+
+    if raccomanda_corsi is None:
+        _fallback("Raccomandazioni non disponibili.")
+        return
+
+    try:
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+    except Exception:
+        raccomandazioni = []
+
+    if not raccomandazioni:
+        candidati = db.esegui("""
+            SELECT COUNT(*) as n FROM corsi_universitari cu
+            WHERE cu.attivo = 1
+              AND cu.id NOT IN (
+                  SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?
+              )
+        """, [studente_id])
+        if candidati and candidati[0]["n"] == 0:
+            _fallback("Sei già iscritto a tutti i corsi disponibili. Nuovi corsi verranno aggiunti presto! 🎓")
+        else:
+            _fallback("Nessuna raccomandazione disponibile al momento.")
+        return
+
+    cols = st.columns(len(raccomandazioni))
+    for i, r in enumerate(raccomandazioni):
+        with cols[i]:
+            st.markdown('<div class="racc-card-marker"></div>', unsafe_allow_html=True)
+            score_pct = int(r.score_totale * 100)
+            tags_html = " ".join(
+                f'<span style="background:#E8F0FE;color:#003087;font-size:0.65rem;'
+                f'padding:2px 6px;border-radius:10px;margin-right:4px;">{t}</span>'
+                for t in (r.tag or [])
+            )
+            motivazione = (r.motivazione or "")[:100]
+            st.markdown(f"""
+            <div class="raccomandazione-card">
+                <h5>{r.corso_nome}</h5>
+                <div style="margin:4px 0">{tags_html}</div>
+                <p>{motivazione}{'…' if len(r.motivazione or '') > 100 else ''}</p>
+                <div class="score-bar-outer">
+                    <div class="score-bar-inner" style="width:{score_pct}%"></div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Iscriviti", key=f"racc_iscriviti_{r.corso_id}", type="primary", use_container_width=True):
+                try:
+                    db.inserisci("studenti_corsi", {
+                        "studente_id": studente_id,
+                        "corso_universitario_id": r.corso_id,
+                        "anno_accademico": _anno_accademico_corrente(),
+                        "stato": "iscritto",
+                    })
+                    st.session_state["_iscrizione_feedback"] = r.corso_nome
+                except Exception:
+                    st.error("Iscrizione non riuscita. Potresti essere già iscritto.")
+                st.rerun()
+
+
 # ---------------------------------------------------------------------------
 # Ricerca corsi
 # ---------------------------------------------------------------------------
@@ -1586,16 +1913,12 @@ def _anno_accademico_corrente() -> str:
     return f"{oggi.year}-{oggi.year + 1}" if oggi.month >= 9 else f"{oggi.year - 1}-{oggi.year}"
 
 
-def _render_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
-    """Sezione di ricerca corsi disponibili nella piattaforma."""
+@st.dialog("🔍 Cerca un corso", width="large")
+def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
+    """Dialog di ricerca corsi disponibili nella piattaforma."""
     st.markdown(
-        '### 🔍 Cerca un corso'
-        '&nbsp;<span class="tooltip-wrap" style="vertical-align:middle">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">Cerca tra tutti i corsi disponibili nella piattaforma. '
-        'Puoi filtrare per nome, docente, CFU o corso di laurea.</span>'
-        '</span>',
-        unsafe_allow_html=True,
+        'Cerca tra tutti i corsi disponibili nella piattaforma. '
+        'Puoi filtrare per nome, docente, CFU o corso di laurea.',
     )
 
     tutti_cdl = _get_tutti_cdl()
@@ -2421,16 +2744,8 @@ def mostra_homepage_studente():
     utente = st.session_state.user
     studente_id = st.session_state.current_user_id
 
-    # Topbar con logout integrato
-    if _render_topbar(utente):
-        _, _, reset_fn = _import_orchestratore()
-        if reset_fn:
-            try:
-                reset_fn()
-            except Exception:
-                pass
-        st.session_state.clear()
-        st.rerun()
+    # Header fisso in alto (puro HTML, come il footer)
+    _render_header(utente)
 
     # Seed iscrizioni se lo studente non ha corsi nel DB (es. utenti demo)
     _seed_iscrizioni_se_mancanti(studente_id)
@@ -2443,19 +2758,26 @@ def mostra_homepage_studente():
     piano_sel_id   = st.session_state.get("_piano_sel")
 
     # Layout a tre colonne — sx:navigazione, cx:contenuto, dx:chatbot
-    col_sx, col_cx, col_dx = st.columns([1.5, 3.0, 2.5], gap="small")
+    col_sx, col_cx, col_dx = st.columns([0.75, 3.75, 2.5], gap="small")
 
     # -------------------------------------------------------------------------
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
-        # Pulsante ricerca corsi
-        if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
-            st.session_state["_view_mode"] = "ricerca"
-            st.session_state["_corso_sel"] = None
-            st.session_state["_piano_sel"] = None
-            st.session_state["_search_results"] = None
+        # Logout
+        if st.button("Esci", key="logout_btn", use_container_width=True):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
             st.rerun()
+
+        # Pulsante ricerca corsi (apre dialog)
+        if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
+            _dialog_ricerca_corsi(corsi, studente_id)
 
         # Bottoni materiale personale (sempre visibili, sempre dialog liberi)
         _sidebar_user_id = utente.get("user_id", utente.get("id", 0))
@@ -2470,8 +2792,7 @@ def mostra_homepage_studente():
         _render_sidebar_corsi(corsi, studente_id)
         # Sezione 2: Piani personalizzati dello studente
         _render_sidebar_piani(studente_id)
-        # Sezione 3: Raccomandazioni AI
-        _render_raccomandazioni(studente_id)
+        # Sezione 3: Raccomandazioni AI — spostata nella home (orizzontale)
 
     # -------------------------------------------------------------------------
     # COLONNA CENTRALE — contenuto (vista diversa per corso vs piano)
@@ -2482,25 +2803,37 @@ def mostra_homepage_studente():
             nome = _esc(utente["nome"])
             st.markdown(f"""
             <div class="empty-state" style="padding-top:24px; padding-bottom:8px">
-                <div class="icon">🎓</div>
-                <h3>Benvenuto, {nome}!</h3>
-                <p style="max-width:360px; margin:0 auto; line-height:1.7">
-                    Seleziona un <strong>corso</strong> per consultarlo,
-                    o apri un <strong>piano personalizzato</strong> per studiare.
-                    Chiedi a <strong>Lea</strong> di creare un nuovo piano su qualsiasi argomento.
+                <div class="icon"></div>
+                <h3>Ciao, {nome}!</h3>
+            </div>
+            <div style="max-width:100%; margin:0; color:#2D3A4A; font-size:0.9rem; line-height:1.8; text-align:left; padding: 0 4px;">
+                <p>
+                    Questa &egrave; la tua piattaforma di studio intelligente, potenziata dall'AI.
+                    Nella colonna a sinistra trovi i tuoi <strong>corsi universitari</strong> e i tuoi
+                    <strong>piani personalizzati</strong>.
+                </p>
+                <p>
+                    I <strong>corsi</strong> sono quelli ufficiali del tuo percorso di laurea: puoi consultare
+                    le lezioni e i materiali caricati dal docente in modalit&agrave; di sola lettura.
+                    Per trovare e iscriverti a nuovi corsi, clicca su <strong>🔍 Cerca corsi</strong> in alto a sinistra.
+                </p>
+                <p>
+                    I <strong>piani personalizzati</strong>, invece, sono spazi di studio creati su misura per te.
+                    Chiedi a <strong>Lea</strong>, il tuo tutor AI, di generarne uno su qualsiasi argomento:
+                    Lea creer&agrave; capitoli, lezioni e contenuti pensati per le tue esigenze.
+                    Puoi anche caricare i tuoi appunti, slide o PDF e Lea generer&agrave; una lezione a partire
+                    dal tuo materiale.
+                </p>
+                <p>
+                    Nella chat a destra puoi interagire con <strong>Lea</strong> in qualsiasi momento:
+                    chiedile di creare <strong>lezioni personalizzate</strong> e <strong>informazioni sul tuo materiale didattico</strong> per verificare
+                    le tue conoscenze.
                 </p>
             </div>
             """, unsafe_allow_html=True)
-            st.markdown("---")
-            _render_ricerca_corsi(corsi, studente_id)
 
-        elif view_mode == "ricerca":
-            # ── VISTA RICERCA ─────────────────────────────────────────────
-            if st.button("← Torna alla home", key="btn_back_from_search"):
-                st.session_state["_view_mode"] = None
-                st.session_state["_search_results"] = None
-                st.rerun()
-            _render_ricerca_corsi(corsi, studente_id)
+            # Raccomandazioni AI — carousel nella colonna centrale
+            _render_raccomandazioni_carousel(studente_id)
 
         elif view_mode == "corso" and corso_sel_id:
             # ── VISTA CORSO — sola lettura ─────────────────────────────────
@@ -2579,3 +2912,8 @@ def mostra_homepage_studente():
             piano_id=piano_sel_id if view_mode == "piano" else None,
             piano_titolo=piano_titolo_chat,
         )
+
+    # -------------------------------------------------------------------------
+    # FOOTER istituzionale
+    # -------------------------------------------------------------------------
+    _render_footer()

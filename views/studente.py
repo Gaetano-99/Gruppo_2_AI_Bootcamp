@@ -13,6 +13,7 @@
 #   src.services.recommender    → raccomandazioni corsi
 # ============================================================================
 
+import base64
 import json
 import re
 import sys
@@ -29,6 +30,17 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+
+
+def _get_logo_base64() -> str:
+    """Carica il logo Federico e lo restituisce come stringa base64 per uso in HTML."""
+    logo_path = os.path.join(_ROOT, "static", "views", "logo", "LOGO_FEDERICO.png")
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
 
 # Import lazy degli agenti AI (solo se necessario, evita errori se AWS non configurato)
 def _import_orchestratore():
@@ -75,38 +87,73 @@ _CSS = """
     background: #F0F4F8 !important;
     font-family: 'Source Sans 3', sans-serif !important;
 }
-#MainMenu, footer { visibility: hidden; }
-.block-container { padding-top: 0 !important; padding-bottom: 0 !important; }
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 74px !important; padding-bottom: 60px !important; padding-left: 1rem !important; padding-right: 1rem !important; }
 
-/* ---- TOPBAR ---- */
-.topbar {
-    background: linear-gradient(135deg, #001A4D 0%, #003087 60%, #1351A8 100%);
+/* ---- COLONNA SINISTRA ---- */
+[data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {
+    background: #E2E8F0;
+    border-radius: 12px;
+    padding: 12px 8px;
+}
+
+/* ---- HEADER (position:fixed, coerente col footer) ---- */
+.app-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(26,35,64,0.97);
     border-bottom: 3px solid #C5A028;
-    padding: 14px 32px;
+    padding: 16px 48px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin: -1rem -1rem 24px -1rem;
+    flex-wrap: wrap;
+    gap: 10px;
+    z-index: 9999;
+    font-family: 'Source Sans 3', sans-serif;
 }
-.topbar-brand {
-    font-family: 'Playfair Display', serif;
-    color: #fff;
-    font-size: 1.25rem;
-    font-weight: 700;
-}
-.topbar-brand span { color: #C5A028; }
-.topbar-user {
-    color: rgba(255,255,255,0.85);
-    font-size: 0.88rem;
+.app-header .header-brand {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
 }
-.topbar-avatar {
+.app-header .header-brand img {
+    height: 38px;
+    width: auto;
+    object-fit: contain;
+}
+.app-header .header-brand-text {
+    color: rgba(255,255,255,0.35);
+    font-size: 0.77rem;
+    font-weight: 400;
+}
+.app-header .header-brand-text strong {
+    color: #fff;
+}
+.app-header .header-brand-text strong span {
+    color: #f0a500;
+}
+.app-header .header-right {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+}
+.app-header .header-user {
+    color: rgba(255,255,255,0.45);
+    font-size: 0.82rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: color 0.2s;
+}
+.app-header .header-user:hover { color: #fff; }
+.app-header .header-avatar {
     width: 34px; height: 34px;
     border-radius: 50%;
     background: #C5A028;
-    color: #001A4D;
+    color: #1a2340;
     font-weight: 700;
     font-size: 0.85rem;
     display: inline-flex;
@@ -619,34 +666,6 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
     border-top-color: transparent;
 }
 
-/* ---- TOPBAR LOGOUT BG (col_esci a sinistra) ---- */
-.topbar-logout-bg {
-    background: linear-gradient(135deg, #001A4D 0%, #003087 100%);
-    border-bottom: 3px solid #C5A028;
-    height: 66px;
-    margin: -1rem 0 0 -1rem;
-}
-/* Bottone Esci: primo stHorizontalBlock → prima column */
-[data-testid="stHorizontalBlock"]:first-of-type
-    [data-testid="column"]:first-child
-    .stButton > button {
-    background: transparent !important;
-    border: 1.5px solid rgba(255,255,255,0.55) !important;
-    color: #C5A028 !important;
-    font-weight: 700 !important;
-    font-size: 0.80rem !important;
-    border-radius: 6px !important;
-    margin-top: -52px !important;
-    position: relative !important;
-    z-index: 200 !important;
-}
-[data-testid="stHorizontalBlock"]:first-of-type
-    [data-testid="column"]:first-child
-    .stButton > button:hover {
-    background: rgba(197,160,40,0.18) !important;
-    border-color: #C5A028 !important;
-}
-
 /* ---- NAV TOC ---- */
 .nav-toc {
     background: #fff;
@@ -817,6 +836,47 @@ div[data-testid="column"] .stButton > button[kind="secondary"]:hover {
 }
 .qa-toggle:checked ~ .qa-answer { display: block; }
 .qa-toggle:checked ~ .qa-reveal-btn { display: none; }
+
+/* ---- FOOTER (coerente col footer login) ---- */
+.app-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(26,35,64,0.97);
+    padding: 16px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    z-index: 9999;
+    font-family: 'Source Sans 3', sans-serif;
+}
+.app-footer .footer-copy {
+    font-size: 0.77rem;
+    color: rgba(255,255,255,0.35);
+}
+.app-footer .footer-copy strong {
+    color: #fff;
+}
+.app-footer .footer-copy strong span {
+    color: #f0a500;
+}
+.app-footer .footer-links {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+}
+.app-footer .footer-links a {
+    text-decoration: none;
+    color: rgba(255,255,255,0.45);
+    font-size: 0.79rem;
+    transition: color 0.2s;
+}
+.app-footer .footer-links a:hover {
+    color: #fff;
+}
 </style>
 """
 
@@ -991,146 +1051,138 @@ def _get_struttura_piano(piano_id: int) -> list[dict]:
 # Componenti UI riutilizzabili
 # ---------------------------------------------------------------------------
 
-def _render_topbar(utente: dict) -> bool:
-    """Renderizza la topbar istituzionale con logout integrato.
-    Ritorna True se il logout è stato richiesto.
-    Struttura: [col_esci | col_brand] — bottone a sinistra, brand a destra."""
+def _render_header(utente: dict):
+    """Renderizza l'header istituzionale fisso in alto (puro HTML, come il footer)."""
     iniziali = f"{utente['nome'][0]}{utente['cognome'][0]}".upper()
+    nome_safe = _esc(utente['nome'])
+    cognome_safe = _esc(utente['cognome'])
+    logo_b64 = _get_logo_base64()
+    logo_html = (
+        f'<img src="data:image/png;base64,{logo_b64}" alt="Federico360">'
+        if logo_b64 else ''
+    )
 
-    # col_esci PRIMA (sinistra) così non viene coperto dal topbar HTML
-    col_esci, col_brand = st.columns([1, 10])
-
-    logout_richiesto = False
-    with col_esci:
-        # Sfondo identico alla topbar per continuità visiva
-        st.markdown("""
-        <div class="topbar-logout-bg"></div>
-        """, unsafe_allow_html=True)
-        logout_richiesto = st.button("Esci", key="logout_btn", use_container_width=True)
-
-    with col_brand:
-        nome_safe = _esc(utente['nome'])
-        cognome_safe = _esc(utente['cognome'])
-        st.markdown(f"""
-        <div class="topbar">
-            <div class="topbar-brand">Learn<span>AI</span> &nbsp;·&nbsp;
-                <span style="font-size:0.82rem; font-weight:300; color:rgba(255,255,255,0.7)">
-                    Università Federico II di Napoli
-                </span>
-            </div>
-            <div class="topbar-user">
-                <span>{nome_safe} {cognome_safe}</span>
-                <div class="topbar-avatar">{iniziali}</div>
+    st.markdown(f"""
+    <div class="app-header">
+        <div class="header-brand">
+            {logo_html}
+            <div class="header-brand-text">
+                &copy; 2026 <strong>Federico<span>360</span></strong>
+                &mdash; Universit&agrave; degli Studi di Napoli Federico II
             </div>
         </div>
-        """, unsafe_allow_html=True)
+        <div class="header-right">
+            <div class="header-user">
+                <span>{nome_safe} {cognome_safe}</span>
+                <div class="header-avatar">{iniziali}</div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    return logout_richiesto
+
+def _render_footer():
+    """Renderizza il footer istituzionale fisso in basso (coerente col footer login)."""
+    st.markdown("""
+    <div class="app-footer">
+        <div class="footer-copy">
+            &copy; 2026 <strong>Federico<span>360</span></strong>
+            &mdash; Universit&agrave; degli Studi di Napoli Federico II
+        </div>
+        <div class="footer-links">
+            <a href="#">Aiuto</a>
+            <a href="#">Termini e Condizioni</a>
+            <a href="#">Privacy Policy</a>
+            <a href="#">Accessibilit&agrave;</a>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def _render_sidebar_corsi(corsi: list[dict], studente_id: int = 0):
     """Renderizza la lista corsi nella colonna sinistra (sola lettura per lo studente)."""
-    st.markdown(
-        '<div class="divider-label">I tuoi corsi'
-        '<span class="tooltip-wrap">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">I corsi sono creati e gestiti dai <strong>docenti</strong> '
-        'con il loro materiale didattico ufficiale. I quiz presenti nei corsi '
-        '<strong>concorrono alle analytics</strong> del docente, che pu\u00f2 monitorare '
-        'i tuoi progressi e risultati.</span>'
-        '</span></div>',
-        unsafe_allow_html=True,
-    )
+    with st.expander(
+        "I tuoi corsi",
+        expanded=True,
+    ):
 
-    if not corsi:
-        st.caption("Nessun corso trovato.")
-        return
+        if not corsi:
+            st.caption("Nessun corso trovato.")
+            return
 
-    for corso in corsi:
-        cid = corso["id"]
-        attivo = (
-            st.session_state.get("_corso_sel") == cid
-            and st.session_state.get("_view_mode") == "corso"
-        )
-        stato = corso["stato"]
-        stato_cls = {
-            "iscritto": "stato-iscritto",
-            "completato": "stato-completato",
-            "abbandonato": "stato-abbandonato",
-        }.get(stato, "stato-iscritto")
+        for corso in corsi:
+            cid = corso["id"]
+            attivo = (
+                st.session_state.get("_corso_sel") == cid
+                and st.session_state.get("_view_mode") == "corso"
+            )
+            stato = corso["stato"]
+            stato_cls = {
+                "iscritto": "stato-iscritto",
+                "completato": "stato-completato",
+                "abbandonato": "stato-abbandonato",
+            }.get(stato, "stato-iscritto")
 
-        meta_parts = []
-        if corso.get("anno_di_corso"):
-            meta_parts.append(f'Anno {corso["anno_di_corso"]}')
-        if corso.get("cfu"):
-            meta_parts.append(f'{corso["cfu"]} CFU')
-        meta_parts.append(stato.capitalize())
-        meta_line = " · ".join(meta_parts)
+            meta_parts = []
+            if corso.get("anno_di_corso"):
+                meta_parts.append(f'Anno {corso["anno_di_corso"]}')
+            if corso.get("cfu"):
+                meta_parts.append(f'{corso["cfu"]} CFU')
+            meta_parts.append(stato.capitalize())
+            meta_line = " · ".join(meta_parts)
 
-        marker = "card-click card-corso-active" if attivo else "card-click card-corso"
-        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
-        col_card, col_del = st.columns([6, 1])
-        with col_card:
-            if st.button(f"{corso['nome']}\n{meta_line}", key=f"btn_corso_{cid}", use_container_width=True):
-                st.session_state["_corso_sel"]  = cid
-                st.session_state["_corso_nome"] = corso["nome"]
-                st.session_state["_view_mode"]  = "corso"
-                st.session_state["_piano_sel"]  = None
-                st.session_state["_chat_history"] = []
-                st.rerun()
-        with col_del:
-            if st.button("🗑", key=f"btn_del_corso_{cid}", use_container_width=True, help="Cancella iscrizione"):
-                _dialog_cancella_iscrizione(studente_id, cid, corso["nome"])
+            marker = "card-click card-corso-active" if attivo else "card-click card-corso"
+            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
+            col_card, col_del = st.columns([6, 1])
+            with col_card:
+                if st.button(f"{corso['nome']}\n{meta_line}", key=f"btn_corso_{cid}", use_container_width=True):
+                    st.session_state["_corso_sel"]  = cid
+                    st.session_state["_corso_nome"] = corso["nome"]
+                    st.session_state["_view_mode"]  = "corso"
+                    st.session_state["_piano_sel"]  = None
+                    st.session_state["_chat_history"] = []
+                    st.rerun()
+            with col_del:
+                if st.button("🗑", key=f"btn_del_corso_{cid}", use_container_width=True, help="Cancella iscrizione"):
+                    _dialog_cancella_iscrizione(studente_id, cid, corso["nome"])
 
 
 def _render_sidebar_piani(studente_id: int):
     """Renderizza la sezione 'I Tuoi Piani Personalizzati' nella colonna sinistra."""
     piani = _get_tutti_piani_studente(studente_id)
-    st.markdown(
-        '<div class="divider-label">I tuoi piani personalizzati'
-        '<span class="tooltip-wrap">'
-        '<span class="tooltip-icon">?</span>'
-        '<span class="tooltip-box">I piani sono <strong>generati da Lea</strong>, la tua tutor AI. '
-        'Puoi crearli a partire dai corsi, dal <strong>tuo materiale</strong> caricato '
-        'o da qualsiasi contenuto sulla piattaforma. '
-        'I quiz nei piani <strong>non concorrono</strong> alle analytics del docente: '
-        'sono solo per il tuo studio personale.</span>'
-        '</span></div>',
-        unsafe_allow_html=True,
-    )
+    with st.expander(
+        "I tuoi piani personalizzati",
+        expanded=True,
+    ):
 
-    if not piani:
-        st.markdown(
-            '<p style="color:#5A6A7E;font-size:0.82rem;margin:4px 0 12px">'
-            'Nessun piano ancora. Chiedi a Lea di generarne uno!</p>',
-            unsafe_allow_html=True,
-        )
-        return
+        if not piani:
+            st.caption("Nessun piano ancora. Chiedi a Lea di generarne uno!")
+            return
 
-    for piano in piani:
-        pid = piano["id"]
-        attivo = (
-            st.session_state.get("_piano_sel") == pid
-            and st.session_state.get("_view_mode") == "piano"
-        )
-        corso_nome_breve = (piano.get("corso_nome") or "")[:22]
-        titolo_breve = (piano["titolo"] or "")[:42]
+        for piano in piani:
+            pid = piano["id"]
+            attivo = (
+                st.session_state.get("_piano_sel") == pid
+                and st.session_state.get("_view_mode") == "piano"
+            )
+            corso_nome_breve = (piano.get("corso_nome") or "")[:22]
+            titolo_breve = (piano["titolo"] or "")[:42]
 
-        marker = "card-click card-piano-active" if attivo else "card-click card-piano"
-        st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
-        col_card, col_del = st.columns([6, 1])
-        with col_card:
-            card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
-            if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
-                st.session_state["_piano_sel"]  = pid
-                st.session_state["_view_mode"]  = "piano"
-                st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
-                st.session_state["_corso_nome"] = piano.get("corso_nome", "")
-                st.session_state["_chat_history"] = []
-                st.rerun()
-        with col_del:
-            if st.button("🗑", key=f"btn_del_piano_{pid}", use_container_width=True, help="Elimina piano"):
-                _dialog_elimina_piano(pid, piano["titolo"] or "Piano")
+            marker = "card-click card-piano-active" if attivo else "card-click card-piano"
+            st.markdown(f'<div class="{marker}"></div>', unsafe_allow_html=True)
+            col_card, col_del = st.columns([6, 1])
+            with col_card:
+                card_label = f"{titolo_breve}{'…' if len(piano['titolo'] or '') > 42 else ''}"
+                if st.button(card_label, key=f"btn_piano_sx_{pid}", use_container_width=True):
+                    st.session_state["_piano_sel"]  = pid
+                    st.session_state["_view_mode"]  = "piano"
+                    st.session_state["_corso_sel"]  = piano["corso_universitario_id"]
+                    st.session_state["_corso_nome"] = piano.get("corso_nome", "")
+                    st.session_state["_chat_history"] = []
+                    st.rerun()
+            with col_del:
+                if st.button("🗑", key=f"btn_del_piano_{pid}", use_container_width=True, help="Elimina piano"):
+                    _dialog_elimina_piano(pid, piano["titolo"] or "Piano")
 
 
 
@@ -2502,16 +2554,8 @@ def mostra_homepage_studente():
     utente = st.session_state.user
     studente_id = st.session_state.current_user_id
 
-    # Topbar con logout integrato
-    if _render_topbar(utente):
-        _, _, reset_fn = _import_orchestratore()
-        if reset_fn:
-            try:
-                reset_fn()
-            except Exception:
-                pass
-        st.session_state.clear()
-        st.rerun()
+    # Header fisso in alto (puro HTML, come il footer)
+    _render_header(utente)
 
     # Seed iscrizioni se lo studente non ha corsi nel DB (es. utenti demo)
     _seed_iscrizioni_se_mancanti(studente_id)
@@ -2524,12 +2568,23 @@ def mostra_homepage_studente():
     piano_sel_id   = st.session_state.get("_piano_sel")
 
     # Layout a tre colonne — sx:navigazione, cx:contenuto, dx:chatbot
-    col_sx, col_cx, col_dx = st.columns([1.5, 3.0, 2.5], gap="small")
+    col_sx, col_cx, col_dx = st.columns([0.75, 3.75, 2.5], gap="small")
 
     # -------------------------------------------------------------------------
     # COLONNA SINISTRA — navigazione
     # -------------------------------------------------------------------------
     with col_sx:
+        # Logout
+        if st.button("Esci", key="logout_btn", use_container_width=True):
+            _, _, reset_fn = _import_orchestratore()
+            if reset_fn:
+                try:
+                    reset_fn()
+                except Exception:
+                    pass
+            st.session_state.clear()
+            st.rerun()
+
         # Pulsante ricerca corsi (apre dialog)
         if st.button("🔍 Cerca corsi", use_container_width=True, key="btn_cerca_corsi"):
             _dialog_ricerca_corsi(corsi, studente_id)
@@ -2561,7 +2616,7 @@ def mostra_homepage_studente():
                 <div class="icon"></div>
                 <h3>Ciao, {nome}!</h3>
             </div>
-            <div style="max-width:560px; margin:0 auto; color:#2D3A4A; font-size:0.9rem; line-height:1.8; text-align:left; padding: 0 12px;">
+            <div style="max-width:100%; margin:0; color:#2D3A4A; font-size:0.9rem; line-height:1.8; text-align:left; padding: 0 4px;">
                 <p>
                     Questa &egrave; la tua piattaforma di studio intelligente, potenziata dall'AI.
                     Nella colonna a sinistra trovi i tuoi <strong>corsi universitari</strong> e i tuoi
@@ -2670,3 +2725,6 @@ def mostra_homepage_studente():
     # -------------------------------------------------------------------------
     if not view_mode:
         _render_raccomandazioni_orizzontale(studente_id)
+
+    # Footer istituzionale fisso in basso
+    _render_footer()
