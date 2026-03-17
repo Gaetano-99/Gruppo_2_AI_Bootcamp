@@ -44,9 +44,9 @@ from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, c
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_MAX_CHUNK_IN_CONTESTO: int = 12
+_MAX_CHUNK_IN_CONTESTO: int = 8
 _MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
-_MAX_CONTESTO_CHARS: int = 35000     # Limite caratteri contesto RAG per evitare output troncato
+_MAX_CONTESTO_CHARS: int = 18000     # Limite caratteri contesto RAG per evitare output troncato
 
 
 def _invoca_llm_strutturato(llm_strutturato, messaggi) -> "StrutturaCorso | None":
@@ -67,10 +67,12 @@ def _invoca_llm_strutturato(llm_strutturato, messaggi) -> "StrutturaCorso | None
 
 
 def _tronca_chunks_per_contesto(chunks: list[dict]) -> list[dict]:
-    """Riduce il numero di chunk se il testo totale supera _MAX_CONTESTO_CHARS.
+    """Riduce il numero di chunk se il contesto formattato supera _MAX_CONTESTO_CHARS.
 
     Rimuove iterativamente l'ultimo chunk (meno rilevante per score) finché
     il contesto non rientra nel limite di caratteri consentito.
+    Stima l'overhead di formattazione (~120 chars per chunk) per evitare
+    che il contesto formattato reale superi il limite.
 
     Args:
         chunks: Lista di chunk ordinati per rilevanza decrescente.
@@ -78,8 +80,9 @@ def _tronca_chunks_per_contesto(chunks: list[dict]) -> list[dict]:
     Returns:
         Lista (eventualmente ridotta) di chunk che rispetta il limite caratteri.
     """
+    _OVERHEAD_PER_CHUNK = 120  # intestazione + separatori di formatta_contesto_rag
     while chunks:
-        totale = sum(len(c.get("testo") or "") for c in chunks)
+        totale = sum(len(c.get("testo") or "") for c in chunks) + len(chunks) * _OVERHEAD_PER_CHUNK
         if totale <= _MAX_CONTESTO_CHARS:
             break
         chunks = chunks[:-1]
