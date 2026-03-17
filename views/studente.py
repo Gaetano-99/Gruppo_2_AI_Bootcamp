@@ -252,7 +252,7 @@ _CSS = """
     gap: 14px;
 }
 .app-header .header-brand img {
-    height: 68px;
+    height: 82px;
     width: auto;
     object-fit: contain;
     filter: brightness(0) invert(1);
@@ -1471,6 +1471,9 @@ def _render_footer():
         '<div class="footer-copy">',
         '&copy; 2026 <strong>Federico<span>360</span></strong>',
         '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
+        '<div style="font-size:0.65rem;color:rgba(255,255,255,0.25);margin-top:2px;">',
+        'I contenuti generati dall&rsquo;AI possono contenere errori o imprecisioni. Verifica sempre le informazioni.',
+        '</div>',
         '</div>',
         '<div class="footer-links">',
         '<a href="#">Aiuto</a>',
