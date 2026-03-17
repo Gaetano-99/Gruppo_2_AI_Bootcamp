@@ -522,15 +522,8 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
 
 
 
+@st.dialog("Nuovo corso", width="large")
 def _dialog_crea_corso(docente_id: int):
-    header_col, close_col = st.columns([10, 1])
-    with header_col:
-        st.markdown("#### Nuovo corso")
-    with close_col:
-        if st.button("X", key="close_create_course", help="Chiudi"):
-            st.session_state["_doc_show_create"] = False
-            st.rerun()
-
     tutti_cdl = _get_tutti_cdl()
     cdl_nomi = [c["nome"] for c in tutti_cdl]
 
@@ -562,9 +555,9 @@ def _dialog_crea_corso(docente_id: int):
         )
         cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
         _salva_cdl_corso(corso_id, cdl_sel_ids)
-        st.session_state["_doc_show_create"] = False
         st.session_state["_doc_create_feedback"] = "Corso salvato in bozza."
         st.session_state["_doc_refresh"] = True
+        st.rerun()
 
 
 def _elimina_corso_completo(corso_id: int) -> None:
@@ -628,20 +621,18 @@ def _elimina_corso_completo(corso_id: int) -> None:
     db.elimina("corsi_universitari", {"id": corso_id})
 
 
+@st.dialog("Elimina corso", width="small")
 def _dialog_elimina_corso(corso_id: int):
-    st.warning("Eliminerai definitivamente il corso e i relativi materiali.")
+    st.warning("Eliminerai definitivamente il corso e i relativi materiali. L'operazione non è reversibile.")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Annulla"):
-            st.session_state["_doc_delete_confirm"] = None
+        if st.button("Annulla", use_container_width=True):
+            st.rerun()
     with c2:
-        if st.button("Elimina", type="primary"):
+        if st.button("Elimina", type="primary", use_container_width=True):
             try:
                 _elimina_corso_completo(corso_id)
                 st.session_state["_doc_refresh"] = True
-                st.session_state["_corso_doc_sel"] = None
-                st.session_state["_doc_delete_confirm"] = None
-                st.success("Corso eliminato.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Impossibile eliminare: {e}")
@@ -937,10 +928,18 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str,
 
     # — Fase 1: Teoria —
     _fasi = "Fase 1/2" if not _senza_quiz else "Fase 1/1"
-    _label = f"{_fasi} — Generazione contenuti teorici"
-    if forza_keyword:
-        _label += " (ricerca per parole chiave)"
-    _label += "…"
+    _label = f"{_fasi} — Generazione contenuti teorici…"
+    # Per la generazione docente non serve RAG semantico: carichiamo direttamente
+    # tutti i chunk del corso da SQLite (fonte di verità), bypassando ChromaDB.
+    chunks_corso = db.trova_tutti(
+        "materiali_chunks",
+        {"corso_universitario_id": corso["id"]},
+        ordine="indice_chunk ASC",
+    )
+    if not chunks_corso:
+        st.error("Nessun materiale didattico trovato per questo corso. Carica prima un documento nella tab 'Materiali'.")
+        return
+
     with st.spinner(_label):
         agente = crea_agente_content_gen()
         stato_t = esegui_generazione(
@@ -950,7 +949,7 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str,
             docente_id=docente_id,
             is_corso_docente=True,
             istruzioni_utente=prompt or "",
-            forza_keyword=forza_keyword,
+            chunks_precaricati=chunks_corso,
         )
 
     if stato_t.get("errore"):
@@ -1417,7 +1416,6 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
 
     st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:16px 0 8px;'>", unsafe_allow_html=True)
     if st.button("Chiudi", key=f"close_detail_{corso['id']}", use_container_width=True):
-        st.session_state["_corso_doc_sel"] = None
         st.rerun()
 
 
@@ -1430,9 +1428,6 @@ def _render_corsi(docente_id: int):
         st.success(feedback)
 
     if st.button("Crea nuovo corso", type="primary"):
-        st.session_state["_doc_show_create"] = True
-        st.session_state["_corso_doc_sel"] = None
-    if st.session_state.get("_doc_show_create"):
         _dialog_crea_corso(docente_id)
 
     corsi = _get_corsi_docente(docente_id)
@@ -1463,33 +1458,22 @@ def _render_corsi(docente_id: int):
             with c_a:
                 if st.button("Apri", key=f"apri_{corso['id']}"):
                     st.session_state["_corso_doc_sel"] = corso["id"]
+                    _render_dettaglio_corso(corso, docente_id)
             with c_b:
                 if corso.get("attivo"):
                     if st.button("Disattiva", key=f"dis_{corso['id']}"):
                         db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 0})
                         st.session_state["_doc_refresh"] = True
-                        st.session_state["_corso_doc_sel"] = None
                         st.rerun()
                 else:
                     if st.button("Pubblica", key=f"pub_{corso['id']}"):
                         db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 1})
                         st.session_state["_doc_refresh"] = True
-                        st.session_state["_corso_doc_sel"] = None
                         st.rerun()
             with c_c:
                 if st.button("Elimina", key=f"del_{corso['id']}"):
-                    st.session_state["_doc_delete_confirm"] = corso["id"]
-                    st.session_state["_corso_doc_sel"] = None
+                    _dialog_elimina_corso(corso["id"])
         st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:6px 0'>", unsafe_allow_html=True)
-
-    if st.session_state.get("_doc_delete_confirm"):
-        _dialog_elimina_corso(st.session_state["_doc_delete_confirm"])
-
-    sel_id = st.session_state.get("_corso_doc_sel")
-    if sel_id:
-        corso_sel = next((c for c in corsi if c["id"] == sel_id), None)
-        if corso_sel:
-            _render_dettaglio_corso(corso_sel, docente_id)
 
 
 def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str | None):
