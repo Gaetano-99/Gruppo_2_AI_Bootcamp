@@ -649,12 +649,13 @@ def _dialog_elimina_corso(corso_id: int):
 
 def _elimina_materiale(materiale_id: int, s3_key: str | None) -> None:
     """Elimina un materiale didattico, i suoi chunk e il file fisico dal disco."""
-    # 1. Elimina i chunk associati
-    try:
-        db.elimina("materiali_chunks", {"materiale_id": materiale_id})
-    except Exception:
-        pass
-    # 2. Elimina il record dal DB
+    # 1. Rimuovi riferimenti in piano_materiali_utilizzati (ON DELETE RESTRICT sui chunk)
+    chunks = db.esegui("SELECT id FROM materiali_chunks WHERE materiale_id = ?", [materiale_id])
+    chunk_ids = [c["id"] for c in chunks]
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM piano_materiali_utilizzati WHERE chunk_id IN ({ph})", chunk_ids)
+    # 2. Elimina il record dal DB (CASCADE elimina automaticamente i chunk)
     db.elimina("materiali_didattici", {"id": materiale_id})
     # 3. Elimina il file fisico (se presente)
     if s3_key:
@@ -1430,6 +1431,7 @@ def _render_corsi(docente_id: int):
 
     if st.button("Crea nuovo corso", type="primary"):
         st.session_state["_doc_show_create"] = True
+        st.session_state["_corso_doc_sel"] = None
     if st.session_state.get("_doc_show_create"):
         _dialog_crea_corso(docente_id)
 
@@ -1466,15 +1468,18 @@ def _render_corsi(docente_id: int):
                     if st.button("Disattiva", key=f"dis_{corso['id']}"):
                         db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 0})
                         st.session_state["_doc_refresh"] = True
+                        st.session_state["_corso_doc_sel"] = None
                         st.rerun()
                 else:
                     if st.button("Pubblica", key=f"pub_{corso['id']}"):
                         db.aggiorna("corsi_universitari", {"id": corso["id"]}, {"attivo": 1})
                         st.session_state["_doc_refresh"] = True
+                        st.session_state["_corso_doc_sel"] = None
                         st.rerun()
             with c_c:
                 if st.button("Elimina", key=f"del_{corso['id']}"):
                     st.session_state["_doc_delete_confirm"] = corso["id"]
+                    st.session_state["_corso_doc_sel"] = None
         st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:6px 0'>", unsafe_allow_html=True)
 
     if st.session_state.get("_doc_delete_confirm"):
