@@ -44,7 +44,7 @@ from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, c
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_MAX_CHUNK_IN_CONTESTO: int = 8
+_MAX_CHUNK_IN_CONTESTO: int = 5
 _MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
 _MAX_CONTESTO_CHARS: int = 18000     # Limite caratteri contesto RAG per evitare output troncato
 
