@@ -20,6 +20,9 @@ import re
 import sys
 import os
 import streamlit as st
+from pydantic import BaseModel, Field
+from langchain_core.messages import SystemMessage, HumanMessage
+
 # ---------------------------------------------------------------------------
 # Path setup — permette l'import del progetto dalla root in qualunque contesto
 # ---------------------------------------------------------------------------
@@ -28,14 +31,24 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
-from platform_sdk.llm import estrai_testo_da_upload
+from platform_sdk.llm import estrai_testo_da_upload, get_llm
 
 # ---------------------------------------------------------------------------
 # Costanti di chunking
 # ---------------------------------------------------------------------------
-_DIMENSIONE_MIN_CHUNK_CARATTERI: int = 150   # chunk più corti vengono uniti
-_DIMENSIONE_MAX_CHUNK_CARATTERI: int = 2000  # chunk più lunghi vengono divisi
-_DOCENTE_ID_MOCK: int = 10   # Mario Rossi (docente, seed data)
+_DIMENSIONE_MIN_CHUNK_CARATTERI: int = 600   # chunk più corti vengono uniti
+_DIMENSIONE_MAX_CHUNK_CARATTERI: int = 4000  # chunk più lunghi vengono divisi
+
+
+# ---------------------------------------------------------------------------
+# Modello Pydantic per l'arricchimento LLM dei chunk
+# ---------------------------------------------------------------------------
+
+class MetadatiChunk(BaseModel):
+    """Metadati semantici generati dall'LLM per un singolo chunk didattico."""
+    titolo_sezione: str = Field(description="Titolo breve e descrittivo della sezione (max 10 parole)")
+    sommario: str = Field(description="Riassunto del contenuto in 2-3 frasi")
+    argomenti_chiave: list[str] = Field(description="Lista di 3-7 parole/frasi chiave che identificano i concetti principali")
 
 
 # ---------------------------------------------------------------------------
@@ -45,9 +58,10 @@ _DOCENTE_ID_MOCK: int = 10   # Mario Rossi (docente, seed data)
 
 def elabora_e_salva_documento(
     uploaded_file,
-    corso_universitario_id: int,
+    corso_universitario_id: int | None,
     titolo: str,
     tipo: str = "dispensa",
+    progress_callback=None,
 ) -> int:
     """Estrae il testo da un file caricato, salva il materiale didattico e
     crea i chunk semantici nel database.
@@ -71,6 +85,15 @@ def elabora_e_salva_documento(
     Raises:
         ValueError: Se il testo estratto è vuoto o il tipo non è valido.
     """
+    # Mappa le estensioni comuni ai tipi accettati dallo schema DB
+    _MAPPA_ESTENSIONI = {
+        "pptx": "slide", "ppt": "slide",
+        "docx": "dispensa", "doc": "dispensa",
+        "txt": "dispensa", "xlsx": "dispensa", "xls": "dispensa",
+        "csv": "dispensa",
+    }
+    tipo = _MAPPA_ESTENSIONI.get(tipo, tipo)
+
     tipi_validi = {"pdf", "slide", "video", "dispensa", "libro"}
     if tipo not in tipi_validi:
         raise ValueError(
@@ -80,7 +103,29 @@ def elabora_e_salva_documento(
     # 1. Estrai testo
     testo_estratto: str = estrai_testo_da_upload(uploaded_file)
     if not testo_estratto or not testo_estratto.strip():
-        raise ValueError("Il file caricato non contiene testo leggibile.")
+        nome = getattr(uploaded_file, "name", "file")
+        ext = nome.rsplit(".", 1)[-1].lower() if "." in nome else ""
+        if ext == "pdf":
+            raise ValueError(
+                "Il PDF non contiene testo selezionabile. "
+                "Probabilmente è una scansione o contiene solo immagini. "
+                "Converti il file con uno strumento OCR e ricaricalo."
+            )
+        raise ValueError(
+            f"Il file '{nome}' non contiene testo leggibile. "
+            "Verifica che il file non sia corrotto o protetto da password."
+        )
+
+    # Controlla se il testo è quasi tutto composto da segnaposti immagine (PDF scansionato)
+    _linee = [l.strip() for l in testo_estratto.splitlines() if l.strip()]
+    if _linee:
+        _linee_immagine = sum(1 for l in _linee if l.startswith("[Pagina ") and "non testuale" in l)
+        if _linee_immagine == len(_linee):
+            raise ValueError(
+                "Il PDF sembra essere una scansione: tutte le pagine contengono solo immagini, "
+                "nessun testo selezionabile è stato trovato. "
+                "Converti il file con uno strumento OCR e ricaricalo."
+            )
 
     # 2. Inserisci il materiale didattico nel DB
     materiale_id: int = db.inserisci(
@@ -97,11 +142,21 @@ def elabora_e_salva_documento(
     )
 
     # 3-4. Chunking e salvataggio
-    _crea_e_salva_chunks(
+    chunk_ids: list[int] = _crea_e_salva_chunks(
         testo=testo_estratto,
         materiale_id=materiale_id,
         corso_universitario_id=corso_universitario_id,
     )
+
+    # 4b. Arricchimento semantico: genera titolo_sezione, sommario, argomenti_chiave
+    _arricchisci_chunks_con_llm(chunk_ids, progress_callback=progress_callback)
+
+    # 4c. Vettorizzazione per ricerca semantica (ChromaDB)
+    try:
+        from src.tools.vector_store import vettorizza_chunks
+        vettorizza_chunks(chunk_ids, corso_universitario_id)
+    except Exception as e:
+        print(f"[WARN document_processor] Vettorizzazione fallita, fallback keyword attivo: {e}")
 
     # 5. Marca il materiale come processato
     db.aggiorna(
@@ -158,6 +213,66 @@ def _crea_e_salva_chunks(
         ids_inseriti.append(chunk_id)
 
     return ids_inseriti
+
+
+_SYSTEM_PROMPT_ARRICCHIMENTO = """Sei un assistente specializzato nell'analisi di testi didattici universitari.
+Dato un frammento di testo, estrai i metadati semantici richiesti in italiano.
+Sii conciso e preciso. Usa solo le informazioni presenti nel testo fornito."""
+
+
+def _arricchisci_chunks_con_llm(chunk_ids: list[int], progress_callback=None) -> None:
+    """Arricchisce ogni chunk con metadati semantici generati dall'LLM.
+
+    Per ogni chunk recupera il testo dal DB, chiama l'LLM con structured output
+    per generare ``titolo_sezione``, ``sommario`` e ``argomenti_chiave``,
+    poi aggiorna il record nel DB.
+
+    Args:
+        chunk_ids: Lista degli ID dei chunk da arricchire.
+        progress_callback: Funzione opzionale (i, totale) per aggiornare la progress bar.
+    """
+    if not chunk_ids:
+        return
+
+    import json as _json
+    llm = get_llm(veloce=True)
+    llm_strutturato = llm.with_structured_output(MetadatiChunk)
+
+    totale = len(chunk_ids)
+    for idx, chunk_id in enumerate(chunk_ids):
+        if progress_callback:
+            progress_callback(idx, totale)
+        righe = db.esegui(
+            "SELECT testo FROM materiali_chunks WHERE id = ?", [chunk_id]
+        )
+        if not righe or not righe[0].get("testo"):
+            continue
+
+        testo_chunk: str = righe[0]["testo"]
+
+        try:
+            messaggi = [
+                SystemMessage(content=_SYSTEM_PROMPT_ARRICCHIMENTO),
+                HumanMessage(content=(
+                    f"Analizza questo frammento di materiale didattico e genera i metadati:\n\n"
+                    f"{testo_chunk}"
+                )),
+            ]
+            metadati: MetadatiChunk = llm_strutturato.invoke(messaggi)
+
+            db.aggiorna(
+                "materiali_chunks",
+                {"id": chunk_id},
+                {
+                    "titolo_sezione": metadati.titolo_sezione,
+                    "sommario": metadati.sommario,
+                    "argomenti_chiave": _json.dumps(metadati.argomenti_chiave, ensure_ascii=False),
+                },
+            )
+        except Exception:
+            # Se l'arricchimento fallisce per un chunk, si continua con il successivo.
+            # Il chunk rimane nel DB con i campi NULL — il RAG userà solo il campo testo.
+            continue
 
 
 def _aggrega_chunk_brevi(paragrafi: list[str]) -> list[str]:

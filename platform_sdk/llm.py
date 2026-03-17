@@ -17,10 +17,15 @@ import json
 import re
 from typing import Generator
 
+from botocore.config import Config as BotoConfig
 from langchain_aws import ChatBedrockConverse
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 import config
+
+# Timeout esteso per chiamate LLM con contesto ampio o structured output.
+# Il default boto3 (60s) non basta per generazioni complesse (es. multi-materiale).
+_BEDROCK_CONFIG = BotoConfig(read_timeout=300, connect_timeout=10, retries={"max_attempts": 2})
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +47,7 @@ def _get_llm_principale():
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=config.LLM_MAX_TOKENS,
+            config=_BEDROCK_CONFIG,
         )
     return _llm_principale
 
@@ -57,22 +63,36 @@ def _get_llm_veloce():
             aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
             temperature=config.LLM_TEMPERATURE,
             max_tokens=config.LLM_MAX_TOKENS_FAST,
+            config=_BEDROCK_CONFIG,
         )
     return _llm_veloce
 
 
-def get_llm(veloce: bool = False):
+def get_llm(veloce: bool = False, max_tokens: int | None = None):
     """
     Restituisce l'oggetto LLM di LangChain, utile se volete usarlo
     direttamente con LangGraph o per creare agenti custom.
 
     Parametri:
         veloce: se True, usa il modello Haiku (più economico)
+        max_tokens: se specificato, crea un'istanza dedicata con questo limite token
+                    (utile per output strutturati complessi che richiedono più spazio)
 
     Esempio:
         llm = get_llm()
         llm_haiku = get_llm(veloce=True)
+        llm_long = get_llm(max_tokens=8192)
     """
+    if max_tokens is not None:
+        return ChatBedrockConverse(
+            model=config.BEDROCK_MODEL_ID_FAST if veloce else config.BEDROCK_MODEL_ID,
+            region_name=config.AWS_DEFAULT_REGION,
+            aws_access_key_id=config.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=config.AWS_SECRET_ACCESS_KEY,
+            temperature=config.LLM_TEMPERATURE,
+            max_tokens=max_tokens,
+            config=_BEDROCK_CONFIG,
+        )
     return _get_llm_veloce() if veloce else _get_llm_principale()
 
 
@@ -324,10 +344,90 @@ def chat_stream(messaggi: list[dict], system_prompt: str = "") -> Generator[str,
 # ---------------------------------------------------------------------------
 
 
+def _ocr_pdf_con_claude(dati: bytes) -> str:
+    """Estrae testo da un PDF scansionato usando Claude Vision via AWS Bedrock.
+
+    Usa PyMuPDF per renderizzare ogni pagina come immagine JPEG, poi invia
+    ogni immagine a Claude (già configurato nel progetto) per l'estrazione
+    del testo tramite visione artificiale.
+
+    Parametri:
+        dati: Contenuto grezzo del file PDF in byte.
+
+    Ritorna:
+        Testo estratto via OCR.
+
+    Raises:
+        RuntimeError: Se l'OCR fallisce su tutte le pagine.
+    """
+    import pymupdf  # PyMuPDF (il pacchetto si chiama pymupdf, non fitz)
+    import base64
+
+    doc = pymupdf.open(stream=dati, filetype="pdf")
+    llm = _get_llm_veloce()
+
+    pagine_testo: list[str] = []
+    errori_ocr: list[str] = []
+    for i, page in enumerate(doc, start=1):
+        try:
+            # Zoom 2x ≈ 144 DPI — buona qualità OCR con immagini < 1 MB
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(2.0, 2.0))
+            img_b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+
+            messaggio = HumanMessage(content=[
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "Estrai tutto il testo presente in questa immagine. "
+                        "Mantieni la struttura originale (titoli, paragrafi, elenchi). "
+                        "Rispondi solo con il testo estratto, senza commenti aggiuntivi."
+                    ),
+                },
+            ])
+
+            risposta = llm.invoke([messaggio])
+
+            # risposta.content può essere str o list[dict] a seconda della
+            # versione di langchain-aws
+            raw = risposta.content
+            if isinstance(raw, list):
+                testo_pagina = " ".join(
+                    (block.get("text", "") if isinstance(block, dict) else str(block))
+                    for block in raw
+                ).strip()
+            else:
+                testo_pagina = (raw or "").strip()
+
+            if testo_pagina:
+                pagine_testo.append(f"[Pagina {i}]\n{testo_pagina}")
+        except Exception as e:
+            errori_ocr.append(f"Pagina {i}: {type(e).__name__}: {e}")
+
+    doc.close()
+
+    risultato = "\n\n".join(pagine_testo).strip()
+    if not risultato:
+        dettaglio = "; ".join(errori_ocr) if errori_ocr else "Il modello non ha restituito testo"
+        raise RuntimeError(
+            f"OCR tramite Claude Vision non è riuscito ad estrarre testo dal PDF. "
+            f"Dettaglio: {dettaglio}"
+        )
+    return risultato
+
+
 def estrai_testo_da_upload(uploaded_file) -> str:
     """
     Legge il contenuto di un file caricato tramite st.file_uploader.
-    Supporta file .txt, .md, .csv, .pdf, .xls e .xlsx.
+    Supporta file .txt, .md, .csv, .pdf, .xls, .xlsx, .docx e .pptx.
+
+    Per i PDF usa pdfplumber (gestisce layout complessi e tabelle); se una pagina
+    non produce testo (es. pagina con sole immagini) viene aggiunto un segnaposto.
+    Per i DOCX estrae paragrafi e celle di tabella. Per i PPTX estrae il testo
+    da tutti gli shape di ogni slide.
 
     Parametri:
         uploaded_file: l'oggetto restituito da st.file_uploader()
@@ -336,7 +436,7 @@ def estrai_testo_da_upload(uploaded_file) -> str:
         Il contenuto del file come stringa
 
     Esempio:
-        file = st.file_uploader("Carica un file", type=["txt", "pdf", "csv", "xls", "xlsx"])
+        file = st.file_uploader("Carica un file", type=["txt", "pdf", "csv", "xls", "xlsx", "docx", "pptx"])
         if file:
             testo = estrai_testo_da_upload(file)
             st.write(testo)
@@ -344,45 +444,159 @@ def estrai_testo_da_upload(uploaded_file) -> str:
     if uploaded_file is None:
         return ""
 
+    import io
     nome = uploaded_file.name.lower()
+    dati = uploaded_file.read()
 
     # --- PDF ---
     if nome.endswith(".pdf"):
+        # Tentativo 1: pdfplumber (migliore per layout complessi e colonne)
+        _pagine_pdfplumber: list[str] | None = None
+        try:
+            import pdfplumber
+            _pagine_tmp: list[str] = []
+            with pdfplumber.open(io.BytesIO(dati)) as pdf:
+                for i, pagina in enumerate(pdf.pages, start=1):
+                    testo_pagina = pagina.extract_text() or ""
+                    if testo_pagina.strip():
+                        _pagine_tmp.append(testo_pagina)
+                    else:
+                        _pagine_tmp.append(f"[Pagina {i}: contenuto non testuale — possibile immagine o scansione]")
+            _pagine_pdfplumber = _pagine_tmp
+        except Exception:
+            pass
+
+        if _pagine_pdfplumber is not None:
+            testo = "\n\n".join(_pagine_pdfplumber).strip()
+            _solo_immagini = bool(_pagine_pdfplumber) and all(
+                p.startswith("[Pagina") and "non testuale" in p
+                for p in _pagine_pdfplumber
+            )
+            if _solo_immagini:
+                # OCR via Claude Vision — le eccezioni qui vengono propagate
+                # così docente.py può mostrarle all'utente
+                return _ocr_pdf_con_claude(dati)
+            if testo:
+                return testo
+
+        # Fallback: PyPDF2
         try:
             from PyPDF2 import PdfReader
-            import io
-            reader = PdfReader(io.BytesIO(uploaded_file.read()))
+            reader = PdfReader(io.BytesIO(dati))
             pagine = [p.extract_text() or "" for p in reader.pages]
-            return "\n\n".join(pagine).strip()
+            testo_pypdf2 = "\n\n".join(pagine).strip()
+            if testo_pypdf2:
+                return testo_pypdf2
+        except Exception:
+            pass
+
+        # Ultimo tentativo: OCR via Claude Vision (pdfplumber e PyPDF2 non
+        # hanno estratto testo — probabilmente il PDF è una scansione)
+        return _ocr_pdf_con_claude(dati)
+
+    # --- DOCX ---
+    # DOCX è un archivio ZIP contenente word/document.xml.
+    # Usiamo zipfile + xml.etree (stdlib) per evitare dipendenze esterne.
+    if nome.endswith(".docx"):
+        try:
+            import zipfile
+            import xml.etree.ElementTree as ET
+            _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            with zipfile.ZipFile(io.BytesIO(dati)) as zf:
+                xml_content = zf.read("word/document.xml")
+            root = ET.fromstring(xml_content)
+            parti: list[str] = []
+            for para in root.iter(f"{{{_W}}}p"):
+                testo_para = "".join(
+                    t.text or "" for t in para.iter(f"{{{_W}}}t")
+                ).strip()
+                if testo_para:
+                    parti.append(testo_para)
+            return "\n\n".join(parti).strip()
         except Exception as e:
-            return f"[Errore lettura PDF: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file DOCX: {e}") from e
+
+    # --- PPTX ---
+    # PPTX è un archivio ZIP contenente ppt/slides/slideN.xml.
+    # Usiamo zipfile + xml.etree (stdlib) per evitare dipendenze esterne.
+    if nome.endswith(".pptx"):
+        try:
+            import zipfile
+            import re as _re
+            import xml.etree.ElementTree as ET
+            _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+            _P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+            _R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            slide_testi: list[str] = []
+            with zipfile.ZipFile(io.BytesIO(dati)) as zf:
+                nomi_disponibili = set(zf.namelist())
+
+                # Determina l'ordine reale delle slide da presentation.xml.rels
+                nomi_slide_ordinati: list[str] = []
+                try:
+                    rels_root = ET.fromstring(zf.read("ppt/_rels/presentation.xml.rels"))
+                    rels_map = {r.get("Id"): r.get("Target") for r in rels_root}
+                    prs_root = ET.fromstring(zf.read("ppt/presentation.xml"))
+                    for sld in prs_root.iter(f"{{{_P}}}sldId"):
+                        rid = sld.get(f"{{{_R}}}id")
+                        if rid and rid in rels_map:
+                            path = f"ppt/{rels_map[rid]}"
+                            if path in nomi_disponibili:
+                                nomi_slide_ordinati.append(path)
+                except Exception:
+                    pass
+
+                # Fallback: sort numerico sul numero nel nome file
+                if not nomi_slide_ordinati:
+                    tutti = [
+                        n for n in nomi_disponibili
+                        if n.startswith("ppt/slides/slide") and n.endswith(".xml")
+                    ]
+                    nomi_slide_ordinati = sorted(
+                        tutti,
+                        key=lambda x: int(_re.search(r"\d+", x.split("/")[-1]).group()),
+                    )
+
+                for idx, nome_slide in enumerate(nomi_slide_ordinati, start=1):
+                    root = ET.fromstring(zf.read(nome_slide))
+                    testi_slide: list[str] = []
+                    # Itera sui paragrafi (<a:p>) e unisce i run (<a:t>) al loro interno,
+                    # così una frase con stili misti resta una riga intera
+                    for para in root.iter(f"{{{_A}}}p"):
+                        testo_para = "".join(
+                            t.text or "" for t in para.iter(f"{{{_A}}}t")
+                        ).strip()
+                        if testo_para:
+                            testi_slide.append(testo_para)
+                    if testi_slide:
+                        slide_testi.append(f"[Slide {idx}]\n" + "\n".join(testi_slide))
+            return "\n\n".join(slide_testi).strip()
+        except Exception as e:
+            raise RuntimeError(f"Impossibile leggere il file PPTX: {e}") from e
 
     # --- CSV ---
     if nome.endswith(".csv"):
         try:
             import pandas as pd
-            import io
-            df = pd.read_csv(io.BytesIO(uploaded_file.read()))
+            df = pd.read_csv(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
-            return f"[Errore lettura CSV: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file CSV: {e}") from e
 
     # --- Excel (.xls, .xlsx) ---
     if nome.endswith((".xls", ".xlsx")):
         try:
             import pandas as pd
-            import io
-            df = pd.read_excel(io.BytesIO(uploaded_file.read()))
+            df = pd.read_excel(io.BytesIO(dati))
             return df.to_string(index=False)
         except Exception as e:
-            return f"[Errore lettura Excel: {e}]"
+            raise RuntimeError(f"Impossibile leggere il file Excel: {e}") from e
 
     # --- File di testo (.txt, .md, e altri) ---
-    contenuto = uploaded_file.read()
-    if isinstance(contenuto, bytes):
-        contenuto = contenuto.decode("utf-8", errors="replace")
+    if isinstance(dati, bytes):
+        dati = dati.decode("utf-8", errors="replace")
 
-    return contenuto
+    return dati
 
 
 def _parse_json_risposta(testo: str) -> dict:

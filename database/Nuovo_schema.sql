@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS corsi_di_laurea (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nome        TEXT    NOT NULL,               -- es. "Ingegneria Informatica"
     facolta     TEXT    NOT NULL,               -- es. "Ingegneria"
+    descrizione TEXT,                           -- descrizione del corso per il catalogo ospiti
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -211,8 +212,8 @@ CREATE TABLE IF NOT EXISTS quiz (
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS materiali_didattici (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    corso_universitario_id  INTEGER NOT NULL REFERENCES corsi_universitari(id)
-                                ON DELETE RESTRICT, -- non eliminare corso con materiali
+    corso_universitario_id  INTEGER REFERENCES corsi_universitari(id)
+                                ON DELETE RESTRICT, -- NULL = materiale personale senza corso
     docente_id              INTEGER NOT NULL REFERENCES users(id)
                                 ON DELETE RESTRICT, -- non eliminare docente con materiali
     titolo                  TEXT    NOT NULL,
@@ -256,8 +257,8 @@ CREATE TABLE IF NOT EXISTS materiali_chunks (
     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
     materiale_id            INTEGER NOT NULL REFERENCES materiali_didattici(id)
                                 ON DELETE CASCADE,  -- materiale eliminato → elimina chunks
-    corso_universitario_id  INTEGER NOT NULL REFERENCES corsi_universitari(id)
-                                ON DELETE RESTRICT, -- denormalizzato per performance RAG
+    corso_universitario_id  INTEGER REFERENCES corsi_universitari(id)
+                                ON DELETE RESTRICT, -- denormalizzato per performance RAG; NULL = materiale senza corso
     indice_chunk            INTEGER NOT NULL,        -- posizione nel documento (0-based)
     titolo_sezione          TEXT,                    -- generato dall'agente
     testo                   TEXT    NOT NULL,

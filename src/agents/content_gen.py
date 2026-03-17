@@ -25,7 +25,7 @@ import re
 from functools import lru_cache
 from typing import TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
 
@@ -38,13 +38,56 @@ if _ROOT not in sys.path:
 
 from platform_sdk.database import db
 from platform_sdk.llm import get_llm
-from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso
+from src.tools.rag_engine import cerca_chunk_rilevanti, formatta_contesto_rag, conta_chunk_corso, recupera_sommari_materiali, RisultatoRicercaRAG
 
 
 # ---------------------------------------------------------------------------
 # Costanti
 # ---------------------------------------------------------------------------
-_MAX_CHUNK_IN_CONTESTO: int = 8
+_MAX_CHUNK_IN_CONTESTO: int = 5
+_MAX_TOKENS_GENERAZIONE: int = 8192  # Token necessari per output strutturato complesso
+_MAX_CONTESTO_CHARS: int = 18000     # Limite caratteri contesto RAG per evitare output troncato
+
+
+def _invoca_llm_strutturato(llm_strutturato, messaggi) -> "StrutturaCorso | None":
+    """Invoca l'LLM con structured output e gestisce errori di parsing.
+
+    Args:
+        llm_strutturato: LLM configurato con ``with_structured_output(StrutturaCorso)``.
+        messaggi: Lista di messaggi (SystemMessage + HumanMessage).
+
+    Returns:
+        Oggetto ``StrutturaCorso`` se la generazione ha successo, None altrimenti.
+    """
+    try:
+        return llm_strutturato.invoke(messaggi)
+    except (ValidationError, Exception) as e:
+        print(f"[DEBUG _invoca_llm_strutturato] Errore: {e}")
+        return None
+
+
+def _tronca_chunks_per_contesto(chunks: list[dict]) -> list[dict]:
+    """Riduce il numero di chunk se il contesto formattato supera _MAX_CONTESTO_CHARS.
+
+    Rimuove iterativamente l'ultimo chunk (meno rilevante per score) finché
+    il contesto non rientra nel limite di caratteri consentito.
+    Stima l'overhead di formattazione (~120 chars per chunk) per evitare
+    che il contesto formattato reale superi il limite.
+
+    Args:
+        chunks: Lista di chunk ordinati per rilevanza decrescente.
+
+    Returns:
+        Lista (eventualmente ridotta) di chunk che rispetta il limite caratteri.
+    """
+    _OVERHEAD_PER_CHUNK = 120  # intestazione + separatori di formatta_contesto_rag
+    while chunks:
+        totale = sum(len(c.get("testo") or "") for c in chunks) + len(chunks) * _OVERHEAD_PER_CHUNK
+        if totale <= _MAX_CONTESTO_CHARS:
+            break
+        chunks = chunks[:-1]
+    return chunks
+
 
 _SYSTEM_PROMPT_AGENTE = """Sei il Content Generation Engine della piattaforma LearnAI.
 Il tuo compito è strutturare materiale didattico in un formato JSON rigoroso.
@@ -86,10 +129,15 @@ def _db_supporta_tipo_corso() -> bool:
     )
 
 
-def _tipo_piano_da_salvare(is_corso: bool) -> str:
-    """Mantiene compatibilita' con DB legacy che non accettano ancora `corso`."""
+def _tipo_piano_da_salvare(is_corso: bool, corso_id: int | None = None) -> str:
+    """Determina il tipo di piano da salvare nel DB.
+
+    - Piano studente con corso → 'esame'
+    - Piano studente senza corso (Lea sceglie) → 'libero'
+    - Corso docente → 'corso' (se supportato dal DB) altrimenti 'esame'
+    """
     if not is_corso:
-        return "esame"
+        return "libero" if corso_id is None else "esame"
     return "corso" if _db_supporta_tipo_corso() else "esame"
 
 
@@ -117,7 +165,7 @@ class StrutturaCorso(BaseModel):
     titolo_corso: str = Field(description="Titolo del corso")
     descrizione_breve: str = Field(description="Descrizione sintetica del corso")
     durata_stimata_minuti: int = Field(description="Durata stimata in minuti")
-    capitoli: list[Capitolo] = Field(description="Lista dei capitoli del corso")
+    capitoli: list[Capitolo] = Field(description="Lista dei capitoli del corso (almeno uno obbligatorio)")
 
 
 # ---------------------------------------------------------------------------
@@ -129,19 +177,27 @@ class ContentGenState(TypedDict):
 
     Attributes:
         corso_id: ID del corso universitario da cui recuperare i materiali.
-        argomento_richiesto: Descrizione dell'argomento da trattare.
+        argomento_richiesto: Argomento/topic principale (usato per la query RAG).
+        istruzioni_utente: Istruzioni aggiuntive dell'utente su come strutturare la lezione.
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, il risultato è un corso docente; se False, piano studente.
+        materiale_id: Se specificato, limita il RAG ai chunk di quel singolo materiale.
+        materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
+        forza_keyword: Se True, usa keyword matching al posto della ricerca semantica.
         chunks_recuperati: Lista di dizionari con i chunk RAG (id, testo, ...).
         n_chunk_totali_corso: Conteggio totale chunk del corso (per display).
         struttura_corso_generata: Dizionario JSON con la StrutturaCorso prodotta.
         chunk_ids_utilizzati: Lista degli ID dei chunk usati nella generazione.
         errore: Messaggio di errore, se presente (None in caso di successo).
     """
-    corso_id: int
+    corso_id: int | None
     argomento_richiesto: str
+    istruzioni_utente: str
     docente_id: int
     is_corso_docente: bool
+    materiale_id: int | None
+    materiale_ids: list[int] | None
+    forza_keyword: bool
     chunks_recuperati: list[dict]
     n_chunk_totali_corso: int
     struttura_corso_generata: dict
@@ -158,6 +214,11 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
 
     Delega interamente a ``cerca_chunk_rilevanti`` in ``rag_engine.py``
     la logica di keyword extraction, query SQL LIKE multi-campo e scoring.
+    Supporta sia singolo materiale_id sia lista materiale_ids.
+
+    Se lo stato contiene già ``chunks_recuperati`` non vuoti (pre-caricati
+    dall'esterno, es. ricerca platform-wide), salta la ricerca e li usa
+    direttamente.
 
     Args:
         stato: Stato corrente del grafo.
@@ -166,29 +227,70 @@ def _nodo_recupera_chunks(stato: ContentGenState) -> dict:
         Aggiornamento parziale dello stato con ``chunks_recuperati``,
         ``n_chunk_totali_corso`` ed eventuale ``errore``.
     """
-    corso_id: int = stato["corso_id"]
-    argomento: str = stato["argomento_richiesto"]
+    # Se i chunk sono già stati pre-caricati dall'esterno, usali direttamente
+    if stato.get("chunks_recuperati"):
+        chunks_pre = stato["chunks_recuperati"]
+        print(f"[DEBUG _nodo_recupera_chunks] Chunks pre-caricati: {len(chunks_pre)}, skip RAG")
+        return {
+            "chunks_recuperati": chunks_pre,
+            "n_chunk_totali_corso": len(chunks_pre),
+            "errore": None,
+        }
 
-    n_totali: int = conta_chunk_corso(corso_id)
+    corso_id: int | None = stato["corso_id"]
+    argomento: str = stato["argomento_richiesto"]
+    materiale_id: int | None = stato.get("materiale_id")
+    materiale_ids: list[int] | None = stato.get("materiale_ids")
+    forza_keyword: bool = stato.get("forza_keyword", False)
+
+    # Aumenta top_k quando ci sono più materiali per garantire copertura
+    top_k = _MAX_CHUNK_IN_CONTESTO
+    if materiale_ids and len(materiale_ids) > 1:
+        top_k = min(_MAX_CHUNK_IN_CONTESTO * 2, 24)
+
+    n_totali: int = conta_chunk_corso(
+        corso_id, materiale_id=materiale_id, materiale_ids=materiale_ids,
+    )
+
+    print(f"[DEBUG _nodo_recupera_chunks] corso_id={corso_id}, materiale_id={materiale_id}, "
+          f"materiale_ids={materiale_ids}, n_totali={n_totali}, top_k={top_k}, "
+          f"forza_keyword={forza_keyword}")
 
     if n_totali == 0:
         return {
             "chunks_recuperati": [],
             "n_chunk_totali_corso": 0,
             "errore": (
-                "Nessun materiale didattico disponibile per questo corso. "
-                "Carica prima un documento nella sezione Upload."
+                "Nessun materiale didattico disponibile. "
+                "Carica prima un documento tramite 'Carica materiale'."
             ),
         }
 
-    chunks_rilevanti: list[dict] = cerca_chunk_rilevanti(
+    risultato: RisultatoRicercaRAG = cerca_chunk_rilevanti(
         corso_id=corso_id,
         query=argomento,
-        top_k=_MAX_CHUNK_IN_CONTESTO,
+        top_k=top_k,
+        materiale_id=materiale_id,
+        materiale_ids=materiale_ids,
+        forza_keyword=forza_keyword,
     )
 
+    print(f"[DEBUG _nodo_recupera_chunks] metodo={risultato.metodo_utilizzato}, "
+          f"chunks={len(risultato.chunks)}, errore_sem={risultato.errore_semantico}")
+
+    # Se la ricerca semantica è fallita e non è stato forzato il keyword,
+    # restituisci l'errore per chiedere conferma all'utente
+    if risultato.errore_semantico and not forza_keyword:
+        return {
+            "chunks_recuperati": [],
+            "n_chunk_totali_corso": n_totali,
+            "errore": (
+                f"RICERCA_SEMANTICA_FALLITA|{risultato.errore_semantico}"
+            ),
+        }
+
     return {
-        "chunks_recuperati": chunks_rilevanti,
+        "chunks_recuperati": risultato.chunks,
         "n_chunk_totali_corso": n_totali,
         "errore": None,
     }
@@ -212,17 +314,30 @@ def _nodo_genera_struttura_corso(stato: ContentGenState) -> dict:
 
     chunks: list[dict] = stato["chunks_recuperati"]
     argomento: str = stato["argomento_richiesto"]
+    istruzioni: str = stato.get("istruzioni_utente", "").strip()
+
+    # Limita i chunk se il contesto supera il massimo consentito,
+    # per evitare che l'output strutturato venga troncato dal limite token.
+    chunks = _tronca_chunks_per_contesto(chunks)
 
     contesto_rag: str = formatta_contesto_rag(chunks)
     chunk_ids: list[int] = [c["id"] for c in chunks]
 
-    prompt_struttura = f"""Genera la struttura completa di un corso didattico sull'argomento: "{argomento}".
+    sezione_istruzioni = (
+        f"\nISTRUZIONI AGGIUNTIVE DEL DOCENTE (rispettale rigorosamente):\n{istruzioni}\n"
+        if istruzioni else ""
+    )
 
-CONTESTO DIDATTICO (usa SOLO queste informazioni):
+    prompt_struttura = f"""Analizza il materiale didattico fornito e genera la struttura completa di un corso.
+Il nome del corso è "{argomento}" — usalo come riferimento, ma struttura i capitoli
+in base ai TEMI REALI presenti nel materiale, non al nome del corso.
+{sezione_istruzioni}
+MATERIALE DIDATTICO (usa SOLO queste informazioni):
 {contesto_rag}
 
-ISTRUZIONE FONDAMENTALE: ogni affermazione deve provenire dai chunk sopra.
-Non aggiungere informazioni esterne. Se il materiale è insufficiente, dichiaralo.
+ISTRUZIONE FONDAMENTALE: ogni affermazione deve provenire dal materiale sopra.
+Non aggiungere informazioni esterne. Devi SEMPRE generare almeno un capitolo
+con tutto il contenuto disponibile nel materiale.
 
 Organizza i contenuti in:
 - Capitoli tematici coerenti (con id_capitolo, titolo, ordine)
@@ -234,14 +349,52 @@ Stima la durata totale del corso in minuti.
 
 Lingua: Italiano."""
 
-    llm = get_llm()
+    llm = get_llm(max_tokens=_MAX_TOKENS_GENERAZIONE)
     llm_strutturato = llm.with_structured_output(StrutturaCorso)
 
     messaggi = [
         SystemMessage(content=_SYSTEM_PROMPT_AGENTE),
         HumanMessage(content=prompt_struttura),
     ]
-    output: StrutturaCorso = llm_strutturato.invoke(messaggi)
+
+    print(f"[DEBUG _nodo_genera_struttura] n_chunks={len(chunks)}, "
+          f"contesto_rag_len={len(contesto_rag)} chars, argomento='{argomento}'")
+
+    # Primo tentativo
+    output = _invoca_llm_strutturato(llm_strutturato, messaggi)
+
+    # Retry con contesto ridotto se il primo tentativo fallisce
+    if output is None and len(chunks) > 6:
+        chunks_ridotti = chunks[:len(chunks) // 2]
+        contesto_ridotto = formatta_contesto_rag(chunks_ridotti)
+        chunk_ids = [c["id"] for c in chunks_ridotti]
+
+        prompt_retry = prompt_struttura.replace(contesto_rag, contesto_ridotto)
+        messaggi_retry = [
+            SystemMessage(content=_SYSTEM_PROMPT_AGENTE),
+            HumanMessage(content=prompt_retry),
+        ]
+
+        print(f"[DEBUG _nodo_genera_struttura] RETRY con {len(chunks_ridotti)} chunks, "
+              f"contesto_len={len(contesto_ridotto)} chars")
+        output = _invoca_llm_strutturato(llm_strutturato, messaggi_retry)
+
+    if output is None:
+        return {
+            "struttura_corso_generata": {},
+            "chunk_ids_utilizzati": [],
+            "errore": "Il modello non ha generato una struttura valida. Riprova con meno materiali.",
+        }
+
+    if not output.capitoli:
+        return {
+            "struttura_corso_generata": {},
+            "chunk_ids_utilizzati": [],
+            "errore": (
+                "Il modello ha restituito una struttura senza capitoli. "
+                "Prova a riformulare la richiesta con un argomento più specifico."
+            ),
+        }
 
     return {
         "struttura_corso_generata": output.model_dump(),
@@ -276,6 +429,10 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
         return {"errore": "Struttura corso vuota: il modello non ha prodotto output valido."}
 
     titolo_corso: str = struttura.get("titolo_corso", argomento)
+    # Per i piani studente il titolo generato dall'LLM coincide spesso col nome
+    # del corso universitario. Prefissare con "Piano: " garantisce distinzione visiva.
+    if not is_corso:
+        titolo_corso = f"Piano: {titolo_corso}"
     descrizione: str = struttura.get("descrizione_breve", "")
 
     try:
@@ -286,6 +443,23 @@ def _nodo_salva_risultati(stato: ContentGenState) -> dict:
 
 def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_ids, corso_id, is_corso) -> dict:
     """Esegue le insert nel DB. Separata da _nodo_salva_risultati per isolare il try/except."""
+    # Per i piani studente: ricava il nome del corso per evitare che capitoli/paragrafi
+    # abbiano lo stesso titolo del corso universitario di appartenenza.
+    nome_corso_norm: str = ""
+    if not is_corso and corso_id:
+        try:
+            riga_corso = db.esegui("SELECT nome FROM corsi_universitari WHERE id = ?", [corso_id])
+            if riga_corso:
+                nome_corso_norm = (riga_corso[0]["nome"] or "").strip().lower()
+        except Exception:
+            pass
+
+    def _disambigua(titolo: str) -> str:
+        """Aggiunge ' — Approfondimento' se il titolo coincide col nome del corso."""
+        if nome_corso_norm and titolo.strip().lower() == nome_corso_norm:
+            return titolo + " — Approfondimento"
+        return titolo
+
     # 1. Crea il piano (corso docente o piano studente)
     piano_id: int = db.inserisci(
         "piani_personalizzati",
@@ -294,7 +468,7 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
             "titolo": titolo_corso,
             "descrizione": descrizione,
             # `is_corso_docente` resta la fonte di verita' anche sui DB legacy.
-            "tipo": _tipo_piano_da_salvare(is_corso),
+            "tipo": _tipo_piano_da_salvare(is_corso, corso_id),
             "corso_universitario_id": corso_id,
             "stato": "attivo",
             "is_corso_docente": 1 if is_corso else 0,
@@ -307,7 +481,7 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
             "piano_capitoli",
             {
                 "piano_id": piano_id,
-                "titolo": capitolo["titolo"],
+                "titolo": _disambigua(capitolo["titolo"]),
                 "ordine": capitolo.get("ordine", 0),
             },
         )
@@ -317,7 +491,7 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
                 "piano_paragrafi",
                 {
                     "capitolo_id": capitolo_id,
-                    "titolo": paragrafo["titolo"],
+                    "titolo": _disambigua(paragrafo["titolo"]),
                     "ordine": 0,
                 },
             )
@@ -331,6 +505,16 @@ def _salva_struttura_nel_db(stato, struttura, titolo_corso, descrizione, chunk_i
                     "generato_al_momento": 0,
                 },
             )
+
+    # 3. Popola piano_materiali_utilizzati per tracciamento fonti
+    for cid in chunk_ids:
+        try:
+            db.inserisci("piano_materiali_utilizzati", {
+                "piano_id": piano_id,
+                "chunk_id": cid,
+            })
+        except Exception:
+            pass  # UNIQUE constraint: chunk già tracciato
 
     return {}
 
@@ -364,19 +548,30 @@ def crea_agente_content_gen():
 
 def esegui_generazione(
     agente,
-    corso_id: int,
+    corso_id: int | None,
     argomento_richiesto: str,
     docente_id: int = 1,
     is_corso_docente: bool = True,
+    materiale_id: int | None = None,
+    materiale_ids: list[int] | None = None,
+    istruzioni_utente: str = "",
+    chunks_precaricati: list[dict] | None = None,
+    forza_keyword: bool = False,
 ) -> ContentGenState:
     """Avvia il grafo di generazione contenuti e restituisce lo stato finale.
 
     Args:
         agente: Grafo compilato creato con ``crea_agente_content_gen()``.
         corso_id: ID del corso universitario.
-        argomento_richiesto: Argomento su cui generare i contenuti.
+        argomento_richiesto: Topic/argomento principale (usato per la query RAG).
         docente_id: ID del docente che richiede la generazione.
         is_corso_docente: Se True, salva come corso docente; se False, come piano studente.
+        materiale_id: Se specificato, limita il RAG ai chunk di quel materiale.
+        materiale_ids: Se specificato, recupera chunk da più materiali contemporaneamente.
+        istruzioni_utente: Istruzioni aggiuntive su come strutturare la lezione.
+        chunks_precaricati: Se forniti, salta il nodo RAG e usa questi chunk direttamente.
+        forza_keyword: Se True, il nodo RAG usa keyword matching al posto della
+            ricerca semantica. Usare solo dopo consenso esplicito dell'utente.
 
     Returns:
         Lo stato finale del grafo con tutti i campi popolati.
@@ -386,7 +581,11 @@ def esegui_generazione(
         "docente_id": docente_id,
         "is_corso_docente": is_corso_docente,
         "argomento_richiesto": argomento_richiesto,
-        "chunks_recuperati": [],
+        "istruzioni_utente": istruzioni_utente,
+        "materiale_id": materiale_id,
+        "materiale_ids": materiale_ids,
+        "forza_keyword": forza_keyword,
+        "chunks_recuperati": chunks_precaricati or [],
         "n_chunk_totali_corso": 0,
         "struttura_corso_generata": {},
         "chunk_ids_utilizzati": [],

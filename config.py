@@ -29,10 +29,28 @@ BEDROCK_MODEL_ID_FAST = os.getenv(
     "anthropic.claude-3-5-haiku-20241022-v1:0"
 )
 
+# Modello potente (per task complessi: generazione corsi, structured output grandi)
+# Usato quando il contesto è ampio o serve output strutturato di alta qualità.
+# Se non configurato, usa il modello principale.
+BEDROCK_MODEL_ID_POTENTE = os.getenv(
+    "BEDROCK_MODEL_ID_POTENTE",
+    os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+)
+
 # --- Parametri LLM ---
 LLM_TEMPERATURE = 0.3          # Creatività: 0 = deterministico, 1 = molto creativo
 LLM_MAX_TOKENS = 4096          # Lunghezza massima risposta modello principale
 LLM_MAX_TOKENS_FAST = 2048     # Lunghezza massima risposta modello veloce
+LLM_MAX_TOKENS_POTENTE = 8192  # Lunghezza massima per generazioni complesse
+
+# --- Embedding & Vector Store ---
+EMBEDDING_MODEL_NAME = os.getenv(
+    "EMBEDDING_MODEL_NAME",
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(__file__), "data", "chroma_db")
+CHROMA_COLLECTION_PREFIX = "learnai_corso_"
+CHROMA_COLLECTION_PIATTAFORMA = "learnai_tutti"
 
 # --- Database SQLite ---
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), "database", "learnai.db")

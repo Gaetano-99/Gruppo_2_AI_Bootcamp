@@ -1,6 +1,11 @@
 """
-pages/ospite.py
-Pagina di onboarding per ospiti: permette di esplorare i corsi di laurea con l'aiuto dell'AI.
+views/ospite.py
+Pagina di onboarding per ospiti.
+
+Flusso:
+  - Home: FAQ + bottoni "Esplora Corsi" / "Questionario" + chatbot Lea
+  - Catalogo: griglia di corsi letti dal DB
+  - Questionario: 30 domande + analisi LLM del percorso
 """
 import sys
 import os
@@ -11,74 +16,297 @@ if _ROOT not in sys.path:
 
 import streamlit as st
 from src.agents.orientamento import chiedi_agente_ospite
+from views.catalogo_corsi import mostra_catalogo
+from views.questionario_ospite import mostra_questionario
+
+_CSS = """
+<style>
+.hero-banner {
+    background: linear-gradient(135deg, #001A4D 0%, #003087 60%, #0057B8 100%);
+    border-radius: 18px;
+    padding: 36px 40px;
+    margin-bottom: 28px;
+    color: white;
+}
+.hero-banner h1 { color: white; margin: 0 0 8px 0; font-size: 2rem; }
+.hero-banner p  { color: rgba(255,255,255,0.88); margin: 0; font-size: 1.05rem; }
+.faq-section {
+    background: #F6F9FF;
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    border: 1px solid #DAEAFF;
+}
+.section-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #003087;
+    margin: 28px 0 12px 0;
+}
+.chat-intro {
+    background: #EEF4FF;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    border-left: 4px solid #0057B8;
+    font-size: 0.95rem;
+    color: #001A4D;
+}
+
+/* --- HACK UI: bottone Streamlit invisibile sovrapposto alla card --- */
+
+/* La colonna deve essere il punto di riferimento per il posizionamento assoluto */
+div[data-testid="column"]:has(.action-card-wrapper) {
+    position: relative !important;
+}
+
+/* Il bottone Streamlit copre tutta la colonna, invisibile */
+div[data-testid="column"]:has(.action-card-wrapper) .stButton {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    z-index: 10 !important;
+    margin: 0 !important;
+}
+div[data-testid="column"]:has(.action-card-wrapper) .stButton > button {
+    width: 100% !important;
+    height: 100% !important;
+    opacity: 0 !important;
+    cursor: pointer !important;
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+/* Nasconde il testo del bottone fantasma */
+div[data-testid="column"]:has(.action-card-wrapper) .stButton > button p {
+    display: none !important;
+}
+
+/* Effetto hover sulla card quando si passa sopra la colonna */
+div[data-testid="column"]:has(.action-card-wrapper):hover .action-card-wrapper {
+    filter: brightness(1.07);
+    transform: scale(1.02);
+}
+
+/* Stile base chat input */
+[data-testid="stChatInput"] {
+    background-color: #ffffff !important;
+    border: 2px solid #DAEAFF !important;
+    border-radius: 25px !important;
+    box-shadow: 0 4px 6px rgba(0, 48, 135, 0.08) !important;
+    transition: all 0.3s ease;
+}
+
+/* Stile quando l'input è a fuoco */
+[data-testid="stChatInput"]:focus-within {
+    border-color: #0057B8 !important;
+    box-shadow: 0 6px 12px rgba(0, 87, 184, 0.15) !important;
+}
+
+/* Icona di invio */
+[data-testid="stChatInput"] button {
+    background-color: #0057B8 !important;
+    color: white !important;
+    border-radius: 50% !important;
+    padding: 8px !important;
+    transition: all 0.2s ease;
+}
+
+[data-testid="stChatInput"] button:hover {
+    background-color: #003087 !important;
+    transform: scale(1.05);
+}
+
+[data-testid="stChatInput"] button svg {
+    fill: white !important;
+}
+</style>
+"""
+
+# FAQ items
+_FAQ = [
+    ("📅 Quando inizia l'anno accademico?", "L'anno accademico inizia solitamente a ottobre. Le iscrizioni aprono in estate, di norma tra giugno e settembre."),
+    ("💰 Quanto costano le tasse universitarie?", "Le tasse variano in base all'ISEE familiare e variano da circa €200 a €3.000 all'anno. Sono previste esenzioni per borse di studio."),
+    ("🔬 Esistono opportunità di tirocinio?", "Sì, la maggior parte dei corsi prevede tirocini obbligatori o facoltativi presso aziende partner e strutture convenzionate."),
+    ("🌍 Posso studiare all'estero?", "Certo! Il programma Erasmus+ ti permette di trascorrere da 3 a 12 mesi in un'università europea, con borsa di studio."),
+    ("📋 Come funzionano i test di ammissione?", "Alcuni corsi (es. Medicina, Architettura) hanno accesso programmato con test nazionale. Altri sono ad accesso libero."),
+]
+
 
 def mostra_homepage_ospite():
-    # Nascondi sidebar nativa per evitare navigazione incontrollata
+    """Entry point principale per la pagina ospite. Gestisce il routing tra home, catalogo e questionario."""
     st.markdown("<style>[data-testid='stSidebarNav']{display:none}</style>", unsafe_allow_html=True)
+    st.markdown(_CSS, unsafe_allow_html=True)
 
+    # Inizializza lo stato di routing
+    if "ospite_pagina" not in st.session_state:
+        st.session_state["ospite_pagina"] = "home"
+
+    # Sidebar
     with st.sidebar:
-        st.markdown("### Orientamento")
-        st.info("Benvenuto nell'area Ospiti. Qui puoi esplorare i corsi di laurea disponibili.")
-        if st.button("← Torna al Login", use_container_width=True):
-            # 1. Pulisci la sessione (rimuove is_logged_in e user_role)
-            st.session_state.clear() 
-            # 2. Riavvia l'app (app.py vedrà che non sei loggato e caricherà login.py)
+        st.markdown("### Area Ospiti")
+        st.info("Esplora i corsi, compila il questionario di orientamento o chatta con Lea!")
+        if st.button("← Torna al Login", use_container_width=True, key="btn_login_sidebar"):
+            st.session_state.clear()
             st.rerun()
-    st.title("Esplora i Corsi di Laurea 🎓")
-    st.markdown("Fai una domanda per scoprire quale corso di laurea è più adatto a te!")
+        st.markdown("---")
+        st.markdown("**Navigazione rapida**")
+        if st.button("🏠 Home", use_container_width=True, key="sidebar_home"):
+            st.session_state["ospite_pagina"] = "home"
+            st.rerun()
+        if st.button("📚 Catalogo Corsi", use_container_width=True, key="sidebar_catalogo"):
+            st.session_state["ospite_pagina"] = "catalogo"
+            st.rerun()
+        if st.button("🎯 Questionario", use_container_width=True, key="sidebar_quest"):
+            st.session_state["ospite_pagina"] = "questionario"
+            st.rerun()
 
-    # Inizializza cronologia specifica per ospite se non esiste
+    # Routing
+    pagina = st.session_state.get("ospite_pagina", "home")
+
+    if pagina == "catalogo":
+        mostra_catalogo()
+        return
+
+    if pagina == "questionario":
+        mostra_questionario()
+        return
+
+    # -------------------------------------------------------------------------
+    # PAGINA HOME
+    # -------------------------------------------------------------------------
+    _render_home()
+
+
+def _render_home():
+    """Renderizza la home page dell'ospite: FAQ + bottoni + chatbot."""
+
+    # Hero banner
+    st.markdown("""
+    <div class="hero-banner">
+        <h1>Scopri il tuo percorso universitario 🎓</h1>
+        <p>Benvenuto/a! Sono <strong>Lea</strong>, la tua assistente di orientamento.
+        Esplora il catalogo dei corsi, fai il questionario o chiedimi qualsiasi cosa sui percorsi di studio.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # FAQ collassabili
+    st.markdown('<div class="section-label">❓ Domande frequenti</div>', unsafe_allow_html=True)
+    with st.container():
+        for domanda, risposta in _FAQ:
+            with st.expander(domanda):
+                st.markdown(risposta)
+
+    st.markdown("---")
+
+    # Action buttons
+    st.markdown('<div class="section-label">🚀 Da dove vuoi iniziare?</div>', unsafe_allow_html=True)
+
+    col_a, col_b = st.columns(2, gap="medium")
+
+    with col_a:
+        # La card visiva con classe action-card-wrapper (usata dal CSS per il posizionamento)
+        st.markdown("""
+        <div class="action-card-wrapper" style="
+            background: linear-gradient(135deg, #003087, #0057B8);
+            border-radius: 14px;
+            padding: 24px 26px;
+            text-align: center;
+            transition: filter 0.2s, transform 0.2s;
+            cursor: pointer;
+        ">
+            <h3 style="margin: 0 0 6px 0; font-size: 1.2rem; color: white;">📚 Esplora Corsi</h3>
+            <p style="margin: 0; font-size: 0.88rem; color: rgba(255,255,255,0.88);">
+                Sfoglia tutti i corsi di laurea disponibili con descrizioni e facoltà.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        # Bottone Streamlit invisibile sovrapposto alla card tramite CSS
+        if st.button("Esplora Corsi", use_container_width=True, key="btn_catalogo_home_inv"):
+            st.session_state["ospite_pagina"] = "catalogo"
+            st.rerun()
+
+    with col_b:
+        # La card visiva con classe action-card-wrapper (usata dal CSS per il posizionamento)
+        st.markdown("""
+        <div class="action-card-wrapper" style="
+            background: linear-gradient(135deg, #C5A028, #E8BA30);
+            border-radius: 14px;
+            padding: 24px 26px;
+            text-align: center;
+            transition: filter 0.2s, transform 0.2s;
+            cursor: pointer;
+        ">
+            <h3 style="margin: 0 0 6px 0; font-size: 1.2rem; color: white;">🎯 Questionario</h3>
+            <p style="margin: 0; font-size: 0.88rem; color: rgba(255,255,255,0.88);">
+                30 domande per scoprire il percorso di studi più adatto al tuo profilo.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        # Bottone Streamlit invisibile sovrapposto alla card tramite CSS
+        if st.button("Fai il Questionario", use_container_width=True, key="btn_questionario_home_inv"):
+            st.session_state["ospite_pagina"] = "questionario"
+            st.rerun()
+
+    st.markdown("---")
+
+    # Chatbot Lea
+    st.markdown('<div class="section-label">💬 Chatta con Lea</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="chat-intro">
+        👋 Puoi chiedermi qualsiasi cosa sui corsi di laurea: durata, materie, sbocchi lavorativi,
+        differenze tra percorsi simili e molto altro.
+        <br><br>
+        <em>Suggerimenti: "Cosa si studia a Ingegneria Informatica?",
+        "Qual è la differenza tra Economia e Giurisprudenza?",
+        "Quali corsi offrono accesso al mondo della finanza?"</em>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Suggerimenti rapidi
+    suggerimenti = [
+        "🖥️ Cosa si studia a Informatica?",
+        "💼 Sbocchi lavorativi di Economia?",
+        "⚕️ Come si accede a Medicina?",
+    ]
+    cols = st.columns(len(suggerimenti))
+    domanda_cliccata = None
+    for i, sugg in enumerate(suggerimenti):
+        with cols[i]:
+            if st.button(sugg, use_container_width=True, key=f"sugg_home_{i}"):
+                domanda_cliccata = sugg
+
+    st.markdown("")
+
+    # Inizializza la chat
     if "chat_ospite" not in st.session_state:
         st.session_state["chat_ospite"] = []
 
-    # Suggerimenti (chip)
-    suggerimenti = [
-        "Cosa si studia a Ingegneria?",
-        "Quali sono gli sbocchi di Economia?",
-        "Che differenza c'è tra Matematica e Fisica?"
-    ]
-
-    st.markdown("**Domande frequenti:**")
-    cols = st.columns(len(suggerimenti))
-    domanda_cliccata = None
-
-    for i, sugg in enumerate(suggerimenti):
-        with cols[i]:
-            # Lo st.button restituisce True solo nel momento in cui viene cliccato
-            if st.button(sugg, use_container_width=True):
-                domanda_cliccata = sugg
-
-    st.divider()
-
-    # Disegna la chat history
+    # Mostra la storia della chat
     for msg in st.session_state["chat_ospite"]:
         with st.chat_message(msg["ruolo"]):
             st.markdown(msg["contenuto"])
 
-    # Priorità: se ha cliccato un bottone, o se ha scritto nel chat input
-    prompt = st.chat_input("Chiedi info sui corsi (es. 'Quanto dura Informatica?')...")
-
-    # Override con pulsante se valorizzato
+    # Input chat
+    prompt = st.chat_input("Chiedi a Lea info sui corsi (es. 'Quanto dura Ingegneria?')...")
     if domanda_cliccata:
         prompt = domanda_cliccata
 
     if prompt:
-        # Mostra messaggio utente nella history e a schermo
         st.session_state["chat_ospite"].append({"ruolo": "user", "contenuto": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
-            
-        # Invocazione agente AI
+
         with st.chat_message("assistant"):
-            with st.spinner("L'assistente sta controllando il catalogo corsi..."):
+            with st.spinner("Lea sta consultando il catalogo corsi..."):
                 try:
-                    # Passa la cronologia meno l'ultimo elemento (che è la domanda corrente)
                     cronologia_passata = st.session_state["chat_ospite"][:-1]
-                    
-                    risposta = chiedi_agente_ospite(
-                        domanda=prompt, 
-                        cronologia=cronologia_passata
-                    )
+                    risposta = chiedi_agente_ospite(domanda=prompt, cronologia=cronologia_passata)
                     st.markdown(risposta)
                     st.session_state["chat_ospite"].append({"ruolo": "assistant", "contenuto": risposta})
                 except Exception as e:
