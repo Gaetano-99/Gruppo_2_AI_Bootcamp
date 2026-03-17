@@ -68,7 +68,7 @@ def _import_recommender():
 # ---------------------------------------------------------------------------
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600&display=swap');
 
 :root {
     --blue:      #003087;
@@ -252,9 +252,10 @@ _CSS = """
     gap: 14px;
 }
 .app-header .header-brand img {
-    height: 38px;
+    height: 68px;
     width: auto;
     object-fit: contain;
+    filter: brightness(0) invert(1);
 }
 .app-header .header-brand-text {
     color: rgba(255,255,255,0.35);
@@ -453,7 +454,7 @@ _CSS = """
 
 /* ---- SEZIONE CENTRALE — CONTENUTO ---- */
 .section-header {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Source Sans 3', sans-serif;
     font-size: 1.55rem;
     color: #001A4D;
     font-weight: 700;
@@ -515,7 +516,7 @@ _CSS = """
     color: #5A6A7E;
 }
 .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
-.empty-state h3 { color: #001A4D; font-family: 'Playfair Display', serif; }
+.empty-state h3 { color: #001A4D; font-family: 'Source Sans 3', sans-serif; }
 
 /* ---- CHATBOT LEA ---- */
 .chat-header {
@@ -752,6 +753,7 @@ div[data-testid="stModal"] > div:first-child {
     border: 1.5px solid #C8D5E3 !important;
     font-family: 'Source Sans 3', sans-serif !important;
     font-size: 0.88rem !important;
+    padding-left: 16px !important;
 }
 .stChatInput textarea:focus {
     border-color: #003087 !important;
@@ -2470,15 +2472,24 @@ def _render_chatbot(
 
     # Aggiorna il contesto ad ogni render (non solo al primo messaggio)
     # così Lea sa subito su quale piano/corso sta lavorando lo studente.
-    # Nota: aggiorna anche quando corso_id è None ma piano_id è impostato.
-    if aggiorna_contesto and (corso_id or piano_id or view_mode):
-        aggiorna_contesto(
-            corso_id=corso_id,
-            corso_nome=corso_nome,
-            tipo_vista=view_mode,
-            piano_id=piano_id,
-            piano_titolo=piano_titolo,
-        )
+    # Quando siamo sulla Home (tutti None) resettiamo il contesto per evitare
+    # che l'orchestratore conservi lo stato della pagina precedente.
+    if aggiorna_contesto:
+        if corso_id or piano_id or view_mode:
+            aggiorna_contesto(
+                corso_id=corso_id,
+                corso_nome=corso_nome,
+                tipo_vista=view_mode,
+                piano_id=piano_id,
+                piano_titolo=piano_titolo,
+            )
+        else:
+            # Home page: resetta contesto navigazione
+            aggiorna_contesto(
+                tipo_vista="home",
+                clear_corso=True,
+                clear_materiale=True,
+            )
 
     # Flag per bloccare l'interazione durante l'elaborazione di Lea
     is_processing = st.session_state.get("_lea_processing", False)
@@ -3068,7 +3079,7 @@ def _dialog_upload_materiale_libero():
                 st.error(f"Errore durante l'elaborazione: {e}")
 
 
-@st.dialog("Materiale didattico")
+@st.dialog("Materiale didattico", width="medium")
 def _dialog_view_materiale_libero(user_id: int):
     st.markdown("**Il tuo materiale didattico**")
     st.caption("Seleziona un documento per chattare con Lea su di esso, oppure genera una lezione strutturata.")
@@ -3152,9 +3163,83 @@ def _dialog_view_materiale_libero(user_id: int):
 # Entry point principale
 # ---------------------------------------------------------------------------
 
+@st.dialog("Federico360 — LearnAI Platform", width="small", dismissible=False)
+def _popup_accettazione():
+    """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
+    st.markdown("""
+    <style>
+    div[data-testid="stModal"] > div:first-child {
+        max-height: 80vh !important;
+        max-width: 550px !important;
+        width: 550px !important;
+    }
+    /* Hide ALL possible close button selectors */
+    button[data-testid="stBaseButton-headerNoPadding"],
+    div[data-testid="stModal"] button[aria-label="Close"],
+    div[data-testid="stModal"] [data-testid="stModalCloseButton"],
+    div[data-testid="stModal"] header button,
+    div[data-testid="stModal"] [data-testid="stHeader"] button,
+    div[data-testid="stModal"] > div > div > div > button {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        pointer-events: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    logo_b64 = _get_logo_base64()
+    logo_img = (
+        f'<img src="data:image/png;base64,{logo_b64}" '
+        f'style="height:50px;width:auto;" alt="Federico360">'
+        if logo_b64 else ""
+    )
+
+    st.markdown(f"""
+    <div style="text-align:center; padding: 8px 0 4px;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:20px;">
+            {logo_img}
+            <span style="color:#C8D5E3; font-size:1.4rem; font-weight:300;">|</span>
+            <span style="font-family:'Source Sans 3',sans-serif; font-size:1.05rem; font-weight:600; color:#5A6A7E;">
+                LearnAI Platform
+            </span>
+        </div>
+        <h3 style="color:#001A4D; font-size:1.12rem; font-weight:700; margin:0 0 18px 0;
+                    font-family:'Source Sans 3',sans-serif;">
+            Benvenuto nella piattaforma LearnAI
+        </h3>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto 12px; font-family:'Source Sans 3',sans-serif;">
+            Stai interagendo con un sistema basato sull'<strong style="color:#001A4D;">Intelligenza
+            Artificiale</strong>, pertanto ricorda che qualsiasi contenuto generato o analizzato
+            sar&agrave; prodotto dall'AI.
+        </p>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto; font-family:'Source Sans 3',sans-serif;">
+            Ti ricordiamo che la piattaforma Federico360 deve essere utilizzata nel rispetto dei
+            <strong style="color:#001A4D;">&ldquo;Termini e Condizioni&rdquo;</strong>. Il trattamento
+            dei dati personali sar&agrave; effettuato in conformit&agrave; con la nostra
+            <strong style="color:#001A4D;">Privacy Policy</strong>.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    if st.button("Accetta", type="primary", use_container_width=True, key="btn_accetta_popup"):
+        st.session_state["_accettazione_accettata"] = True
+        st.rerun()
+
+
 def mostra_homepage_studente():
     """Renderizza l'intera homepage studente."""
     st.markdown(_CSS, unsafe_allow_html=True)
+
+    if not st.session_state.get("_accettazione_accettata"):
+        _popup_accettazione()
 
     utente = st.session_state.user
     studente_id = st.session_state.current_user_id
@@ -3233,7 +3318,7 @@ def mostra_homepage_studente():
             # Welcome screen
             nome = _esc(utente["nome"])
             st.markdown(f"""
-            <div class="empty-state" style="padding-top:24px; padding-bottom:8px">
+            <div class="empty-state" style="padding-top:48px; padding-bottom:8px">
                 <div class="icon"></div>
                 <h3>Ciao, {nome}!</h3>
             </div>

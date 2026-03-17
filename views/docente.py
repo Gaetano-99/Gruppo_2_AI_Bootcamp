@@ -1551,9 +1551,73 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         st.rerun()
 
 
+@st.dialog("Federico360 — LearnAI Platform", width="large")
+def _popup_accettazione():
+    """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
+    st.markdown("""
+    <style>
+    /* Hide ALL possible close button selectors */
+    button[data-testid="stBaseButton-headerNoPadding"],
+    div[data-testid="stModal"] button[aria-label="Close"],
+    div[data-testid="stModal"] [data-testid="stModalCloseButton"],
+    div[data-testid="stModal"] header button,
+    div[data-testid="stModal"] [data-testid="stHeader"] button,
+    div[data-testid="stModal"] > div > div > div > button {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        pointer-events: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="text-align:center; padding: 8px 0 4px;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:20px;">
+            <span style="font-family:'Playfair Display','Source Sans 3',serif; font-size:1.3rem;
+                         font-weight:700; color:#001A4D;">
+                Federico<span style="color:#C5A028;">360</span>
+            </span>
+            <span style="color:#C8D5E3; font-size:1.4rem; font-weight:300;">|</span>
+            <span style="font-family:'Source Sans 3',sans-serif; font-size:1.05rem; font-weight:600; color:#5A6A7E;">
+                LearnAI Platform
+            </span>
+        </div>
+        <h3 style="color:#001A4D; font-size:1.12rem; font-weight:700; margin:0 0 18px 0;
+                    font-family:'Source Sans 3',sans-serif;">
+            Benvenuto nella piattaforma LearnAI
+        </h3>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto 12px; font-family:'Source Sans 3',sans-serif;">
+            Stai interagendo con un sistema basato sull'<strong style="color:#001A4D;">Intelligenza
+            Artificiale</strong>, pertanto ricorda che qualsiasi contenuto generato o analizzato
+            sar&agrave; prodotto dall'AI.
+        </p>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto; font-family:'Source Sans 3',sans-serif;">
+            Ti ricordiamo che la piattaforma Federico360 deve essere utilizzata nel rispetto dei
+            <strong style="color:#001A4D;">&ldquo;Termini e Condizioni&rdquo;</strong>. Il trattamento
+            dei dati personali sar&agrave; effettuato in conformit&agrave; con la nostra
+            <strong style="color:#001A4D;">Privacy Policy</strong>.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    if st.button("Accetta", type="primary", use_container_width=True, key="btn_accetta_popup"):
+        st.session_state["_accettazione_accettata"] = True
+        st.rerun()
+
+
 def mostra_homepage_docente():
     utente = st.session_state.user
     docente_id = st.session_state.current_user_id
+    if not st.session_state.get("_accettazione_accettata"):
+        _popup_accettazione()
     if _render_topbar(utente):
         return
     col_main, col_chat = st.columns([4, 2.5], gap="medium")
