@@ -380,8 +380,8 @@ def mostra_login():
   </div>
   <div style="display:flex;gap:22px;flex-wrap:wrap;">
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Aiuto</a>
-    <a href="pages/termini_e_condizioni.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Termini e Condizioni</a>
-        <a href="pages/privacy_policy.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
+    <a href="http://localhost:8502/pages/termini_e_condizioni.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Termini e Condizioni</a>
+        <a href="http://localhost:8502/pages/privacy_policy.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Accessibilità</a>
       </div>
 </div>
