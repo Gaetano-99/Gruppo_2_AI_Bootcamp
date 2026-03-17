@@ -89,6 +89,25 @@ _avvia_landing_server()
 
 
 # ---------------------------------------------------------------------------
+# Verifica integrità vector store (una sola volta per sessione Streamlit)
+# ---------------------------------------------------------------------------
+@st.cache_resource
+def _verifica_vectorstore():
+    """Rileva desync SQLite/ChromaDB e ri-vettorizza se necessario."""
+    try:
+        from src.tools.vector_store import verifica_integrita_vectorstore
+        n = verifica_integrita_vectorstore()
+        if n > 0:
+            print(f"[INFO app] Vector store: ri-vettorizzati {n} chunk dopo desync.")
+    except Exception as e:
+        print(f"[WARN app] Verifica vector store fallita: {e}")
+    return True
+
+
+_verifica_vectorstore()
+
+
+# ---------------------------------------------------------------------------
 # Routing
 # ---------------------------------------------------------------------------
 def main():

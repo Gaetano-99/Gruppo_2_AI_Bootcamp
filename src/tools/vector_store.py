@@ -354,6 +354,48 @@ def _costruisci_filtro(
 # Sincronizzazione batch
 # ---------------------------------------------------------------------------
 
+def verifica_integrita_vectorstore() -> int:
+    """Rileva e ripara il desync tra SQLite (embedding_sync=1) e ChromaDB vuoto.
+
+    Scenario tipico: ``data/chroma_db/`` è in ``.gitignore`` e viene perso
+    dopo un clone, git clean o cancellazione manuale. SQLite conserva
+    ``embedding_sync=1`` ma ChromaDB non ha più gli embedding.
+
+    Se rileva chunk marcati come sincronizzati ma assenti nel vector store,
+    resetta ``embedding_sync=0`` e li ri-vettorizza.
+
+    Returns:
+        Numero di chunk ri-vettorizzati.
+    """
+    # Conta chunk che SQLite ritiene sincronizzati
+    n_sync = db.conta("materiali_chunks", {"embedding_sync": 1})
+    if n_sync == 0:
+        return 0  # nulla da verificare
+
+    # Controlla se ChromaDB ha effettivamente dati
+    try:
+        collection_tutti = _get_collection(None)
+        n_chroma = collection_tutti.count()
+    except Exception:
+        n_chroma = 0
+
+    if n_chroma >= n_sync:
+        return 0  # tutto coerente
+
+    # Desync rilevato: ChromaDB ha meno embedding di quelli attesi
+    print(f"[WARN vector_store] Desync rilevato: SQLite ha {n_sync} chunk con "
+          f"embedding_sync=1, ma ChromaDB ne contiene solo {n_chroma}. "
+          f"Reset e ri-vettorizzazione in corso...")
+
+    # Reset embedding_sync=0 per tutti i chunk sincronizzati
+    db.esegui(
+        "UPDATE materiali_chunks SET embedding_sync = 0 WHERE embedding_sync = 1"
+    )
+
+    # Ri-vettorizza tutto
+    return sincronizza_embeddings_pendenti()
+
+
 def sincronizza_embeddings_pendenti() -> int:
     """Vettorizza tutti i chunk con ``embedding_sync=0``.
 
