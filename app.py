@@ -67,14 +67,16 @@ def _verifica_e_installa_dipendenze():
 
     if mancanti:
         import subprocess
-        print(f"[INFO app] Pacchetti mancanti: {', '.join(mancanti)}")
-        print("[INFO app] Installazione in corso...")
+        print(f"\n[DIPENDENZE] Pacchetti mancanti: {', '.join(mancanti)}")
+        print("[DIPENDENZE] Installazione in corso...")
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", *mancanti],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.STDOUT,
         )
-        print("[INFO app] Installazione completata.")
+        print(f"[DIPENDENZE] OK — {len(mancanti)} pacchetti installati con successo.\n")
+    else:
+        print("[DIPENDENZE] OK — Tutti i pacchetti di requirements.txt sono presenti.")
 
 
 _verifica_e_installa_dipendenze()
