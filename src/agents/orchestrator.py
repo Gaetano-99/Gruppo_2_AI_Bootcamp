@@ -120,7 +120,8 @@ COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto       → sapere quale corso è attualmente visualizzato.
 2. tool_analizza_classe      → analizzare performance studenti, argomenti più difficili, rischio abbandono.
 3. tool_esplora_catalogo     → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
-                                tipo_ricerca='corsi' → lista corsi attivi.
+                                tipo_ricerca='corsi' → panoramica corsi raggruppati per area tematica.
+                                tipo_ricerca='corsi' + keyword → filtra corsi per nome/descrizione.
                                 tipo_ricerca='argomenti' → materiali di un corso specifico.
                                 tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                 tra tutti i materiali del corso e quelli caricati dal docente.
@@ -139,6 +140,10 @@ COSA SAI FARE (tool a tua disposizione):
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
+- ESPLORAZIONE CORSI — REGOLA ANTI-ELENCO:
+  Se il docente chiede genericamente di vedere i corsi disponibili, NON elencare tutti i corsi.
+  Chiama tool_esplora_catalogo(tipo_ricerca='corsi') per la panoramica per area tematica,
+  e chiedi quale area o argomento interessa. Se specifica un argomento, richiama con keyword.
 - Se tool_leggi_contesto riporta "ANALYTICS del corso: ...", il docente sta guardando le statistiche
   di quel corso. Qualsiasi domanda vaga (andamento, risultati, studenti, quiz, difficoltà) va
   interpretata come riferita a quel corso → chiama tool_analizza_classe con quel corso_id IMMEDIATAMENTE.
@@ -209,7 +214,8 @@ piacevole. Dopo ogni azione completata, proponi proattivamente il passo successi
 COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
 2. tool_esplora_catalogo        → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
-                                  tipo_ricerca='corsi' → lista corsi attivi.
+                                  tipo_ricerca='corsi' → panoramica corsi raggruppati per area tematica.
+                                  tipo_ricerca='corsi' + keyword → filtra corsi per nome/descrizione.
                                   tipo_ricerca='argomenti' → materiali di un corso specifico.
                                   tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                   tra tutti i materiali dello studente (personali e dei corsi).
@@ -273,6 +279,29 @@ REGOLE DI COMPORTAMENTO:
   precedente eri in modalità chat documento, ignora il vecchio contesto e considera il contesto
   attuale come unica verità. Chiama comunque tool_leggi_contesto per i dettagli completi.
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
+- ESPLORAZIONE CORSI — REGOLA ANTI-ELENCO:
+  Quando lo studente chiede genericamente "quali corsi ci sono?", "cosa posso studiare?",
+  "elenca i corsi" o domande simili senza specificare un'area o argomento:
+  1. NON elencare MAI tutti i corsi uno per uno. L'elenco completo è lungo e poco utile.
+  2. Chiama tool_esplora_catalogo(tipo_ricerca='corsi') SENZA keyword per ottenere la
+     panoramica raggruppata per area tematica.
+  3. Presenta allo studente SOLO le aree tematiche disponibili (es. "Ingegneria",
+     "Lettere e Filosofia", "Scienze MMFFNN"...) con il numero di corsi per area.
+  4. Chiedi quale area o argomento specifico gli interessa.
+  5. Quando lo studente indica un'area o argomento, richiama tool_esplora_catalogo
+     con tipo_ricerca='corsi' e keyword=<area o argomento indicato> per filtrare.
+  6. Presenta SOLO i corsi filtrati pertinenti con una breve descrizione.
+- RICERCA CORSI PER ARGOMENTO SPECIFICO:
+  Quando lo studente chiede un corso su un argomento specifico (es. "c'è un corso sul
+  deep learning?", "vorrei studiare machine learning"):
+  1. Chiama tool_esplora_catalogo(tipo_ricerca='corsi', keyword='<argomento>').
+  2. Se trova un corso specifico → proponilo con la descrizione.
+  3. Se non trova un corso esatto ma trova corsi correlati → mostra i 2-3 più pertinenti
+     spiegando che non esiste un corso specifico sull'argomento ma questi lo trattano.
+  4. Se non trova nulla → comunicalo e proponi di:
+     a) Creare un piano di studio personalizzato sull'argomento usando materiale disponibile
+     b) Usare la modalità "Lea sceglie" per cercare materiale su tutta la piattaforma
+     c) Caricare materiale proprio sull'argomento
 - I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
   chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
   rispondi che i corsi non sono modificabili dagli studenti e suggerisci di creare un piano
@@ -561,7 +590,8 @@ def tool_leggi_contesto() -> str:
 def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None, keyword: str = "") -> str:
     """
     Scopri i corsi universitari disponibili o cerca materiali didattici.
-    - tipo_ricerca='corsi'           → lista tutti i corsi attivi.
+    - tipo_ricerca='corsi'           → panoramica corsi raggruppati per area tematica.
+                                       Con keyword: filtra corsi per nome/descrizione.
     - tipo_ricerca='argomenti'       → materiali del corso (richiede corso_universitario_id).
     - tipo_ricerca='cerca_materiale' → cerca materiali per nome/keyword tra TUTTI i materiali
                                        dello studente (personali e dei corsi). Richiede keyword.
@@ -570,9 +600,89 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
         corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
         if not corsi:
             return "Nessun corso universitario attivo nel sistema."
-        return "Corsi disponibili:\n" + "\n".join(
-            f"- ID {c['id']}: {c['nome']}" for c in corsi
-        )
+
+        # Se c'è una keyword, filtra i corsi per nome o descrizione
+        if keyword and keyword.strip():
+            kw_lower = keyword.strip().lower()
+            corsi_filtrati = [
+                c for c in corsi
+                if kw_lower in c.get("nome", "").lower()
+                or kw_lower in c.get("descrizione", "").lower()
+            ]
+            if not corsi_filtrati:
+                # Nessun match esatto: cerca corsi con parole parzialmente simili
+                parole_kw = kw_lower.split()
+                corsi_simili = [
+                    c for c in corsi
+                    if any(
+                        p in c.get("nome", "").lower() or p in c.get("descrizione", "").lower()
+                        for p in parole_kw
+                    )
+                ]
+                if corsi_simili:
+                    return (
+                        f"Nessun corso specifico trovato per '{keyword}'. "
+                        f"Corsi con argomenti correlati ({len(corsi_simili)}):\n"
+                        + "\n".join(f"- ID {c['id']}: {c['nome']} — {c.get('descrizione', '')}" for c in corsi_simili)
+                        + "\n\nSe nessuno corrisponde, puoi proporre allo studente di creare "
+                        "un piano personalizzato sull'argomento usando il materiale disponibile."
+                    )
+                return (
+                    f"Nessun corso trovato per '{keyword}'. "
+                    "Suggerisci allo studente di cercare con un termine diverso, "
+                    "oppure proponi di creare un piano personalizzato sull'argomento."
+                )
+            return (
+                f"Corsi trovati per '{keyword}' ({len(corsi_filtrati)}):\n"
+                + "\n".join(f"- ID {c['id']}: {c['nome']} — {c.get('descrizione', '')}" for c in corsi_filtrati)
+            )
+
+        # Senza keyword: raggruppa per area tematica (facoltà) tramite corsi_di_laurea
+        try:
+            mappatura = db.esegui(
+                "SELECT clu.corso_universitario_id, cdl.facolta "
+                "FROM corsi_laurea_universitari clu "
+                "JOIN corsi_di_laurea cdl ON cdl.id = clu.corso_di_laurea_id"
+            )
+            # Costruisci mappa corso_id → set di facoltà
+            corso_facolta: dict[int, set] = {}
+            for row in mappatura:
+                cid = row["corso_universitario_id"]
+                corso_facolta.setdefault(cid, set()).add(row["facolta"])
+
+            # Raggruppa corsi per facoltà
+            aree: dict[str, list] = {}
+            senza_area: list = []
+            for c in corsi:
+                facolta_set = corso_facolta.get(c["id"])
+                if facolta_set:
+                    for fac in facolta_set:
+                        aree.setdefault(fac, []).append(c)
+                else:
+                    senza_area.append(c)
+
+            righe = [f"Sulla piattaforma ci sono {len(corsi)} corsi attivi, suddivisi per area:"]
+            for area in sorted(aree.keys()):
+                nomi = [c["nome"] for c in aree[area]]
+                righe.append(f"\n{area} ({len(nomi)} corsi): {', '.join(nomi)}")
+            if senza_area:
+                nomi = [c["nome"] for c in senza_area]
+                righe.append(f"\nAltri ({len(nomi)} corsi): {', '.join(nomi)}")
+
+            righe.append(
+                "\n\nNON elencare tutti i corsi all'utente. Chiedi all'utente quale AREA "
+                "o ARGOMENTO gli interessa, poi richiama questo tool con la keyword "
+                "per filtrare i risultati e proporre solo i corsi pertinenti."
+            )
+            return "\n".join(righe)
+
+        except Exception:
+            # Fallback: restituisci comunque raggruppamento semplice
+            return (
+                f"Ci sono {len(corsi)} corsi attivi sulla piattaforma.\n"
+                "Chiedi all'utente quale area o argomento gli interessa "
+                "per filtrare i risultati."
+            )
 
     elif tipo_ricerca == "cerca_materiale":
         if not keyword or not keyword.strip():
