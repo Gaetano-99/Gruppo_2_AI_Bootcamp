@@ -1,12 +1,1 @@
-Esercizio if-elif-else 4
-Distributore automatico
-Un distributore vende bevande:
-Codice Prodotto Prezzo
-Lâ€™utente inserisce: A Acqua 1.00
-- il codice del prodotto C Cola 1.50
-- i soldi inseriti
-T TÃ¨ 1.20
-Il programma deve dire:
-- se lâ€™acquisto Ã¨ possibile
-- il resto oppure quanto manca
-2026 DIGITA AI Bootcamp| Docenti: Proff. G. Aceto, V. Persico, A. Montieri, G. Bovenzi, D. Ciuonzo | 27ÿÿÿÿÿÿ
+invalid type: string "Operatori logici (operatori booleani)\nGli operatori logici permettono di comporre le proposizioni semplici, realizzando proposizioni\ncomposte\n- NOT (negazione, complemento): restituisce True se lâ€™ingresso Ã¨ False, True altrimenti\n- AND (congiunzione): restituisce True se entrambi gli ingressi sono True, False altrimenti\n>=b:\nVERA FALSA SE a>=c:\na >=b\nmax=a\nÿÿÿÿÿÿÿ
