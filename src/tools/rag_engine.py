@@ -793,14 +793,21 @@ def cerca_chunk_piattaforma(
             chunk_ids_semantici = cerca_simili_piattaforma(query, top_k=top_k)
             # Ricerca semantica riuscita
             chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
-            for i, c in enumerate(chunks):
-                mat = db.esegui(
-                    "SELECT titolo, tipo FROM materiali_didattici WHERE id = ?",
-                    [c.get("materiale_id")],
+            # Batch lookup materiali (evita N+1 query)
+            _mat_ids = list({c.get("materiale_id") for c in chunks if c.get("materiale_id")})
+            _mat_map: dict = {}
+            if _mat_ids:
+                _ph = ",".join("?" * len(_mat_ids))
+                _mat_rows = db.esegui(
+                    f"SELECT id, titolo, tipo FROM materiali_didattici WHERE id IN ({_ph})",
+                    _mat_ids,
                 )
+                _mat_map = {m["id"]: m for m in _mat_rows}
+            for i, c in enumerate(chunks):
+                mat = _mat_map.get(c.get("materiale_id"))
                 if mat:
-                    c["materiale_titolo"] = mat[0]["titolo"]
-                    c["materiale_tipo"] = mat[0].get("tipo", "")
+                    c["materiale_titolo"] = mat["titolo"]
+                    c["materiale_tipo"] = mat.get("tipo", "")
                 c["score_rilevanza"] = top_k - i
                 c["parole_trovate"] = ["(semantico)"]
             return RisultatoRicercaRAG(
