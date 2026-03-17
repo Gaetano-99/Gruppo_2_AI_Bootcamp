@@ -1274,6 +1274,64 @@ def _get_docenti() -> list[dict]:
         return []
 
 
+def _get_opzioni_filtro(
+    nome: str = "",
+    docente_id: int | None = None,
+    cfu: int | None = None,
+    cdl_id: int | None = None,
+) -> dict:
+    """Restituisce le opzioni disponibili per ciascun filtro in base alle selezioni correnti."""
+    base_from = """
+        FROM corsi_universitari cu
+        JOIN users u ON u.id = cu.docente_id
+        LEFT JOIN corsi_laurea_universitari clu ON clu.corso_universitario_id = cu.id
+        LEFT JOIN corsi_di_laurea cdl ON cdl.id = clu.corso_di_laurea_id
+    """
+
+    def _where(exclude: str) -> tuple[str, list]:
+        conds = ["cu.attivo = 1"]
+        params: list = []
+        if nome:
+            conds.append("cu.nome LIKE ?")
+            params.append(f"%{nome}%")
+        if exclude != "docente" and docente_id is not None:
+            conds.append("cu.docente_id = ?")
+            params.append(docente_id)
+        if exclude != "cfu" and cfu is not None:
+            conds.append("cu.cfu = ?")
+            params.append(cfu)
+        if exclude != "cdl" and cdl_id is not None:
+            conds.append("clu.corso_di_laurea_id = ?")
+            params.append(cdl_id)
+        return " AND ".join(conds), params
+
+    result: dict = {"docenti": [], "cdl": [], "cfu": []}
+    try:
+        w, p = _where("docente")
+        result["docenti"] = db.esegui(
+            f"SELECT DISTINCT u.id, u.nome, u.cognome {base_from} WHERE {w} ORDER BY u.cognome, u.nome", p
+        )
+    except Exception:
+        pass
+    try:
+        w, p = _where("cdl")
+        result["cdl"] = db.esegui(
+            f"SELECT DISTINCT cdl.id, cdl.nome {base_from} WHERE {w} AND cdl.id IS NOT NULL ORDER BY cdl.nome", p
+        )
+    except Exception:
+        pass
+    try:
+        w, p = _where("cfu")
+        result["cfu"] = [
+            r["cfu"] for r in db.esegui(
+                f"SELECT DISTINCT cu.cfu {base_from} WHERE {w} AND cu.cfu IS NOT NULL ORDER BY cu.cfu", p
+            )
+        ]
+    except Exception:
+        pass
+    return result
+
+
 def _cerca_corsi(nome: str, docente_id: int | None, cfu: int | None, cdl_id: int | None) -> list[dict]:
     conditions = ["cu.attivo = 1"]
     params: list = []
@@ -1903,9 +1961,11 @@ def _render_raccomandazioni(studente_id: int):
         return
 
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
     except Exception:
         raccomandazioni = []
+
+    raccomandazioni = raccomandazioni[:6]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -1982,9 +2042,11 @@ def _render_raccomandazioni_orizzontale(studente_id: int):
         return
 
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
     except Exception:
         raccomandazioni = []
+
+    raccomandazioni = raccomandazioni[:6]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -2053,10 +2115,15 @@ def _render_raccomandazioni_slideshow(studente_id: int):
         _fallback("Raccomandazioni non disponibili.")
         return
 
+    _MAX_RACCOMANDAZIONI = 6
+
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=_MAX_RACCOMANDAZIONI)
     except Exception:
         raccomandazioni = []
+
+    # Limite massimo di sicurezza
+    raccomandazioni = raccomandazioni[:_MAX_RACCOMANDAZIONI]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -2267,39 +2334,76 @@ def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
         'Puoi filtrare per nome, docente, CFU o corso di laurea.',
     )
 
-    tutti_cdl = _get_tutti_cdl()
-    docenti = _get_docenti()
+    # ---- Leggi selezioni correnti dal session_state ----
+    nome_cerca = st.session_state.get("search_nome", "")
+    doc_map_prev: dict = st.session_state.get("_doc_map", {})
+    cdl_map_prev: dict = st.session_state.get("_cdl_map", {})
 
-    # Mappa etichetta → id per docenti e CDL
+    sel_doc_label = st.session_state.get("search_docente", "Tutti")
+    sel_doc_id = doc_map_prev.get(sel_doc_label)
+
+    sel_cdl_label = st.session_state.get("search_cdl", "Tutti")
+    sel_cdl_id = cdl_map_prev.get(sel_cdl_label)
+
+    sel_cfu_label = st.session_state.get("search_cfu_sel", "Tutti")
+    sel_cfu = int(sel_cfu_label) if sel_cfu_label != "Tutti" else None
+
+    # ---- Opzioni dinamiche (ogni filtro esclude se stesso) ----
+    opzioni = _get_opzioni_filtro(nome_cerca, sel_doc_id, sel_cfu, sel_cdl_id)
+
+    # Docenti
     docenti_map: dict[str, int | None] = {"Tutti": None}
-    for d in docenti:
-        label = f"{d['nome']} {d['cognome']} (ID {d['id']})"
-        docenti_map[label] = d["id"]
+    for d in opzioni["docenti"]:
+        docenti_map[f"{d['nome']} {d['cognome']} (ID {d['id']})"] = d["id"]
+    doc_options = list(docenti_map.keys())
+    if st.session_state.get("search_docente") not in doc_options:
+        st.session_state["search_docente"] = "Tutti"
 
+    # Corsi di Laurea
     cdl_map: dict[str, int | None] = {"Tutti": None}
-    for c in tutti_cdl:
+    for c in opzioni["cdl"]:
         cdl_map[c["nome"]] = c["id"]
+    cdl_options = list(cdl_map.keys())
+    if st.session_state.get("search_cdl") not in cdl_options:
+        st.session_state["search_cdl"] = "Tutti"
 
+    # CFU
+    cfu_options: list[str] = ["Tutti"] + [str(v) for v in opzioni["cfu"]]
+    if st.session_state.get("search_cfu_sel") not in cfu_options:
+        st.session_state["search_cfu_sel"] = "Tutti"
+
+    # Salva le mappe per decodifica al prossimo run
+    st.session_state["_doc_map"] = docenti_map
+    st.session_state["_cdl_map"] = cdl_map
+
+    # ---- Render filtri ----
     col1, col2 = st.columns(2)
     with col1:
-        nome_cerca = st.text_input("Nome del corso", placeholder="Es. Basi di Dati", key="search_nome")
-        cfu_cerca = st.number_input("CFU (0 = qualsiasi)", min_value=0, max_value=30, step=1, value=0, key="search_cfu")
+        nome_input = st.text_input("Nome del corso", placeholder="Es. Basi di Dati", key="search_nome")
+        cfu_sel = st.selectbox("CFU", cfu_options, key="search_cfu_sel")
     with col2:
-        doc_label = st.selectbox("Docente", list(docenti_map.keys()), key="search_docente")
-        cdl_label = st.selectbox("Corso di Laurea", list(cdl_map.keys()), key="search_cdl")
+        doc_label = st.selectbox("Docente", doc_options, key="search_docente")
+        cdl_label = st.selectbox("Corso di Laurea", cdl_options, key="search_cdl")
 
+    # ---- Valori filtro effettivi (dal widget appena renderizzato) ----
+    eff_doc_id = docenti_map.get(doc_label)
+    eff_cdl_id = cdl_map.get(cdl_label)
+    eff_cfu = int(cfu_sel) if cfu_sel != "Tutti" else None
+
+    # Mostra risultati solo dopo il click su Cerca
     if st.button("Cerca", type="primary", key="search_btn"):
-        risultati = _cerca_corsi(
-            nome=nome_cerca,
-            docente_id=docenti_map[doc_label],
-            cfu=cfu_cerca if cfu_cerca > 0 else None,
-            cdl_id=cdl_map[cdl_label],
-        )
-        st.session_state["_search_results"] = risultati
+        st.session_state["_search_active"] = True
 
-    risultati = st.session_state.get("_search_results")
-    if risultati is None:
+    if not st.session_state.get("_search_active"):
         return
+
+    # ---- Risultati (aggiornati automaticamente ad ogni cambio filtro) ----
+    risultati = _cerca_corsi(
+        nome=nome_input,
+        docente_id=eff_doc_id,
+        cfu=eff_cfu,
+        cdl_id=eff_cdl_id,
+    )
 
     st.markdown(f"**{len(risultati)} risultati trovati**")
     if not risultati:
@@ -2333,7 +2437,6 @@ def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
                         st.session_state["_corso_desc"] = r.get("descrizione", "")
                         st.session_state["_view_mode"] = "corso"
                         st.session_state["_piano_sel"] = None
-                        st.session_state["_search_results"] = None
                         st.rerun()
                 else:
                     if st.button("Iscriviti", key=f"search_iscriviti_{r['id']}", type="primary"):
@@ -3090,7 +3193,6 @@ def mostra_homepage_studente():
             st.session_state["_piano_sel"] = None
             st.session_state["_corso_nome"] = ""
             st.session_state["_corso_desc"] = ""
-            st.session_state["_search_results"] = None
             st.rerun()
 
         # Pulsante ricerca corsi (apre dialog)

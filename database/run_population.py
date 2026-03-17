@@ -23,6 +23,7 @@ SQL_FILES = [
     "seed_population.sql",
     "seed_population_part2.sql",
     "seed_population_part3.sql",
+    "seed_population_umanistici.sql",
 ]
 
 
