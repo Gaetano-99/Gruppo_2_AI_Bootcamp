@@ -151,6 +151,13 @@ def elabora_e_salva_documento(
     # 4b. Arricchimento semantico: genera titolo_sezione, sommario, argomenti_chiave
     _arricchisci_chunks_con_llm(chunk_ids, progress_callback=progress_callback)
 
+    # 4c. Vettorizzazione per ricerca semantica (ChromaDB)
+    try:
+        from src.tools.vector_store import vettorizza_chunks
+        vettorizza_chunks(chunk_ids, corso_universitario_id)
+    except Exception as e:
+        print(f"[WARN document_processor] Vettorizzazione fallita, fallback keyword attivo: {e}")
+
     # 5. Marca il materiale come processato
     db.aggiorna(
         "materiali_didattici",

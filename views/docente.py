@@ -510,6 +510,67 @@ def _dialog_crea_corso(docente_id: int):
         st.session_state["_doc_refresh"] = True
 
 
+def _elimina_corso_completo(corso_id: int) -> None:
+    """Elimina un corso e TUTTI i record dipendenti nell'ordine corretto."""
+
+    # 1. Elimina contenuto piani docente (capitoli, paragrafi, contenuti, quiz interni)
+    _cancella_contenuto_piano_corso(corso_id)
+
+    # 2. Elimina piano_materiali_utilizzati per chunk di questo corso
+    chunk_ids_rows = db.esegui(
+        "SELECT id FROM materiali_chunks WHERE corso_universitario_id = ?", [corso_id]
+    )
+    chunk_ids = [r["id"] for r in chunk_ids_rows]
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM piano_materiali_utilizzati WHERE chunk_id IN ({ph})", chunk_ids)
+
+    # 3. Elimina catena quiz: risposte → tentativi → domande → quiz
+    quiz_ids_rows = db.esegui(
+        "SELECT id FROM quiz WHERE corso_universitario_id = ?", [corso_id]
+    )
+    quiz_ids = [r["id"] for r in quiz_ids_rows]
+    if quiz_ids:
+        qph = ",".join("?" * len(quiz_ids))
+        domande_ids_rows = db.esegui(
+            f"SELECT id FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids
+        )
+        domande_ids = [r["id"] for r in domande_ids_rows]
+        if domande_ids:
+            dph = ",".join("?" * len(domande_ids))
+            db.esegui(f"DELETE FROM risposte_domande WHERE domanda_id IN ({dph})", domande_ids)
+        db.esegui(f"DELETE FROM tentativi_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+        db.esegui(f"DELETE FROM domande_quiz WHERE quiz_id IN ({qph})", quiz_ids)
+        db.esegui(f"DELETE FROM quiz WHERE id IN ({qph})", quiz_ids)
+
+    # 4. Elimina lezioni del corso
+    db.esegui("DELETE FROM lezioni_corso WHERE corso_universitario_id = ?", [corso_id])
+
+    # 5. Elimina materiali: chunks → didattici (+ file fisici)
+    materiali = db.esegui(
+        "SELECT id, s3_key FROM materiali_didattici WHERE corso_universitario_id = ?", [corso_id]
+    )
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM materiali_chunks WHERE id IN ({ph})", chunk_ids)
+    for m in materiali:
+        db.elimina("materiali_didattici", {"id": m["id"]})
+        if m.get("s3_key"):
+            try:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                file_path = os.path.join(base_dir, m["s3_key"])
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            except Exception:
+                pass
+
+    # 6. Elimina iscrizioni studenti
+    db.esegui("DELETE FROM studenti_corsi WHERE corso_universitario_id = ?", [corso_id])
+
+    # 7. Elimina il corso (corsi_laurea_universitari CASCADE, piani SET NULL automatici)
+    db.elimina("corsi_universitari", {"id": corso_id})
+
+
 def _dialog_elimina_corso(corso_id: int):
     st.warning("Eliminerai definitivamente il corso e i relativi materiali.")
     c1, c2 = st.columns(2)
@@ -519,10 +580,12 @@ def _dialog_elimina_corso(corso_id: int):
     with c2:
         if st.button("Elimina", type="primary"):
             try:
-                db.elimina("corsi_universitari", {"id": corso_id})
+                _elimina_corso_completo(corso_id)
                 st.session_state["_doc_refresh"] = True
                 st.session_state["_corso_doc_sel"] = None
+                st.session_state["_doc_delete_confirm"] = None
                 st.success("Corso eliminato.")
+                st.rerun()
             except Exception as e:
                 st.error(f"Impossibile eliminare: {e}")
 
@@ -801,7 +864,7 @@ def _get_primo_paragrafo_id(corso_id: int, titolo_capitolo: str) -> int:
         return 0
 
 
-def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str) -> None:
+def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str, forza_keyword: bool = False) -> None:
     """Invoca agente teorico e agente pratico in sequenza, poi aggiorna lo stato UI."""
     try:
         from src.agents.content_gen import crea_agente_content_gen, esegui_generazione
@@ -816,7 +879,11 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
 
     # — Fase 1: Teoria —
     _fasi = "Fase 1/2" if not _senza_quiz else "Fase 1/1"
-    with st.spinner(f"{_fasi} — Generazione contenuti teorici…"):
+    _label = f"{_fasi} — Generazione contenuti teorici"
+    if forza_keyword:
+        _label += " (ricerca per parole chiave)"
+    _label += "…"
+    with st.spinner(_label):
         agente = crea_agente_content_gen()
         stato_t = esegui_generazione(
             agente=agente,
@@ -825,10 +892,25 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str)
             docente_id=docente_id,
             is_corso_docente=True,
             istruzioni_utente=prompt or "",
+            forza_keyword=forza_keyword,
         )
 
     if stato_t.get("errore"):
-        st.error(f"Errore teoria: {stato_t['errore']}")
+        errore = stato_t["errore"]
+
+        # Gestione speciale: ricerca semantica fallita → salva stato per chiedere consenso
+        if errore.startswith("RICERCA_SEMANTICA_FALLITA|"):
+            motivo = errore.split("|", 1)[1]
+            # Salva in session_state per mostrare il prompt di fallback nella UI
+            st.session_state[f"_sem_fallita_{corso['id']}"] = {
+                "motivo": motivo,
+                "prompt": prompt,
+                "key": key,
+            }
+            st.rerun()
+            return
+
+        st.error(f"Errore teoria: {errore}")
         return
 
     struttura = stato_t.get("struttura_corso_generata", {})
@@ -1025,6 +1107,28 @@ def _render_contenuti_ai(corso: dict):
         placeholder="Es: Focalizzati su esempi pratici. Usa un linguaggio accessibile agli studenti del primo anno.",
         key=f"prompt_{corso['id']}",
     )
+    # Gestione fallback ricerca semantica → keyword (con consenso docente)
+    _sem_fallita_key = f"_sem_fallita_{corso['id']}"
+    if _sem_fallita_key in st.session_state:
+        _info_fallita = st.session_state[_sem_fallita_key]
+        st.warning(
+            f"La ricerca nel database vettoriale non è riuscita.\n\n"
+            f"**Motivo:** {_info_fallita['motivo']}\n\n"
+            f"È disponibile una ricerca alternativa basata su parole chiave "
+            f"(keyword matching sui metadati), che potrebbe essere meno precisa."
+        )
+        col_si, col_no = st.columns(2)
+        with col_si:
+            if st.button("Procedi con ricerca per parole chiave", key=f"kw_si_{corso['id']}"):
+                _prompt_salvato = _info_fallita["prompt"]
+                _key_salvato = _info_fallita["key"]
+                del st.session_state[_sem_fallita_key]
+                _genera_contenuto_corso(corso, docente_id, _prompt_salvato, _key_salvato, forza_keyword=True)
+        with col_no:
+            if st.button("Annulla", key=f"kw_no_{corso['id']}"):
+                del st.session_state[_sem_fallita_key]
+                st.rerun()
+
     if st.button("Genera contenuto corso", type="primary", key=f"gen_corso_{corso['id']}"):
         _genera_contenuto_corso(corso, docente_id, prompt, key)
 

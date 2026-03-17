@@ -15,6 +15,8 @@ import atexit
 import os
 import shutil
 import sys
+import threading
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 
 import streamlit as st
 
@@ -57,6 +59,53 @@ from views.login import mostra_login
 from views.studente import mostra_homepage_studente
 from views.docente import mostra_homepage_docente
 from views.ospite import mostra_homepage_ospite
+
+# ---------------------------------------------------------------------------
+# Mini HTTP server per servire index.html come pagina standalone
+# ---------------------------------------------------------------------------
+_LANDING_PORT = 8502
+
+
+class _SilentHandler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=_ROOT_DIR, **kwargs)
+
+    def log_message(self, format, *args):
+        pass  # niente log in console
+
+
+@st.cache_resource
+def _avvia_landing_server():
+    try:
+        server = HTTPServer(("localhost", _LANDING_PORT), _SilentHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        return True
+    except OSError:
+        return False  # porta già in uso (server già avviato)
+
+
+_avvia_landing_server()
+
+
+# ---------------------------------------------------------------------------
+# Verifica integrità vector store (una sola volta per sessione Streamlit)
+# ---------------------------------------------------------------------------
+@st.cache_resource
+def _verifica_vectorstore():
+    """Rileva desync SQLite/ChromaDB e ri-vettorizza se necessario."""
+    try:
+        from src.tools.vector_store import verifica_integrita_vectorstore
+        n = verifica_integrita_vectorstore()
+        if n > 0:
+            print(f"[INFO app] Vector store: ri-vettorizzati {n} chunk dopo desync.")
+    except Exception as e:
+        print(f"[WARN app] Verifica vector store fallita: {e}")
+    return True
+
+
+_verifica_vectorstore()
+
 
 # ---------------------------------------------------------------------------
 # Routing

@@ -349,7 +349,7 @@ def mostra_login():
 
         st.markdown("""
 <div style="text-align:center;margin-top:14px;">
-  <a href="#" style="font-size:.85rem;color:#7a849a;text-decoration:none;">← Torna indietro</a>
+  <a href="http://localhost:8502/index.html" target="_top" style="font-size:.85rem;color:#7a849a;text-decoration:none;">← Torna indietro</a>
 </div>
 <div class="demo-box">
   <strong>Account demo disponibili:</strong><br>

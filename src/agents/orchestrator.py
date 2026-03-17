@@ -48,8 +48,10 @@ from src.agents.practice_gen import esegui_generazione_pratica
 from src.agents.gap_analysis import analizza_gap
 from src.tools.rag_engine import (
     recupera_sommari_materiali,
+    cerca_chunk_rilevanti,
     cerca_chunk_piattaforma,
     conta_chunk_piattaforma,
+    formatta_contesto_rag,
     formatta_riferimenti_materiali,
 )
 
@@ -100,6 +102,15 @@ def _aggiorna_studente_corrente() -> None:
 # ---------------------------------------------------------------------------
 _SYSTEM_PROMPT_DOCENTE = """Sei Lea, l'assistente virtuale dei docenti della piattaforma LearnAI.
 
+VINCOLO FONDAMENTALE — FONTI DELLE INFORMAZIONI:
+Tutte le informazioni che fornisci, generi o utilizzi per riscrivere contenuti devono
+provenire ESCLUSIVAMENTE dal materiale didattico presente sulla piattaforma (materiale
+dei corsi, materiale caricato dai docenti, o materiale recuperato tramite RAG).
+È SEVERAMENTE VIETATO usare conoscenze generali proprie del modello AI per generare,
+arricchire, integrare o riscrivere contenuti didattici.
+Se il materiale disponibile è insufficiente, comunicalo chiaramente e suggerisci al
+docente di caricare materiale aggiuntivo o cercare tra i materiali esistenti sulla piattaforma.
+
 IL TUO CARATTERE:
 Parli in italiano con un tono professionale, diretto e propositivo.
 Supporti i docenti nella gestione didattica e nel monitoraggio della classe.
@@ -118,10 +129,13 @@ COSA SAI FARE (tool a tua disposizione):
                                 la lezione SOLO dal contenuto di quel materiale specifico.
                                 IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
 5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
-6. tool_modifica_piano       → leggere e riscrivere il testo di capitoli/paragrafi del corso,
+6. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
                                 rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
+                                Per RISCRIVERE il testo usa tool_riscrivi_paragrafo.
 7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                 Utile per decidere come integrare materiali in un corso esistente.
+8. tool_riscrivi_paragrafo   → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+                                didattico della piattaforma. Usa SEMPRE questo per riscritture.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
@@ -145,18 +159,22 @@ REGOLE DI COMPORTAMENTO:
   o espandere un paragrafo o capitolo del corso:
   1. Chiama tool_leggi_contesto → ottieni il piano_id e la struttura (capitoli e paragrafi con ID).
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
-  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
-  4. Genera il testo riscritto in modo completo e dettagliato.
-  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
-     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
-     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
-  NON dire mai che non puoi modificare il contenuto: hai sempre tool_modifica_piano a disposizione.
+  3. Chiama tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id).
+     Passa come "istruzioni" ciò che il docente vuole (es. "espandi", "semplifica", "arricchisci").
+     Se il docente menziona un materiale specifico, passa il materiale_id.
+     Il tool gestisce AUTONOMAMENTE: lettura del testo originale, recupero materiale RAG,
+     riscrittura vincolata al solo materiale didattico, e salvataggio.
+  NON generare MAI tu stesso il testo riscritto nella conversazione.
+  NON usare tool_modifica_piano('riscrivi_contenuto') per la riscrittura: usa SEMPRE
+  tool_riscrivi_paragrafo che garantisce l'uso esclusivo di materiale didattico.
+  NON dire mai che non puoi modificare il contenuto: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN CORSO CON MATERIALE: quando il docente chiede di arricchire, integrare o ampliare
   un corso usando un materiale specifico, segui lo stesso flusso della modifica ma per contenuti nuovi:
   1. Chiama tool_leggi_contesto → ottieni piano_id e struttura.
   2. Cerca il materiale con tool_esplora_catalogo.
   3. Per ogni nuovo argomento: aggiungi capitolo con 'aggiungi_capitolo',
-     poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con 'riscrivi_contenuto'
+     poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con
+     tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id)
      passando SEMPRE il materiale_id per tracciare la fonte.
   NON creare mai capitoli vuoti senza paragrafi.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
@@ -166,6 +184,22 @@ REGOLE DI COMPORTAMENTO:
 """
 
 _SYSTEM_PROMPT = """Sei Lea, il tutor didattico intelligente della piattaforma LearnAI.
+
+VINCOLO FONDAMENTALE — FONTI DELLE INFORMAZIONI:
+Tutte le informazioni che fornisci, generi o utilizzi per riscrivere contenuti devono
+provenire ESCLUSIVAMENTE dal materiale didattico presente sulla piattaforma (materiale
+del corso, materiale del piano personalizzato, materiale caricato dallo studente, o
+materiale recuperato tramite RAG dalla piattaforma).
+È SEVERAMENTE VIETATO usare conoscenze generali proprie del modello AI per generare,
+arricchire, integrare o riscrivere contenuti didattici.
+Se il materiale disponibile è insufficiente per rispondere a una domanda o completare
+una richiesta, comunicalo chiaramente allo studente e suggerisci di:
+- Cercare materiale pertinente tra i corsi disponibili sulla piattaforma
+- Caricare materiale proprio
+- Consultare il docente del corso
+Al massimo, previo avviso esplicito allo studente e con il suo consenso, puoi cercare
+materiale pertinente in ALTRI corsi o materiali presenti sulla piattaforma usando
+tool_esplora_catalogo o tool_genera_corso_libero, ma MAI inventare contenuti.
 
 IL TUO CARATTERE:
 Parli in italiano con un tono caldo, chiaro e motivante. Non sei un bot che esegue
@@ -186,15 +220,58 @@ COSA SAI FARE (tool a tua disposizione):
 4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
 5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
 6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
-                                  LEGGERE e RISCRIVERE il testo di una lezione.
+                                  LEGGERE il testo di una lezione. Per RISCRIVERE usa tool_riscrivi_paragrafo.
+10. tool_riscrivi_paragrafo     → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+                                  didattico della piattaforma. Usa SEMPRE questo tool per riscritture.
 7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                   Utile per decidere come integrare materiali in un piano esistente.
 8. tool_genera_corso_libero        → generare una lezione attingendo a TUTTI i materiali della piattaforma
                                   (modalità "Lea sceglie"). Lea cerca autonomamente il materiale più
                                   pertinente tra tutto ciò che è disponibile nel sistema.
                                   Il piano generato include automaticamente i riferimenti bibliografici.
+9. tool_rispondi_domanda        → RISPONDERE a domande, dubbi e curiosità dello studente su argomenti,
+                                  concetti, paragrafi o capitoli SENZA creare piani o lezioni.
+                                  Cerca materiale rilevante con RAG e risponde in modo conversazionale.
+
+REGOLA FONDAMENTALE — RISPONDERE vs GENERARE:
+Non tutte le richieste richiedono la creazione di un piano o una lezione!
+Quando lo studente fa una DOMANDA o chiede una SPIEGAZIONE, usa tool_rispondi_domanda.
+Quando lo studente chiede di CREARE, GENERARE o STUDIARE un argomento in modo strutturato,
+usa tool_genera_corso o tool_genera_corso_libero.
+
+Usa tool_rispondi_domanda quando lo studente:
+- Fa una domanda su un argomento ("Cos'è il Deep Learning?", "Parlami delle reti neurali")
+- Chiede di spiegare un concetto ("Spiegami la normalizzazione", "Come funziona il backpropagation?")
+- Chiede esempi ("Fammi un esempio di SQL JOIN")
+- Vuole un riassunto ("Riassumi il capitolo X", "Riassumi brevemente questo argomento")
+- Ha un dubbio su un paragrafo specifico ("Nel paragrafo X si parla di Y, spiega meglio")
+- Chiede chiarimenti ("Non ho capito la differenza tra...", "Cosa si intende per...")
+- Fa domande generiche di cultura ("Parlami delle imprese commerciali", "Cos'è il machine learning?")
+
+Se lo studente menziona un paragrafo o capitolo specifico, passa il nome come contesto_aggiuntivo
+a tool_rispondi_domanda per recuperare il contenuto esatto dal piano.
+
+MODALITÀ CHAT CON DOCUMENTO:
+Quando tool_leggi_contesto riporta "MODALITÀ CHAT CON DOCUMENTO ATTIVA", lo studente
+sta chattando su un documento specifico. In questa modalità:
+- Usa SEMPRE tool_rispondi_domanda per TUTTE le richieste (anche riassunti, spiegazioni, esempi).
+- Passa sempre il nome del documento come contesto_aggiuntivo.
+- NON proporre mai di generare piani o lezioni: lo studente vuole interagire col documento.
+- NON chiedere su quale corso o materiale vuole lavorare: il documento è già selezionato.
+- Se lo studente chiede qualcosa che il documento non copre, rispondi comunque ma segnala
+  che l'informazione non proviene dal documento selezionato.
+
+Usa tool_genera_corso / tool_genera_corso_libero SOLO quando lo studente:
+- Chiede ESPLICITAMENTE di generare un piano, un corso o una lezione strutturata
+- Usa parole come "genera", "crea un piano", "prepara una lezione"
+- Vuole materiale di studio organizzato da salvare nel proprio piano personalizzato
 
 REGOLE DI COMPORTAMENTO:
+- Ogni messaggio dell'utente è preceduto da un tag [CONTESTO NAVIGAZIONE: ...] che indica
+  il contesto ATTUALE della sessione. Questo tag ha SEMPRE la priorità su qualsiasi contesto
+  precedente nella cronologia della conversazione. Se il tag dice "Corso 'X'" ma nella cronologia
+  precedente eri in modalità chat documento, ignora il vecchio contesto e considera il contesto
+  attuale come unica verità. Chiama comunque tool_leggi_contesto per i dettagli completi.
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
 - I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
   chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
@@ -229,13 +306,18 @@ REGOLE DI COMPORTAMENTO:
 - Quando lo studente chiede di riscrivere, modificare, semplificare, espandere un paragrafo:
   1. Chiama tool_leggi_contesto → ottieni piano_id e l'elenco "Sezioni del piano" con gli ID.
   2. Identifica il paragrafo_id dal nome (corrispondenza parziale se necessario).
-  3. Chiama tool_modifica_piano(piano_id, 'leggi_contenuto', paragrafo_id) per leggere il testo attuale.
-  4. Genera il testo riscritto in modo completo e dettagliato.
-  5. Chiama tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, nuovo_testo, materiale_id).
-     Se hai usato un materiale specifico per arricchire il contenuto, passa il materiale_id
-     per tracciare la fonte. Il materiale apparirà in "Materiale del piano".
+  3. Chiama tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id).
+     Passa come "istruzioni" ciò che lo studente vuole (es. "espandi", "semplifica", "riscrivi
+     in modo più chiaro"). Se lo studente menziona un materiale specifico, passa il materiale_id.
+     Il tool gestisce AUTONOMAMENTE: lettura del testo originale, recupero materiale RAG,
+     riscrittura vincolata al solo materiale didattico, e salvataggio.
+  NON generare MAI tu stesso il testo riscritto nella conversazione.
+  NON usare tool_modifica_piano('riscrivi_contenuto') per la riscrittura: usa SEMPRE
+  tool_riscrivi_paragrafo che garantisce l'uso esclusivo di materiale didattico.
+  tool_modifica_piano('riscrivi_contenuto') è riservato SOLO a tool_riscrivi_paragrafo internamente
+  o per operazioni strutturali (rinomina, riordina, elimina, aggiungi).
   NON chiedere mai il numero del piano all'utente: è già nel contesto.
-  NON dire mai che non puoi modificare il testo: hai sempre questo percorso disponibile.
+  NON dire mai che non puoi modificare il testo: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN PIANO CON MATERIALE DIDATTICO: quando lo studente chiede di arricchire,
   integrare o ampliare un piano personalizzato usando un materiale specifico:
   1. Chiama tool_leggi_contesto → ottieni piano_id e la struttura attuale del piano.
@@ -247,15 +329,15 @@ REGOLE DI COMPORTAMENTO:
      b. Per ogni sotto-argomento, aggiungi un paragrafo:
         tool_modifica_piano(piano_id, 'aggiungi_paragrafo', capitolo_id, titolo_paragrafo)
         → ottieni il paragrafo_id dalla risposta.
-     c. Scrivi il contenuto del paragrafo basandoti sul materiale:
-        tool_modifica_piano(piano_id, 'riscrivi_contenuto', paragrafo_id, testo_completo, materiale_id)
+     c. Scrivi il contenuto del paragrafo usando il materiale:
+        tool_riscrivi_paragrafo(piano_id, paragrafo_id, "scrivi il contenuto basandoti sul materiale", materiale_id)
         IMPORTANTE: passa SEMPRE il materiale_id per tracciare la fonte nel piano.
   NON creare mai capitoli vuoti senza paragrafi. Ogni capitolo DEVE avere almeno un paragrafo con contenuto.
   Se il piano ha già capitoli sugli stessi argomenti, arricchisci quelli esistenti invece di duplicarli.
 - MODALITÀ "LEA SCEGLIE" (ricerca su tutta la piattaforma):
-  Quando lo studente chiede una lezione su un argomento generico SENZA riferimento a un corso
-  specifico o a un materiale specifico, e tool_leggi_contesto NON riporta un corso o materiale
-  già selezionato nel contesto:
+  Quando lo studente chiede di GENERARE una lezione su un argomento generico SENZA riferimento
+  a un corso specifico o a un materiale specifico, e tool_leggi_contesto NON riporta un corso
+  o materiale già selezionato nel contesto:
   1. Offri allo studente 3 opzioni:
      a) Riferirsi a un corso specifico tra quelli a cui è iscritto
      b) Usare il proprio materiale didattico caricato
@@ -272,10 +354,29 @@ REGOLE DI COMPORTAMENTO:
      con l'elenco dei materiali della piattaforma usati come fonte.
   4. NON attivare questo flusso se c'è già un corso o materiale nel contesto (in quel caso
      usa tool_genera_corso come di consueto).
+  5. ATTENZIONE: se lo studente fa solo una DOMANDA (es. "Parlami del Deep Learning") senza
+     chiedere di generare un piano, usa tool_rispondi_domanda invece di questo flusso.
 - Se l'utente fa small talk o saluta, rispondi naturalmente senza invocare tool.
 - Se la richiesta è davvero ambigua e non puoi risolvere con una ricerca, fai UNA sola domanda mirata.
 - Non mostrare mai ID numerici interni all'utente.
 - Gestisci gli errori con empatia e suggerisci il passo successivo.
+
+REGOLA QUIZ E FLASHCARD — ASSOCIAZIONE OBBLIGATORIA A UN PIANO PERSONALIZZATO:
+Quiz e flashcard possono essere generati SOLO per sezioni (paragrafi) di un piano personalizzato.
+NON è possibile creare quiz o flashcard "liberi" senza un piano associato.
+Quando lo studente chiede di creare quiz, flashcard o strumenti pratici:
+1. Chiama tool_leggi_contesto per verificare il contesto attuale.
+2. Se lo studente NON ha nessun piano personalizzato:
+   - NON generare quiz o flashcard.
+   - Spiega che per creare quiz e flashcard è necessario prima generare un piano personalizzato.
+   - Proponi di creare un piano personalizzato sull'argomento di interesse.
+3. Se lo studente HA piani personalizzati ma NON sta visualizzando un piano specifico
+   (tipo_vista ≠ "piano" oppure piano_id è assente nel contesto):
+   - NON generare quiz o flashcard direttamente.
+   - Chiedi a quale piano personalizzato vuole associare quiz e flashcard.
+   - Elenca i piani disponibili (li trovi nell'output di tool_leggi_contesto) per facilitare la scelta.
+4. Se lo studente sta visualizzando un piano specifico (tipo_vista="piano" con piano_id presente):
+   - Procedi normalmente con tool_genera_pratica per le sezioni del piano attivo.
 """
 
 
@@ -293,7 +394,32 @@ def tool_leggi_contesto() -> str:
     # background di LangGraph (warning "missing ScriptRunContext").
     contesto = _CONTESTO_CORRENTE
     if not contesto:
-        return "Nessun contesto attivo. L'utente non ha ancora selezionato un corso."
+        # Anche senza contesto attivo, verifica se lo studente ha piani personalizzati
+        parti = ["Nessun contesto attivo. L'utente non ha ancora selezionato un corso."]
+        studente_id = _STUDENTE_ID_CORRENTE
+        if studente_id:
+            try:
+                piani_studente = db.esegui(
+                    "SELECT id, titolo, stato FROM piani_personalizzati "
+                    "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                    [studente_id],
+                )
+                if piani_studente:
+                    elenco_piani = "\n".join(
+                        f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                        for p in piani_studente
+                    )
+                    parti.append(
+                        f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente NON ha ancora nessun piano personalizzato. "
+                        "Per generare quiz o flashcard è necessario prima creare un piano."
+                    )
+            except Exception:
+                pass
+        return "\n".join(parti)
 
     parti = []
     tipo = contesto.get("tipo_vista")
@@ -384,12 +510,49 @@ def tool_leggi_contesto() -> str:
         )
     elif mat:
         corso_id_mat = mat.get("corso_id") or 0  # 0 = nessun corso associato
-        parti.append(
-            f"Materiale selezionato dallo studente: '{mat['titolo']}' "
-            f"(materiale_id={mat['id']}, corso_id={corso_id_mat}). "
-            f"Genera una lezione su questo materiale chiamando tool_genera_corso "
-            f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
-        )
+        # Controlla se siamo in modalità "chat con documento"
+        doc_chat = contesto.get("documento_chat")
+        if doc_chat:
+            parti.append(
+                f"⚠️ MODALITÀ CHAT CON DOCUMENTO ATTIVA: lo studente sta chattando sul documento "
+                f"'{mat['titolo']}' (materiale_id={mat['id']}). "
+                f"NON generare piani o lezioni. Usa SEMPRE tool_rispondi_domanda per rispondere "
+                f"alle domande, passando la domanda e il nome del documento come contesto_aggiuntivo. "
+                f"Ogni risposta deve basarsi sul contenuto di questo documento specifico."
+            )
+        else:
+            parti.append(
+                f"Materiale selezionato dallo studente: '{mat['titolo']}' "
+                f"(materiale_id={mat['id']}, corso_id={corso_id_mat}). "
+                f"Genera una lezione su questo materiale chiamando tool_genera_corso "
+                f"con corso_universitario_id={corso_id_mat} e materiale_id={mat['id']}."
+            )
+
+    # Elenco piani personalizzati dello studente (utile per quiz/flashcard)
+    tipo = contesto.get("tipo_vista")
+    if tipo != "docente":
+        studente_id = _STUDENTE_ID_CORRENTE
+        try:
+            piani_studente = db.esegui(
+                "SELECT id, titolo, stato FROM piani_personalizzati "
+                "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                [studente_id],
+            )
+            if piani_studente:
+                elenco_piani = "\n".join(
+                    f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                    for p in piani_studente
+                )
+                parti.append(
+                    f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                )
+            else:
+                parti.append(
+                    "Lo studente NON ha ancora nessun piano personalizzato. "
+                    "Per generare quiz o flashcard è necessario prima creare un piano."
+                )
+        except Exception:
+            pass
 
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
@@ -463,7 +626,7 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
 
 
 @tool
-def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "") -> str:
+def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
     Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
@@ -476,6 +639,9 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     Se ci sono più materiali, chiama questo tool una volta per ciascun materiale.
     Parametro materiale_ids_csv: riservato per integrazione in corsi esistenti, non usare
     per generare lezioni nuove da più materiali combinati.
+    Parametro forza_ricerca_keyword: usa 1 SOLO se la ricerca semantica è fallita
+    e l'utente ha dato il consenso esplicito a procedere con la ricerca per parole chiave
+    (meno precisa). Default 0.
     """
     # Usa la variabile globale aggiornata dal thread principale prima dell'invocazione
     studente_id = _STUDENTE_ID_CORRENTE
@@ -498,7 +664,8 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         mat_id_singolo = materiale_id
 
     print(f"[DEBUG tool_genera_corso] corso_id_eff={corso_id_eff}, argomento='{argomento}', "
-          f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}")
+          f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}, "
+          f"forza_ricerca_keyword={forza_ricerca_keyword}")
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -508,11 +675,28 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         is_corso_docente=False,
         materiale_id=mat_id_singolo,
         materiale_ids=mat_ids,
+        forza_keyword=bool(forza_ricerca_keyword),
     )
 
     if stato_finale.get("errore"):
-        print(f"[DEBUG tool_genera_corso] ERRORE: {stato_finale['errore']}")
-        return f"Errore durante la generazione: {stato_finale['errore']}"
+        errore = stato_finale["errore"]
+        print(f"[DEBUG tool_genera_corso] ERRORE: {errore}")
+
+        # Gestione speciale: ricerca semantica fallita → chiedi consenso all'utente
+        if errore.startswith("RICERCA_SEMANTICA_FALLITA|"):
+            motivo = errore.split("|", 1)[1]
+            return (
+                f"La ricerca nel database vettoriale non è riuscita.\n"
+                f"Motivo: {motivo}\n\n"
+                f"È disponibile una ricerca alternativa basata su parole chiave "
+                f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+                f"rispetto alla ricerca semantica.\n\n"
+                f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+                f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+                f"ma con forza_ricerca_keyword=1."
+            )
+
+        return f"Errore durante la generazione: {errore}"
 
     print(f"[DEBUG tool_genera_corso] Generazione completata con successo, "
           f"n_chunks={len(stato_finale.get('chunks_recuperati', []))}")
@@ -647,7 +831,7 @@ Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
 
 
 @tool
-def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str:
+def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera una lezione attingendo da TUTTI i materiali della piattaforma (modalità 'Lea sceglie').
     Usa questo tool SOLO dopo aver chiarito le intenzioni dello studente (max 3 messaggi).
@@ -658,6 +842,9 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str
     Parametro argomento: topic specifico su cui generare la lezione (non generico).
     Parametro istruzioni_utente: istruzioni aggiuntive raccolte durante la conversazione
     (es. livello di approfondimento, aree da includere/escludere).
+    Parametro forza_ricerca_keyword: usa 1 SOLO se la ricerca semantica è fallita
+    e l'utente ha dato il consenso esplicito a procedere con la ricerca per parole chiave
+    (meno precisa). Default 0.
     """
     studente_id = _STUDENTE_ID_CORRENTE
 
@@ -670,7 +857,24 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str
         )
 
     # Ricerca platform-wide
-    chunks = cerca_chunk_piattaforma(query=argomento, top_k=16)
+    risultato_rag = cerca_chunk_piattaforma(
+        query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
+    )
+
+    # Se la ricerca semantica è fallita, chiedi consenso all'utente
+    if risultato_rag.errore_semantico and not forza_ricerca_keyword:
+        return (
+            f"La ricerca nel database vettoriale non è riuscita.\n"
+            f"Motivo: {risultato_rag.errore_semantico}\n\n"
+            f"È disponibile una ricerca alternativa basata su parole chiave "
+            f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+            f"rispetto alla ricerca semantica.\n\n"
+            f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+            f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+            f"ma con forza_ricerca_keyword=1."
+        )
+
+    chunks = risultato_rag.chunks
     if not chunks:
         return (
             "Non ho trovato materiale pertinente sull'argomento richiesto. "
@@ -790,12 +994,424 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "") -> str
 
 
 @tool
+def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
+    """
+    Rispondi a una domanda dello studente su un argomento, concetto o contenuto
+    del corso/piano, SENZA generare un piano o una lezione completa.
+
+    Usa questo tool quando lo studente:
+    - Chiede una spiegazione su un argomento (es. "Parlami del Deep Learning")
+    - Vuole capire meglio un concetto (es. "Spiegami le reti neurali")
+    - Chiede di riassumere un capitolo o paragrafo
+    - Ha un dubbio su qualcosa che sta studiando
+    - Chiede esempi su un argomento
+    - Fa domande di tipo "cos'è", "come funziona", "perché", "qual è la differenza tra..."
+
+    NON usare questo tool per generare piani di studio, quiz o flashcard.
+
+    Parametro domanda: la domanda o richiesta dello studente.
+    Parametro contesto_aggiuntivo: eventuale contesto extra (es. nome del paragrafo,
+    capitolo specifico, testo da approfondire). Se lo studente fa riferimento a un
+    paragrafo o capitolo specifico del piano, includi qui il titolo.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+    contesto = _CONTESTO_CORRENTE
+
+    # --- 1. Raccogli contesto dal piano personalizzato (se attivo) ---
+    contenuto_piano = ""
+    if contesto.get("piano_id"):
+        piano_id = contesto["piano_id"]
+        # Se c'è un riferimento a un paragrafo/capitolo specifico nel contesto_aggiuntivo,
+        # cerca il contenuto di quel paragrafo
+        if contesto_aggiuntivo:
+            # Cerca paragrafi il cui titolo corrisponde parzialmente
+            paragrafi = db.esegui(
+                """SELECT pp.id, pp.titolo, pc.contenuto_json
+                   FROM piano_paragrafi pp
+                   JOIN piano_capitoli cap ON pp.capitolo_id = cap.id
+                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                   WHERE cap.piano_id = ?""",
+                [piano_id],
+            )
+            # Cerca anche i capitoli
+            capitoli = db.esegui(
+                "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
+                [piano_id],
+            )
+
+            contesto_lower = contesto_aggiuntivo.lower()
+            parti_piano = []
+
+            # Match su capitoli
+            for cap in capitoli:
+                if cap["titolo"].lower() in contesto_lower or contesto_lower in cap["titolo"].lower():
+                    # Recupera tutti i paragrafi di questo capitolo
+                    par_cap = db.esegui(
+                        """SELECT pp.titolo, pc.contenuto_json
+                           FROM piano_paragrafi pp
+                           LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                           WHERE pp.capitolo_id = ? ORDER BY pp.ordine""",
+                        [cap["id"]],
+                    )
+                    for p in par_cap:
+                        if p.get("contenuto_json"):
+                            parti_piano.append(f"### {p['titolo']}\n{p['contenuto_json'][:3000]}")
+
+            # Match su paragrafi
+            for par in paragrafi:
+                if par["titolo"].lower() in contesto_lower or contesto_lower in par["titolo"].lower():
+                    if par.get("contenuto_json"):
+                        parti_piano.append(f"### {par['titolo']}\n{par['contenuto_json'][:5000]}")
+
+            if parti_piano:
+                contenuto_piano = "\n\n".join(parti_piano[:3])  # max 3 sezioni
+
+        # Se non c'è match specifico, prendi un sommario del piano
+        if not contenuto_piano:
+            paragrafi_piano = db.esegui(
+                """SELECT pp.titolo, SUBSTR(pc.contenuto_json, 1, 500) AS anteprima
+                   FROM piano_paragrafi pp
+                   JOIN piano_capitoli cap ON pp.capitolo_id = cap.id
+                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                   WHERE cap.piano_id = ? ORDER BY cap.ordine, pp.ordine""",
+                [piano_id],
+            )
+            if paragrafi_piano:
+                sommario_parti = []
+                for p in paragrafi_piano[:8]:
+                    anteprima = (p.get("anteprima") or "(non ancora generato)")[:300]
+                    sommario_parti.append(f"- {p['titolo']}: {anteprima}")
+                contenuto_piano = "Sommario del piano attivo:\n" + "\n".join(sommario_parti)
+
+    # --- 2. Cerca materiale rilevante con RAG ---
+    contesto_rag = ""
+    corso_id = contesto.get("corso_id")
+    doc_chat = contesto.get("documento_chat")
+    mat_sel = contesto.get("materiale_selezionato")
+
+    # Costruisci la query di ricerca combinando domanda e contesto
+    query_ricerca = domanda
+    if contesto_aggiuntivo:
+        query_ricerca = f"{domanda} {contesto_aggiuntivo}"
+
+    try:
+        if doc_chat or mat_sel:
+            # Modalità chat documento o materiale selezionato: cerca SOLO in quel documento
+            mat_id = (doc_chat or mat_sel)["id"]
+            mat_corso_id = (doc_chat or mat_sel).get("corso_id")
+            risultato = cerca_chunk_rilevanti(
+                mat_corso_id, query_ricerca, top_k=8,
+                materiale_id=mat_id,
+            )
+        elif corso_id:
+            # Cerca nel corso specifico
+            risultato = cerca_chunk_rilevanti(corso_id, query_ricerca, top_k=6)
+        else:
+            # Cerca su tutta la piattaforma
+            risultato = cerca_chunk_piattaforma(query_ricerca, top_k=6)
+
+        if risultato.chunks:
+            contesto_rag = formatta_contesto_rag(risultato.chunks)
+    except Exception as e:
+        print(f"[DEBUG tool_rispondi_domanda] Errore RAG: {e}")
+
+    # --- 3. Costruisci il prompt per la risposta ---
+    parti_contesto = []
+    if contenuto_piano:
+        parti_contesto.append(f"CONTENUTO DAL PIANO PERSONALIZZATO DELLO STUDENTE:\n{contenuto_piano}")
+    if contesto_rag:
+        parti_contesto.append(f"MATERIALE DIDATTICO RILEVANTE (da RAG):\n{contesto_rag}")
+
+    contesto_completo = "\n\n---\n\n".join(parti_contesto) if parti_contesto else "(Nessun materiale specifico trovato)"
+
+    corso_nome = contesto.get("corso_nome", "")
+    piano_titolo = contesto.get("piano_titolo", "")
+    info_contesto = ""
+    if doc_chat:
+        info_contesto += f"MODALITÀ CHAT DOCUMENTO: lo studente sta chattando sul documento '{doc_chat['titolo']}'. "
+    if corso_nome:
+        info_contesto += f"Corso attivo: {corso_nome}. "
+    if piano_titolo:
+        info_contesto += f"Piano attivo: {piano_titolo}. "
+
+    # Istruzioni specifiche per modalità documento
+    if doc_chat:
+        istruzioni_extra = (
+            "- Lo studente sta chattando su un DOCUMENTO SPECIFICO. Basa la risposta "
+            "ESCLUSIVAMENTE sul contenuto del documento fornito.\n"
+            "- Se la domanda riguarda qualcosa che il documento non tratta, segnalalo "
+            "chiaramente e indica che l'informazione richiesta non è presente nel documento. "
+            "NON rispondere con conoscenze generali proprie. Suggerisci allo studente di "
+            "consultare altri materiali del corso o della piattaforma.\n"
+            "- Quando citi informazioni dal documento, indicalo naturalmente "
+            "(es. 'Come descritto nel documento...', 'Il materiale spiega che...').\n"
+            "- NON proporre di creare piani o lezioni: lo studente vuole chattare sul documento."
+        )
+    else:
+        istruzioni_extra = (
+            "- Basa la risposta ESCLUSIVAMENTE sul materiale didattico fornito sopra "
+            "(contenuto del piano e/o materiale RAG). NON usare MAI conoscenze generali "
+            "o informazioni che non provengono dal materiale della piattaforma.\n"
+            "- Se il materiale disponibile non copre l'argomento richiesto o è insufficiente, "
+            "comunicalo chiaramente allo studente. Suggerisci di cercare materiale pertinente "
+            "tra i corsi o di caricare materiale proprio, oppure di chiedere al docente.\n"
+            "- Cita sempre la fonte delle informazioni (es. 'Secondo il materiale del corso...', "
+            "'Come riportato nel documento...').\n"
+            "- NON proporre di creare piani o lezioni: lo studente vuole una risposta diretta."
+        )
+
+    prompt = f"""Sei Lea, tutor didattico della piattaforma LearnAI. Rispondi alla domanda dello
+studente in modo chiaro, esaustivo e coinvolgente, basandoti ESCLUSIVAMENTE sul materiale
+didattico fornito di seguito. NON usare MAI conoscenze generali proprie del modello AI.
+Se il materiale è insufficiente, dichiaralo esplicitamente.
+
+{info_contesto}
+
+DOMANDA DELLO STUDENTE:
+{domanda}
+
+{f"CONTESTO AGGIUNTIVO: {contesto_aggiuntivo}" if contesto_aggiuntivo else ""}
+
+MATERIALE DI RIFERIMENTO:
+{contesto_completo}
+
+ISTRUZIONI PER LA RISPOSTA:
+- Rispondi in italiano con tono caldo e motivante.
+- Spiega in modo chiaro, usando esempi concreti quando possibile.
+{istruzioni_extra}
+- Se appropriato, alla fine suggerisci domande di approfondimento o argomenti correlati.
+- Usa formattazione Markdown (grassetto, elenchi, titoli) per rendere la risposta leggibile.
+- Se lo studente chiede un riassunto, sii sintetico ma completo sui punti chiave.
+- Se lo studente chiede esempi, fornisci esempi pratici e concreti."""
+
+    try:
+        llm = get_llm(max_tokens=4096)
+        from langchain_core.messages import HumanMessage as HM
+        risposta = llm.invoke([HM(content=prompt)])
+        return risposta.content
+    except Exception as e:
+        return f"Mi dispiace, ho avuto un problema nel rispondere alla tua domanda: {e}"
+
+
+@tool
+def tool_riscrivi_paragrafo(
+    piano_id: int,
+    paragrafo_id: int,
+    istruzioni: str,
+    materiale_id: int = 0,
+) -> str:
+    """
+    Riscrive il testo di un paragrafo di un piano personalizzato basandosi
+    ESCLUSIVAMENTE sul testo originale e sul materiale didattico della piattaforma.
+
+    Usa SEMPRE questo tool quando lo studente o il docente chiede di riscrivere,
+    modificare, semplificare, espandere, arricchire o migliorare il testo di un
+    paragrafo. NON generare MAI il testo riscritto direttamente nella conversazione:
+    delegalo SEMPRE a questo tool.
+
+    Parametro piano_id: ID del piano che contiene il paragrafo.
+    Parametro paragrafo_id: ID del paragrafo da riscrivere.
+    Parametro istruzioni: cosa fare col testo (es. "espandi", "semplifica",
+        "riscrivi in modo più chiaro", "arricchisci con più dettagli", "traduci in inglese").
+    Parametro materiale_id: (opzionale) ID di un materiale specifico da cui attingere
+        per arricchire il contenuto. Se 0, il tool cercherà automaticamente materiale
+        pertinente sulla piattaforma tramite RAG.
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+    contesto = _CONTESTO_CORRENTE
+
+    # --- 1. Verifica proprietà del piano ---
+    piano = db.trova_uno("piani_personalizzati", {"id": piano_id, "studente_id": studente_id})
+    if not piano:
+        return f"Piano ID {piano_id} non trovato o non appartiene allo studente corrente."
+
+    # --- 2. Verifica che il paragrafo appartenga al piano ---
+    par = db.esegui(
+        "SELECT pp.titolo FROM piano_paragrafi pp JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+        "WHERE pp.id = ? AND pc.piano_id = ?",
+        [paragrafo_id, piano_id],
+    )
+    if not par:
+        return f"Paragrafo ID {paragrafo_id} non trovato in questo piano."
+    titolo_paragrafo = par[0]["titolo"]
+
+    # --- 3. Leggi il testo attuale ---
+    contenuto = db.trova_uno("piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"})
+    if not contenuto or not contenuto.get("contenuto_json"):
+        return (
+            f"Nessun testo trovato per '{titolo_paragrafo}'. "
+            "Il paragrafo non ha ancora una lezione generata."
+        )
+    testo_originale = contenuto["contenuto_json"]
+
+    # --- 4. Recupera materiale didattico con RAG ---
+    contesto_rag = ""
+    chunk_ids_utilizzati: list[int] = []
+    corso_id = contesto.get("corso_id")
+
+    try:
+        if materiale_id and materiale_id > 0:
+            # Materiale specifico richiesto
+            risultato = cerca_chunk_rilevanti(
+                corso_id, titolo_paragrafo, top_k=8, materiale_id=materiale_id,
+            )
+        elif corso_id:
+            # Cerca nel corso associato
+            risultato = cerca_chunk_rilevanti(corso_id, titolo_paragrafo, top_k=6)
+        else:
+            # Cerca su tutta la piattaforma
+            risultato = cerca_chunk_piattaforma(titolo_paragrafo, top_k=6)
+
+        if risultato.chunks:
+            contesto_rag = formatta_contesto_rag(risultato.chunks)
+            chunk_ids_utilizzati = [c["id"] for c in risultato.chunks]
+    except Exception as e:
+        print(f"[DEBUG tool_riscrivi_paragrafo] Errore RAG: {e}")
+
+    # --- 5. Genera il testo riscritto con LLM vincolato ---
+    prompt = f"""Sei il Content Rewriting Engine della piattaforma LearnAI.
+Il tuo compito è riscrivere il testo di un paragrafo didattico seguendo le istruzioni fornite.
+
+VINCOLO FONDAMENTALE — RISPETTALO RIGOROSAMENTE:
+Puoi usare ESCLUSIVAMENTE:
+1. Il TESTO ORIGINALE del paragrafo fornito di seguito.
+2. Il MATERIALE DIDATTICO DELLA PIATTAFORMA recuperato tramite RAG (se disponibile).
+È SEVERAMENTE VIETATO aggiungere informazioni, concetti, esempi, definizioni o
+spiegazioni che non provengono da queste due fonti.
+Se le istruzioni richiedono di espandere o arricchire ma il materiale disponibile
+è insufficiente, riscrivi migliorando la struttura e la chiarezza del testo originale
+SENZA inventare nuovi contenuti. Segnala alla fine che il materiale disponibile non
+conteneva informazioni aggiuntive sull'argomento.
+
+ISTRUZIONI DELL'UTENTE:
+{istruzioni}
+
+TITOLO DEL PARAGRAFO:
+{titolo_paragrafo}
+
+TESTO ORIGINALE DA RISCRIVERE:
+{testo_originale}
+
+{"MATERIALE DIDATTICO DELLA PIATTAFORMA (fonte RAG):" + chr(10) + contesto_rag if contesto_rag else "MATERIALE DIDATTICO: Nessun materiale aggiuntivo trovato sulla piattaforma per questo argomento. Riscrivi basandoti SOLO sul testo originale."}
+
+REGOLE:
+- Scrivi sempre in italiano.
+- Il testo riscritto deve essere completo e autosufficiente (non un riassunto).
+- Usa formattazione Markdown (grassetto, elenchi, titoli) per rendere il testo leggibile.
+- NON aggiungere MAI informazioni che non provengono dal testo originale o dal materiale RAG.
+- Se hai usato informazioni dal materiale RAG, indica i Chunk ID utilizzati tra parentesi
+  alla fine (es. "[Fonti: Chunk 42, 55]").
+
+Riscrivi il testo ora:"""
+
+    try:
+        llm = get_llm(max_tokens=4096)
+        from langchain_core.messages import HumanMessage as HM
+        risposta = llm.invoke([HM(content=prompt)])
+        nuovo_testo = risposta.content
+    except Exception as e:
+        return f"Errore durante la riscrittura del paragrafo: {e}"
+
+    # --- 6. Salva il testo riscritto ---
+    try:
+        esistente = db.trova_uno("piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"})
+        aggiornamento = {"contenuto_json": nuovo_testo.strip()}
+
+        # Aggiorna chunk_ids_utilizzati
+        if chunk_ids_utilizzati:
+            chunk_ids_esistenti: list = []
+            try:
+                chunk_ids_esistenti = json.loads(esistente.get("chunk_ids_utilizzati") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                pass
+            for cid in chunk_ids_utilizzati:
+                if cid not in chunk_ids_esistenti:
+                    chunk_ids_esistenti.append(cid)
+            aggiornamento["chunk_ids_utilizzati"] = json.dumps(chunk_ids_esistenti)
+
+        # Aggiungi chunk del materiale specifico se fornito
+        if materiale_id and materiale_id > 0:
+            nuovi_chunks = db.esegui(
+                "SELECT id FROM materiali_chunks WHERE materiale_id = ?",
+                [materiale_id],
+            )
+            try:
+                ids_esistenti = json.loads(aggiornamento.get("chunk_ids_utilizzati") or
+                                          esistente.get("chunk_ids_utilizzati") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                ids_esistenti = []
+            for c in nuovi_chunks:
+                if c["id"] not in ids_esistenti:
+                    ids_esistenti.append(c["id"])
+            aggiornamento["chunk_ids_utilizzati"] = json.dumps(ids_esistenti)
+
+        if esistente:
+            db.aggiorna(
+                "piano_contenuti",
+                {"paragrafo_id": paragrafo_id, "tipo": "lezione"},
+                aggiornamento,
+            )
+        else:
+            nuovo_record = {
+                "paragrafo_id": paragrafo_id,
+                "tipo": "lezione",
+                **aggiornamento,
+            }
+            db.inserisci("piano_contenuti", nuovo_record)
+
+        fonte_info = ""
+        if contesto_rag:
+            fonte_info = " Il testo è stato arricchito con materiale didattico della piattaforma."
+        else:
+            fonte_info = " Non è stato trovato materiale aggiuntivo: il testo è stato riscritto basandosi solo sul contenuto originale."
+
+        return (
+            f"✅ Paragrafo '{titolo_paragrafo}' riscritto e salvato nel piano.{fonte_info} "
+            "Lo studente vedrà la nuova versione al prossimo caricamento."
+        )
+    except Exception as e:
+        return f"Errore durante il salvataggio del paragrafo riscritto: {e}"
+
+
+@tool
 def tool_genera_pratica(paragrafo_id: int, strumenti: list[str]) -> str:
     """
     Genera strumenti pratici (quiz, flashcard, schema) per una sezione studiata.
     strumenti: lista con uno o più tra "quiz", "flashcard", "schema".
+    IMPORTANTE: quiz e flashcard possono essere generati SOLO per sezioni di un
+    piano personalizzato dello studente. Se lo studente non ha piani, suggerisci
+    di crearne uno prima.
     """
     studente_id = _STUDENTE_ID_CORRENTE
+
+    # Verifica che il paragrafo appartenga a un piano dello studente
+    verifica = db.esegui(
+        "SELECT pp.id FROM piano_paragrafi pp "
+        "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+        "JOIN piani_personalizzati p ON pc.piano_id = p.id "
+        "WHERE pp.id = ? AND p.studente_id = ?",
+        [paragrafo_id, studente_id],
+    )
+    if not verifica:
+        # Controlla se lo studente ha almeno un piano
+        piani = db.esegui(
+            "SELECT id, titolo FROM piani_personalizzati "
+            "WHERE studente_id = ? AND stato = 'attivo'",
+            [studente_id],
+        )
+        if not piani:
+            return (
+                "Non puoi generare quiz o flashcard perché non hai ancora nessun piano personalizzato. "
+                "Crea prima un piano personalizzato sull'argomento che ti interessa, "
+                "poi potrai generare quiz e flashcard per le sue sezioni."
+            )
+        elenco = ", ".join(f"'{p['titolo']}'" for p in piani)
+        return (
+            f"La sezione indicata non appartiene a un tuo piano personalizzato. "
+            f"Quiz e flashcard possono essere generati solo per sezioni di un tuo piano. "
+            f"I tuoi piani attivi sono: {elenco}. "
+            f"Indica a quale piano vuoi associare quiz o flashcard."
+        )
 
     contenuti = db.trova_tutti(
         "piano_contenuti", {"paragrafo_id": paragrafo_id, "tipo": "lezione"}
@@ -1214,6 +1830,7 @@ def _get_orchestratore():
                     tool_genera_pratica,
                     tool_analizza_classe,
                     tool_modifica_piano,
+                    tool_riscrivi_paragrafo,
                     tool_analizza_coerenza_materiali,
                 ],
                 system_prompt=_SYSTEM_PROMPT_DOCENTE,
@@ -1229,9 +1846,11 @@ def _get_orchestratore():
                 tool_esplora_catalogo,
                 tool_genera_corso,
                 tool_genera_corso_libero,
+                tool_rispondi_domanda,
                 tool_genera_pratica,
                 tool_analizza_preparazione,
                 tool_modifica_piano,
+                tool_riscrivi_paragrafo,
                 tool_analizza_coerenza_materiali,
             ],
             system_prompt=_SYSTEM_PROMPT,
@@ -1315,6 +1934,7 @@ def aggiorna_contesto_sessione(
     if clear_materiale:
         contesto.pop("materiale_selezionato", None)
         contesto.pop("materiali_selezionati", None)
+        contesto.pop("documento_chat", None)
     if extra:
         contesto.update(extra)
     st.session_state[_SK_CONTESTO] = contesto
@@ -1359,6 +1979,25 @@ def chat_con_orchestratore(
     # l'agente. I tool girano in thread background dove session_state
     # non è accessibile — leggono _STUDENTE_ID_CORRENTE dal modulo.
     _aggiorna_studente_corrente()
+
+    # Inietta il contesto di navigazione corrente nel messaggio.
+    # Il thread LangGraph mantiene la memoria delle conversazioni precedenti,
+    # e l'agente potrebbe non richiamare tool_leggi_contesto se crede di
+    # conoscere già il contesto. Prefissando il contesto attuale evitiamo
+    # che la memoria stantia (es. "chat documento" chiusa) prevalga.
+    contesto = _CONTESTO_CORRENTE
+    if contesto:
+        _ctx_parts: list[str] = []
+        doc_chat = contesto.get("documento_chat")
+        if doc_chat:
+            _ctx_parts.append(f"Chat documento '{doc_chat.get('titolo', '')}'")
+        else:
+            if contesto.get("corso_nome"):
+                _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
+            if contesto.get("piano_titolo"):
+                _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        if _ctx_parts:
+            messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 
     try:
         return esegui_agente(
