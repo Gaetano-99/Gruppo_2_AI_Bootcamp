@@ -83,6 +83,13 @@ _STUDENTE_ID_CORRENTE: int = 1
 # tool_leggi_contesto legge da qui invece che da st.session_state.
 _CONTESTO_CORRENTE: dict = {}
 
+# Cache dei chunk RAG recuperati da tool_verifica_materiale_disponibile.
+# Evita di eseguire la RAG due volte: il pre-check salva qui i chunk,
+# tool_genera_corso/tool_genera_corso_libero li riusa come chunks_precaricati.
+# Struttura: {"argomento": str, "chunks": list[dict], "metodo": str}
+# Viene svuotata dopo ogni utilizzo da parte di tool_genera_corso.
+_CACHE_CHUNKS_VERIFICATI: dict = {}
+
 
 def _aggiorna_studente_corrente() -> None: 
     """Legge studente_id da session_state (thread principale) e lo salva
@@ -125,17 +132,20 @@ COSA SAI FARE (tool a tua disposizione):
                                 tipo_ricerca='argomenti' → materiali di un corso specifico.
                                 tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                 tra tutti i materiali del corso e quelli caricati dal docente.
-4. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+4. tool_verifica_materiale_disponibile → VERIFICA OBBLIGATORIA prima di generare lezioni.
+                                Controlla se esiste materiale pertinente all'argomento richiesto.
+5. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+                                CHIAMARE SOLO DOPO tool_verifica_materiale_disponibile positivo.
                                 Accetta un parametro opzionale materiale_id per generare
                                 la lezione SOLO dal contenuto di quel materiale specifico.
                                 IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
-5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
-6. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
+6. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
+8. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
                                 rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
                                 Per RISCRIVERE il testo usa tool_riscrivi_paragrafo.
-7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+9. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                 Utile per decidere come integrare materiali in un corso esistente.
-8. tool_riscrivi_paragrafo   → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+10. tool_riscrivi_paragrafo  → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
                                 didattico della piattaforma. Usa SEMPRE questo per riscritture.
 
 REGOLE DI COMPORTAMENTO:
@@ -151,6 +161,10 @@ REGOLE DI COMPORTAMENTO:
 - Quando il docente chiede "andamento della classe", "studenti in difficoltà", "argomenti ostici",
   "chi è a rischio", "nessuno ha fatto quiz", "risultati" o simili → usa SEMPRE tool_analizza_classe.
 - I contenuti generati (lezioni, quiz) sono associati al corso ufficiale.
+- VERIFICA OBBLIGATORIA PRIMA DI GENERARE LEZIONI:
+  Prima di chiamare tool_genera_corso, chiama SEMPRE tool_verifica_materiale_disponibile.
+  Se i materiali trovati non sono pertinenti all'argomento, NON generare la lezione.
+  Informa il docente e suggerisci di caricare materiale appropriato.
 - Non parlare mai di "piano personalizzato": i docenti gestiscono corsi, non piani.
 - Dopo ogni analisi, suggerisci azioni concrete: es. rivedere un argomento, creare esercizi mirati.
 - Se il docente non ha ancora studenti o quiz, comunicalo chiaramente e suggerisci come procedere.
@@ -219,23 +233,28 @@ COSA SAI FARE (tool a tua disposizione):
                                   tipo_ricerca='argomenti' → materiali di un corso specifico.
                                   tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                   tra tutti i materiali dello studente (personali e dei corsi).
-3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+3. tool_verifica_materiale_disponibile → VERIFICA OBBLIGATORIA prima di generare qualsiasi piano.
+                                  Controlla se esiste materiale didattico pertinente all'argomento.
+                                  Restituisce gli argomenti dei materiali trovati: TU giudichi se
+                                  sono coerenti con la richiesta. Se non lo sono, NON generare il piano.
+4. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+                                  CHIAMARE SOLO DOPO tool_verifica_materiale_disponibile positivo.
                                   Accetta un parametro opzionale materiale_id per generare
                                   la lezione SOLO dal contenuto di quel materiale specifico.
                                   IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
-4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
-5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
-6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
+5. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
+6. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
+7. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
                                   LEGGERE il testo di una lezione. Per RISCRIVERE usa tool_riscrivi_paragrafo.
-10. tool_riscrivi_paragrafo     → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+8. tool_riscrivi_paragrafo      → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
                                   didattico della piattaforma. Usa SEMPRE questo tool per riscritture.
-7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+9. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                   Utile per decidere come integrare materiali in un piano esistente.
-8. tool_genera_corso_libero        → generare una lezione attingendo a TUTTI i materiali della piattaforma
+10. tool_genera_corso_libero       → generare una lezione attingendo a TUTTI i materiali della piattaforma
                                   (modalità "Lea sceglie"). Lea cerca autonomamente il materiale più
                                   pertinente tra tutto ciò che è disponibile nel sistema.
                                   Il piano generato include automaticamente i riferimenti bibliografici.
-9. tool_rispondi_domanda        → RISPONDERE a domande, dubbi e curiosità dello studente su argomenti,
+11. tool_rispondi_domanda       → RISPONDERE a domande, dubbi e curiosità dello studente su argomenti,
                                   concetti, paragrafi o capitoli SENZA creare piani o lezioni.
                                   Cerca materiale rilevante con RAG e risponde in modo conversazionale.
 
@@ -302,6 +321,29 @@ REGOLE DI COMPORTAMENTO:
      a) Creare un piano di studio personalizzato sull'argomento usando materiale disponibile
      b) Usare la modalità "Lea sceglie" per cercare materiale su tutta la piattaforma
      c) Caricare materiale proprio sull'argomento
+- VERIFICA OBBLIGATORIA PRIMA DI GENERARE UN PIANO:
+  Prima di chiamare tool_genera_corso o tool_genera_corso_libero, e PRIMA di chiedere
+  allo studente dettagli su come strutturare il piano, DEVI SEMPRE chiamare
+  tool_verifica_materiale_disponibile per controllare che esista materiale pertinente.
+  Flusso OBBLIGATORIO per la generazione di un piano:
+  1. Studente chiede di generare un piano/lezione su un argomento.
+  2. Chiama SUBITO tool_verifica_materiale_disponibile(argomento, corso_universitario_id,
+     materiale_id) — NON chiedere prima dettagli sulla struttura del piano.
+  3. Leggi la risposta: contiene gli argomenti dei materiali trovati dalla ricerca RAG.
+  4. GIUDICA se i materiali sono pertinenti alla richiesta:
+     - Se PERTINENTI → chiedi allo studente eventuali chiarimenti sulla struttura
+       (livello, argomenti specifici, ecc.), poi chiama tool_genera_corso.
+       I chunk RAG sono già memorizzati: tool_genera_corso li riuserà automaticamente
+       senza ripetere la ricerca (zero latenza aggiuntiva per la RAG).
+     - Se NON PERTINENTI (es. lo studente chiede "Diritto Privato Romano" ma i materiali
+       parlano di "Marketing" o argomenti diversi) → NON chiamare tool_genera_corso.
+       NON chiedere chiarimenti sulla struttura. Informa SUBITO lo studente che il materiale
+       disponibile non copre l'argomento richiesto e proponi:
+       a) Caricare dispense, slide o documenti propri sull'argomento
+       b) Cercare un argomento correlato tra i corsi disponibili
+       c) Usare la modalità "Lea sceglie" per cercare su tutta la piattaforma
+  NON generare MAI un piano con materiale non pertinente. È meglio non generare nulla
+  che generare contenuti fuorvianti su argomenti sbagliati.
 - I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
   chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
   rispondi che i corsi non sono modificabili dagli studenti e suggerisci di creare un piano
@@ -316,15 +358,22 @@ REGOLE DI COMPORTAMENTO:
   conferma. Se trovi più risultati, mostrali e chiedi quale intende. Se non trovi nulla,
   comunicalo e suggerisci di controllare i materiali caricati.
 - MATERIALE SELEZIONATO (SINGOLO): se tool_leggi_contesto riporta "Materiale selezionato" con
-  UN SOLO materiale_id, lo studente vuole una lezione su quel materiale specifico. Usa SUBITO
-  tool_genera_corso passando il materiale_id indicato nel contesto. Se non c'è un corso
-  associato, usa corso_universitario_id=0. Non chiedere conferme.
+  UN SOLO materiale_id, lo studente vuole una lezione su quel materiale specifico.
+  Se lo studente specifica un argomento: chiama PRIMA tool_verifica_materiale_disponibile
+  con quell'argomento e il materiale_id per verificare che il materiale copra l'argomento.
+  Se la verifica è positiva → procedi con tool_genera_corso.
+  Se la verifica è negativa → informa lo studente che il materiale selezionato non copre
+  l'argomento richiesto e suggerisci alternative.
+  Se lo studente NON specifica un argomento (vuole una lezione generica dal materiale):
+  procedi direttamente con tool_genera_corso. Se non c'è un corso associato, usa
+  corso_universitario_id=0. Non chiedere conferme.
 - MATERIALI MULTIPLI SELEZIONATI: se tool_leggi_contesto riporta "Materiali selezionati"
   con più materiale_ids, DEVI generare una lezione SEPARATA per CIASCUN materiale.
   NON tentare MAI di combinare più materiali in una sola lezione (causa errori di generazione).
   Flusso OBBLIGATORIO:
-  1. Informa lo studente che genererai un piano separato per ogni materiale selezionato.
-  2. Per CIASCUN materiale nella lista, chiama tool_genera_corso con il singolo materiale_id
+  1. Se lo studente specifica un argomento, verifica la pertinenza di CIASCUN materiale
+     con tool_verifica_materiale_disponibile prima di generare.
+  2. Per CIASCUN materiale pertinente, chiama tool_genera_corso con il singolo materiale_id
      e corso_universitario_id=0.
   3. Al termine, comunica allo studente che sono stati creati i piani e suggerisci di
      consultarli singolarmente.
@@ -372,12 +421,16 @@ REGOLE DI COMPORTAMENTO:
      b) Usare il proprio materiale didattico caricato
      c) "Lea sceglie" — tu cercherai tra TUTTI i materiali disponibili sulla piattaforma
   2. Se lo studente sceglie l'opzione c) ("Lea sceglie" o equivalente):
-     - Fai al MASSIMO 3 domande di chiarimento per capire:
+     - Chiama SUBITO tool_verifica_materiale_disponibile(argomento, 0, 0) per verificare
+       che esista materiale pertinente sulla piattaforma PRIMA di fare domande.
+     - Se la verifica è NEGATIVA → informa lo studente, proponi alternative. STOP.
+     - Se la verifica è POSITIVA → poi fai al MASSIMO 3 domande di chiarimento per capire:
        * L'argomento specifico (non generico) su cui vuole la lezione
        * Il livello di approfondimento desiderato (introduttivo, intermedio, avanzato)
        * Eventuali aree specifiche da includere o escludere
      - Dopo aver raccolto abbastanza informazioni (o dopo 3 messaggi di chiarimento),
        chiama tool_genera_corso_libero con l'argomento raffinato e le istruzioni raccolte.
+       I chunk RAG sono già memorizzati dal pre-check e verranno riutilizzati.
      - NON chiedere MAI più di 3 domande: dopo la terza, procedi con le informazioni disponibili.
   3. Il piano generato includerà automaticamente un capitolo "Riferimenti bibliografici"
      con l'elenco dei materiali della piattaforma usati come fonte.
@@ -736,10 +789,108 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
 
 
 @tool
+def tool_verifica_materiale_disponibile(
+    argomento: str,
+    corso_universitario_id: int = 0,
+    materiale_id: int = 0,
+) -> str:
+    """
+    Verifica se esiste materiale didattico pertinente PRIMA di generare un piano.
+    Chiama SEMPRE questo tool prima di tool_genera_corso o tool_genera_corso_libero,
+    e PRIMA di chiedere all'utente dettagli su come strutturare il piano.
+
+    Esegue la ricerca RAG e MEMORIZZA i chunk trovati: quando successivamente chiamerai
+    tool_genera_corso, i chunk verranno riutilizzati senza ripetere la ricerca.
+
+    Parametro argomento: l'argomento richiesto dallo studente.
+    Parametro corso_universitario_id: ID del corso (0 se nessun corso specifico).
+    Parametro materiale_id: ID del materiale specifico (0 se nessuno).
+    """
+    global _CACHE_CHUNKS_VERIFICATI
+
+    corso_id_eff = corso_universitario_id if corso_universitario_id and corso_universitario_id > 0 else None
+    mat_id_eff = materiale_id if materiale_id and materiale_id > 0 else None
+
+    # 1. Ricerca RAG (unica: i chunk verranno riusati da tool_genera_corso)
+    # Se non c'è né corso né materiale specifico → ricerca platform-wide
+    if corso_id_eff is None and mat_id_eff is None:
+        risultato_rag = cerca_chunk_piattaforma(
+            query=argomento, top_k=16,
+        )
+    else:
+        risultato_rag = cerca_chunk_rilevanti(
+            corso_id=corso_id_eff,
+            query=argomento,
+            top_k=8,
+            materiale_id=mat_id_eff,
+        )
+
+    # Se la ricerca semantica è fallita
+    if risultato_rag.errore_semantico:
+        _CACHE_CHUNKS_VERIFICATI = {}
+        return (
+            f"La ricerca semantica non è riuscita: {risultato_rag.errore_semantico}\n"
+            "Non è possibile verificare la disponibilità del materiale in questo momento. "
+            "Chiedi all'utente se vuole provare con la ricerca per parole chiave."
+        )
+
+    chunks = risultato_rag.chunks
+    if not chunks:
+        _CACHE_CHUNKS_VERIFICATI = {}
+        return (
+            f"NESSUN materiale trovato per l'argomento '{argomento}'.\n"
+            "Non generare il piano. Informa lo studente che non è disponibile "
+            "materiale didattico sull'argomento richiesto e suggerisci alternative:\n"
+            "- Caricare materiale proprio sull'argomento\n"
+            "- Cercare un argomento correlato tra i corsi disponibili\n"
+            "- Usare la modalità 'Lea sceglie' per cercare su tutta la piattaforma"
+        )
+
+    # 2. Salva i chunk nella cache per tool_genera_corso
+    _CACHE_CHUNKS_VERIFICATI = {
+        "argomento": argomento,
+        "chunks": chunks,
+        "metodo": risultato_rag.metodo_utilizzato,
+        "corso_id": corso_id_eff,
+        "materiale_id": mat_id_eff,
+    }
+    print(f"[DEBUG tool_verifica] Cache salvata: {len(chunks)} chunks per '{argomento}'")
+
+    # 3. Estrai i materiali coinvolti e i loro argomenti
+    materiale_ids_trovati = list({c["materiale_id"] for c in chunks if c.get("materiale_id")})
+    sommari = recupera_sommari_materiali(materiale_ids_trovati)
+
+    # 4. Costruisci il riepilogo per l'orchestratore
+    righe = [
+        f"Verifica materiale per '{argomento}':",
+        f"Metodo di ricerca: {risultato_rag.metodo_utilizzato}",
+        f"Chunk trovati: {len(chunks)}, da {len(materiale_ids_trovati)} materiale/i.\n",
+        "MATERIALI RECUPERATI E LORO ARGOMENTI:",
+    ]
+    for s in sommari:
+        argomenti_str = ", ".join(s["argomenti_chiave"][:10]) if s["argomenti_chiave"] else "nessun argomento estratto"
+        righe.append(f"- '{s['titolo']}' (ID {s['materiale_id']}, tipo: {s['tipo']})")
+        righe.append(f"  Argomenti: {argomenti_str}")
+
+    righe.append(
+        f"\nISTRUZIONI: Confronta gli argomenti dei materiali trovati con la richiesta "
+        f"dello studente ('{argomento}'). "
+        f"Se i materiali sono PERTINENTI → procedi con tool_genera_corso (i chunk RAG "
+        f"sono già memorizzati e verranno riutilizzati, nessuna seconda ricerca). "
+        f"Se i materiali NON sono pertinenti (argomenti completamente diversi) → "
+        f"NON generare il piano. Informa lo studente che il materiale disponibile "
+        f"non copre l'argomento richiesto e proponi alternative."
+    )
+    return "\n".join(righe)
+
+
+@tool
 def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
-    Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
+    PREREQUISITO: chiama SEMPRE tool_verifica_materiale_disponibile PRIMA di questo tool
+    per verificare che esista materiale pertinente. NON chiamare se la verifica ha dato
+    esito negativo (materiale non pertinente o assente).
 
     Parametro corso_universitario_id: usa 0 se non c'è un corso associato (es. materiale personale).
     Parametro opzionale materiale_id: se > 0, la lezione viene generata usando SOLO
@@ -773,9 +924,19 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     elif materiale_id and materiale_id > 0:
         mat_id_singolo = materiale_id
 
+    # Recupera chunk dalla cache del pre-check (se disponibili)
+    global _CACHE_CHUNKS_VERIFICATI
+    chunks_da_cache: list[dict] | None = None
+    if _CACHE_CHUNKS_VERIFICATI and _CACHE_CHUNKS_VERIFICATI.get("chunks"):
+        chunks_da_cache = _CACHE_CHUNKS_VERIFICATI["chunks"]
+        print(f"[DEBUG tool_genera_corso] Riuso {len(chunks_da_cache)} chunk dalla cache "
+              f"(verifica pre-generazione per '{_CACHE_CHUNKS_VERIFICATI.get('argomento')}')")
+        _CACHE_CHUNKS_VERIFICATI = {}  # Svuota dopo l'uso
+
     print(f"[DEBUG tool_genera_corso] corso_id_eff={corso_id_eff}, argomento='{argomento}', "
           f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}, "
-          f"forza_ricerca_keyword={forza_ricerca_keyword}")
+          f"forza_ricerca_keyword={forza_ricerca_keyword}, "
+          f"chunks_precaricati={'sì (' + str(len(chunks_da_cache)) + ')' if chunks_da_cache else 'no'}")
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -785,6 +946,7 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         is_corso_docente=False,
         materiale_id=mat_id_singolo,
         materiale_ids=mat_ids,
+        chunks_precaricati=chunks_da_cache,
         forza_keyword=bool(forza_ricerca_keyword),
     )
 
@@ -944,6 +1106,7 @@ Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
 def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera una lezione attingendo da TUTTI i materiali della piattaforma (modalità 'Lea sceglie').
+    PREREQUISITO: chiama SEMPRE tool_verifica_materiale_disponibile PRIMA di questo tool.
     Usa questo tool SOLO dopo aver chiarito le intenzioni dello studente (max 3 messaggi).
 
     Il piano generato include automaticamente un capitolo "Riferimenti bibliografici"
@@ -958,49 +1121,57 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_
     """
     studente_id = _STUDENTE_ID_CORRENTE
 
-    # Verifica che ci siano materiali sulla piattaforma
-    n_totali = conta_chunk_piattaforma()
-    if n_totali == 0:
-        return (
-            "Nessun materiale didattico disponibile sulla piattaforma. "
-            "Non è possibile generare una lezione senza materiale di riferimento."
+    # Recupera chunk dalla cache del pre-check (se disponibili)
+    global _CACHE_CHUNKS_VERIFICATI
+    chunks_da_cache: list[dict] | None = None
+    if _CACHE_CHUNKS_VERIFICATI and _CACHE_CHUNKS_VERIFICATI.get("chunks"):
+        chunks_da_cache = _CACHE_CHUNKS_VERIFICATI["chunks"]
+        print(f"[DEBUG tool_genera_corso_libero] Riuso {len(chunks_da_cache)} chunk dalla cache")
+        _CACHE_CHUNKS_VERIFICATI = {}  # Svuota dopo l'uso
+
+    if chunks_da_cache:
+        # Usa i chunk già verificati dal pre-check
+        chunks = chunks_da_cache
+    else:
+        # Fallback: ricerca platform-wide (caso in cui il pre-check non è stato chiamato)
+        n_totali = conta_chunk_piattaforma()
+        if n_totali == 0:
+            return (
+                "Nessun materiale didattico disponibile sulla piattaforma. "
+                "Non è possibile generare una lezione senza materiale di riferimento."
+            )
+
+        risultato_rag = cerca_chunk_piattaforma(
+            query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
         )
 
-    # Ricerca platform-wide
-    risultato_rag = cerca_chunk_piattaforma(
-        query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
-    )
+        if risultato_rag.errore_semantico and not forza_ricerca_keyword:
+            return (
+                f"La ricerca nel database vettoriale non è riuscita.\n"
+                f"Motivo: {risultato_rag.errore_semantico}\n\n"
+                f"È disponibile una ricerca alternativa basata su parole chiave "
+                f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+                f"rispetto alla ricerca semantica.\n\n"
+                f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+                f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+                f"ma con forza_ricerca_keyword=1."
+            )
 
-    # Se la ricerca semantica è fallita, chiedi consenso all'utente
-    if risultato_rag.errore_semantico and not forza_ricerca_keyword:
-        return (
-            f"La ricerca nel database vettoriale non è riuscita.\n"
-            f"Motivo: {risultato_rag.errore_semantico}\n\n"
-            f"È disponibile una ricerca alternativa basata su parole chiave "
-            f"(keyword matching sui metadati), che potrebbe essere meno precisa "
-            f"rispetto alla ricerca semantica.\n\n"
-            f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
-            f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
-            f"ma con forza_ricerca_keyword=1."
-        )
-
-    chunks = risultato_rag.chunks
-    if not chunks:
-        return (
-            "Non ho trovato materiale pertinente sull'argomento richiesto. "
-            "Prova a riformulare con termini più specifici o scegli un altro argomento."
-        )
+        chunks = risultato_rag.chunks
+        if not chunks:
+            return (
+                "Non ho trovato materiale pertinente sull'argomento richiesto. "
+                "Prova a riformulare con termini più specifici o scegli un altro argomento."
+            )
 
     # Log info sui materiali coinvolti
     materiale_ids_unici = list({c["materiale_id"] for c in chunks if c.get("materiale_id")})
 
     print(f"[DEBUG tool_genera_corso_libero] argomento='{argomento}', "
           f"chunks_trovati={len(chunks)}, materiali_coinvolti={len(materiale_ids_unici)}, "
-          f"studente_id={studente_id}")
+          f"studente_id={studente_id}, da_cache={'sì' if chunks_da_cache else 'no'}")
 
-    # Genera il piano usando i chunk già recuperati dalla ricerca platform-wide.
-    # Passa i chunk direttamente (chunks_precaricati) per evitare che il nodo RAG
-    # ri-cerchi su tutti i materiale_ids e includa materiali non pertinenti.
+    # Genera il piano usando i chunk (da cache o dalla ricerca platform-wide).
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
         corso_id=None,
@@ -1936,6 +2107,7 @@ def _get_orchestratore():
                 tools=[
                     tool_leggi_contesto,
                     tool_esplora_catalogo,
+                    tool_verifica_materiale_disponibile,
                     tool_genera_corso,
                     tool_genera_pratica,
                     tool_analizza_classe,
@@ -1954,6 +2126,7 @@ def _get_orchestratore():
             tools=[
                 tool_leggi_contesto,
                 tool_esplora_catalogo,
+                tool_verifica_materiale_disponibile,
                 tool_genera_corso,
                 tool_genera_corso_libero,
                 tool_rispondi_domanda,
