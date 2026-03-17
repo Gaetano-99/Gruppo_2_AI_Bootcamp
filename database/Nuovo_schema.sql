@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS corsi_di_laurea (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     nome        TEXT    NOT NULL,               -- es. "Ingegneria Informatica"
     facolta     TEXT    NOT NULL,               -- es. "Ingegneria"
+    descrizione TEXT,                           -- descrizione del corso per il catalogo ospiti
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
