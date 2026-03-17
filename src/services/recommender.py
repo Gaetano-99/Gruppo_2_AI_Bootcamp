@@ -60,7 +60,7 @@ _PESO_SEMANTICO   : float = 0.25
 _DECAY_DIMEZZAMENTO_GIORNI: int = 30
 
 # Numero massimo di raccomandazioni restituite
-_TOP_N_DEFAULT: int = 5
+_TOP_N_DEFAULT: int = 6
 
 
 # ---------------------------------------------------------------------------
