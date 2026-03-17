@@ -78,7 +78,65 @@ _CSS = """
     font-size: 0.95rem;
     color: #001A4D;
 }
+[data-testid="stChatInput"] {
+    background-color: #ffffff !important;
+    border: 2px solid #DAEAFF !important;
+    border-radius: 25px !important;
+    box-shadow: 0 4px 6px rgba(0, 48, 135, 0.08) !important;
+    transition: all 0.3s ease;
+}
+[data-testid="stChatInput"]:focus-within {
+    border-color: #0057B8 !important;
+    box-shadow: 0 6px 12px rgba(0, 87, 184, 0.15) !important;
+}
+[data-testid="stChatInput"] button {
+    background-color: #0057B8 !important;
+    color: white !important;
+    border-radius: 50% !important;
+    padding: 8px !important;
+    transition: all 0.2s ease;
+}
+[data-testid="stChatInput"] button:hover {
+    background-color: #003087 !important;
+    transform: scale(1.05);
+}
+[data-testid="stChatInput"] button svg {
+    fill: white !important;
+}
 </style>
+"""
+
+# Script scroll: iniettato come st.markdown, targeting tutti i possibili
+# contenitori scrollabili di Streamlit. Viene triggerato solo quando
+# st.session_state["_scroll_top"] è True, poi resettato subito.
+_SCROLL_SCRIPT = """
+<script>
+(function() {
+    function doScroll() {
+        var doc = window.parent.document;
+        // Streamlit >= 1.x: il main content è in [data-testid="stAppViewContainer"]
+        // oppure nella sezione .main > div oppure in .block-container
+        var targets = [
+            doc.querySelector('[data-testid="stAppViewContainer"]'),
+            doc.querySelector('.main'),
+            doc.querySelector('.block-container'),
+            doc.documentElement,
+            doc.body
+        ];
+        targets.forEach(function(el) {
+            if (el) el.scrollTop = 0;
+        });
+        // Fallback: scroll della finestra parent
+        window.parent.scrollTo(0, 0);
+    }
+
+    // Prima esecuzione immediata
+    doScroll();
+    // Secondo tentativo dopo il re-render di Streamlit
+    setTimeout(doScroll, 80);
+    setTimeout(doScroll, 250);
+})();
+</script>
 """
 
 DOMANDE_PER_PAGINA = 10
@@ -95,12 +153,30 @@ def _init_stato():
         st.session_state["quest_completato"] = False
     if "quest_risultato" not in st.session_state:
         st.session_state["quest_risultato"] = ""
+    if "_scroll_top" not in st.session_state:
+        st.session_state["_scroll_top"] = False
+
+
+def _maybe_scroll():
+    """
+    Inietta lo script di scroll via st.markdown (non components.html).
+    st.markdown con unsafe_allow_html=True esegue il tag <script> nel
+    contesto del documento parent di Streamlit, che ha accesso diretto
+    ai container scrollabili — a differenza di components.html che gira
+    in un iframe sandboxato separato con il suo scroll context.
+    """
+    if st.session_state.get("_scroll_top"):
+        st.markdown(_SCROLL_SCRIPT, unsafe_allow_html=True)
+        st.session_state["_scroll_top"] = False
 
 
 def mostra_questionario():
     """Renderizza la pagina questionario di orientamento."""
     st.markdown(_CSS, unsafe_allow_html=True)
     _init_stato()
+
+    # Scroll top se richiesto (dopo cambio pagina o submit)
+    _maybe_scroll()
 
     # Header
     st.markdown("""
@@ -150,7 +226,7 @@ def mostra_questionario():
 
     # Render domande con form
     with st.form(key=f"form_quest_pag_{pagina_corrente}"):
-        risposte_pagina: dict[str, str] = {}
+        risposte_pagina = {}
 
         for i, dom in enumerate(domande_pagina, idx_start + 1):
             categoria = dom.get("categoria", "")
@@ -163,7 +239,6 @@ def mostra_questionario():
                 unsafe_allow_html=True,
             )
 
-            # Valore precedente se esiste
             val_precedente = st.session_state["quest_risposte"].get(dom["id"])
             idx_default = dom["opzioni"].index(val_precedente) if val_precedente in dom["opzioni"] else 0
 
@@ -201,7 +276,6 @@ def mostra_questionario():
                         risultato = analizza_questionario_esteso(st.session_state["quest_risposte"])
                         st.session_state["quest_risultato"] = risultato
                         st.session_state["quest_completato"] = True
-                        # Pre-popola la chat del questionario con la raccomandazione
                         st.session_state["chat_questionario"] = [
                             {"ruolo": "assistant", "contenuto": risultato}
                         ]
@@ -209,11 +283,16 @@ def mostra_questionario():
                         st.error(f"Errore durante l'analisi: {e}")
             else:
                 st.session_state["quest_pagina"] = pagina_corrente + 1
+
+            # Attiva lo scroll al prossimo re-render
+            st.session_state["_scroll_top"] = True
             st.rerun()
 
         if btn_indietro and pagina_corrente > 0:
             st.session_state["quest_risposte"].update(risposte_pagina)
             st.session_state["quest_pagina"] = pagina_corrente - 1
+            # Attiva lo scroll al prossimo re-render
+            st.session_state["_scroll_top"] = True
             st.rerun()
 
 
@@ -221,7 +300,6 @@ def _mostra_risultato():
     """Mostra il risultato LLM, i bottoni di navigazione e la chat inline."""
     risultato = st.session_state.get("quest_risultato", "")
 
-    # --- Raccomandazione ---
     st.markdown("### 🎓 Il tuo percorso di studi consigliato da Lea")
     if risultato:
         st.markdown(
@@ -233,7 +311,7 @@ def _mostra_risultato():
 
     st.markdown("---")
 
-    # --- Bottoni di navigazione ---
+    # Bottoni navigazione
     col_a, col_b, col_c = st.columns(3)
     with col_a:
         if st.button("← Torna alla home", key="btn_torna_home_risultato", type="primary"):
@@ -241,7 +319,13 @@ def _mostra_risultato():
             st.rerun()
     with col_b:
         if st.button("🔄 Rifai il questionario", key="btn_rifai"):
-            for k in ["quest_pagina", "quest_risposte", "quest_completato", "quest_risultato", "chat_questionario"]:
+            for k in [
+                "quest_pagina",
+                "quest_risposte",
+                "quest_completato",
+                "quest_risultato",
+                "chat_questionario",
+            ]:
                 st.session_state.pop(k, None)
             st.rerun()
     with col_c:
@@ -249,7 +333,7 @@ def _mostra_risultato():
             st.session_state["ospite_pagina"] = "catalogo"
             st.rerun()
 
-    # --- Chat inline con Lea ---
+    # Chat inline con Lea
     st.markdown("---")
     st.markdown("#### 💬 Vuoi saperne di più? Chatta con Lea!")
     st.markdown(
@@ -276,13 +360,12 @@ def _mostra_risultato():
 
     st.markdown("")
 
-    # Inizializza la chat del questionario se non esiste
     if "chat_questionario" not in st.session_state:
         st.session_state["chat_questionario"] = (
             [{"ruolo": "assistant", "contenuto": risultato}] if risultato else []
         )
 
-    # Mostra la storia (dal secondo messaggio in poi: il primo è il risultato già mostrato sopra)
+    # Mostra la storia (dal secondo messaggio: il primo è il risultato già mostrato sopra)
     for msg in st.session_state["chat_questionario"][1:]:
         with st.chat_message(msg["ruolo"]):
             st.markdown(msg["contenuto"])

@@ -92,6 +92,39 @@ div[data-testid="column"]:has(.action-card-wrapper):hover .action-card-wrapper {
     filter: brightness(1.07);
     transform: scale(1.02);
 }
+
+/* Stile base chat input */
+[data-testid="stChatInput"] {
+    background-color: #ffffff !important;
+    border: 2px solid #DAEAFF !important;
+    border-radius: 25px !important;
+    box-shadow: 0 4px 6px rgba(0, 48, 135, 0.08) !important;
+    transition: all 0.3s ease;
+}
+
+/* Stile quando l'input è a fuoco */
+[data-testid="stChatInput"]:focus-within {
+    border-color: #0057B8 !important;
+    box-shadow: 0 6px 12px rgba(0, 87, 184, 0.15) !important;
+}
+
+/* Icona di invio */
+[data-testid="stChatInput"] button {
+    background-color: #0057B8 !important;
+    color: white !important;
+    border-radius: 50% !important;
+    padding: 8px !important;
+    transition: all 0.2s ease;
+}
+
+[data-testid="stChatInput"] button:hover {
+    background-color: #003087 !important;
+    transform: scale(1.05);
+}
+
+[data-testid="stChatInput"] button svg {
+    fill: white !important;
+}
 </style>
 """
 
