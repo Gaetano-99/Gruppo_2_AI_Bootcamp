@@ -18,6 +18,68 @@ import sys
 import threading
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 
+
+# ---------------------------------------------------------------------------
+# Verifica dipendenze da requirements.txt (auto-install se mancanti)
+# ---------------------------------------------------------------------------
+def _verifica_e_installa_dipendenze():
+    """Controlla che tutti i pacchetti in requirements.txt siano installati.
+
+    Se ne manca qualcuno, lo installa automaticamente con pip.
+    Viene eseguito una sola volta all'avvio.
+    """
+    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    if not os.path.exists(req_path):
+        return
+
+    # Mappa nome-pacchetto → nome-import per i casi in cui differiscono
+    _NOME_IMPORT = {
+        "python-dotenv": "dotenv",
+        "pypdf2": "PyPDF2",
+        "pymupdf": "fitz",
+        "python-docx": "docx",
+        "python-pptx": "pptx",
+        "sentence-transformers": "sentence_transformers",
+        "langchain-aws": "langchain_aws",
+        "langchain-huggingface": "langchain_huggingface",
+    }
+
+    mancanti: list[str] = []
+
+    with open(req_path, "r", encoding="utf-8") as f:
+        for riga in f:
+            riga = riga.strip()
+            if not riga or riga.startswith("#"):
+                continue
+            # Estrai il nome del pacchetto (prima di >=, ==, <, ecc.)
+            for sep in (">=", "==", "<=", "!=", "<", ">", "~="):
+                if sep in riga:
+                    nome_pkg = riga.split(sep)[0].strip()
+                    break
+            else:
+                nome_pkg = riga.strip()
+
+            nome_import = _NOME_IMPORT.get(nome_pkg.lower(), nome_pkg.replace("-", "_"))
+            try:
+                __import__(nome_import)
+            except ImportError:
+                mancanti.append(riga)
+
+    if mancanti:
+        import subprocess
+        print(f"[INFO app] Pacchetti mancanti: {', '.join(mancanti)}")
+        print("[INFO app] Installazione in corso...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", *mancanti],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        print("[INFO app] Installazione completata.")
+
+
+_verifica_e_installa_dipendenze()
+
+
 import streamlit as st
 
 # DEBUG — rimuovere dopo aver risolto il problema di import
