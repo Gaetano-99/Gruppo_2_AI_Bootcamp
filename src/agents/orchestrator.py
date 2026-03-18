@@ -266,6 +266,15 @@ COSA SAI FARE (tool a tua disposizione):
 11. tool_rispondi_domanda       → RECUPERA materiale didattico pertinente per rispondere a domande,
                                   dubbi e curiosità dello studente. Restituisce il contesto (piano + RAG):
                                   formula TU la risposta basandoti SOLO sul materiale restituito.
+12. tool_iscrivi_corso          → iscrive lo studente a un corso universitario.
+                                  Con corso_universitario_id=0 restituisce i corsi disponibili (non ancora iscritti).
+                                  Mostra allo studente i corsi disponibili e chiedi a quale vuole iscriversi.
+13. tool_cancella_iscrizione    → cancella l'iscrizione dello studente a un corso universitario.
+                                  Con corso_universitario_id=0 restituisce la lista dei corsi iscritti.
+                                  RICHIEDE SEMPRE conferma esplicita dallo studente PRIMA di eseguire.
+14. tool_elimina_piano          → elimina un piano personalizzato e tutto il suo contenuto.
+                                  Con piano_id=0 restituisce la lista dei piani dello studente.
+                                  RICHIEDE SEMPRE conferma esplicita dallo studente PRIMA di eseguire.
 
 REGOLA FONDAMENTALE — RISPONDERE vs GENERARE:
 Non tutte le richieste richiedono la creazione di un piano o una lezione!
@@ -491,6 +500,61 @@ Quando lo studente chiede di creare quiz, flashcard o strumenti pratici:
    - Elenca i piani disponibili (li trovi nell'output di tool_leggi_contesto) per facilitare la scelta.
 4. Se lo studente sta visualizzando un piano specifico (tipo_vista="piano" con piano_id presente):
    - Procedi normalmente con tool_genera_pratica per le sezioni del piano attivo.
+
+ISCRIZIONE A UN CORSO:
+Quando lo studente chiede di iscriversi a un corso:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente specifica un corso per nome o argomento:
+   - Usa tool_esplora_catalogo(tipo_ricerca='corsi', keyword='...') per trovare il corso.
+   - Se trovi un solo corso corrispondente, chiama tool_iscrivi_corso con l'ID trovato.
+   - Se trovi più corsi, mostra le opzioni e chiedi quale preferisce.
+3. Se lo studente non specifica quale corso:
+   - Chiama tool_iscrivi_corso(corso_universitario_id=0) per ottenere la lista dei corsi disponibili.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi a quale vuole iscriversi.
+4. Non serve conferma esplicita per le iscrizioni (non è un'operazione distruttiva).
+5. Dopo l'iscrizione, conferma e suggerisci di esplorare il corso o i suoi materiali.
+
+REGOLA CANCELLAZIONE ISCRIZIONI E PIANI — CONFERMA OBBLIGATORIA:
+Quando lo studente chiede di cancellare un'iscrizione a un corso o di eliminare un piano personalizzato,
+segui SEMPRE questo flusso:
+
+CANCELLAZIONE ISCRIZIONE A UN CORSO:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente sta visualizzando un CORSO specifico (tipo_vista="corso" con corso_id presente):
+   - Lo studente probabilmente vuole cancellare l'iscrizione a QUEL corso.
+   - Chiedi conferma esplicita: "Vuoi cancellare l'iscrizione al corso '<nome corso>'? Questa azione
+     è irreversibile: non potrai più accedere al corso, ma i tuoi piani personalizzati verranno conservati."
+   - SOLO dopo che lo studente conferma → chiama tool_cancella_iscrizione(corso_universitario_id).
+3. Se lo studente è nella HOME o non specifica quale corso:
+   - Chiama tool_cancella_iscrizione(corso_universitario_id=0) per ottenere la lista dei corsi iscritti.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi quale corso vuole cancellare.
+   - Dopo che lo studente sceglie, chiedi conferma esplicita prima di procedere.
+4. Se lo studente chiede di cancellare PIÙ iscrizioni:
+   - Presenta la lista, chiedi quali corsi vuole cancellare.
+   - Chiedi conferma per TUTTI i corsi selezionati in un unico messaggio.
+   - Dopo la conferma, chiama tool_cancella_iscrizione una volta per CIASCUN corso.
+
+ELIMINAZIONE PIANO PERSONALIZZATO:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente sta visualizzando un PIANO specifico (tipo_vista="piano" con piano_id presente):
+   - Lo studente probabilmente vuole eliminare QUEL piano.
+   - Chiedi conferma esplicita: "Vuoi eliminare il piano '<titolo piano>'? Questa azione
+     è irreversibile: tutti i capitoli, le sezioni e i contenuti verranno eliminati definitivamente."
+   - SOLO dopo che lo studente conferma → chiama tool_elimina_piano(piano_id).
+3. Se lo studente è nella HOME o non specifica quale piano:
+   - Chiama tool_elimina_piano(piano_id=0) per ottenere la lista dei piani.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi quale piano vuole eliminare.
+   - Dopo che lo studente sceglie, chiedi conferma esplicita prima di procedere.
+4. Se lo studente chiede di eliminare PIÙ piani:
+   - Presenta la lista, chiedi quali piani vuole eliminare.
+   - Chiedi conferma per TUTTI i piani selezionati in un unico messaggio.
+   - Dopo la conferma, chiama tool_elimina_piano una volta per CIASCUN piano.
+
+REGOLE COMUNI PER ENTRAMBE LE OPERAZIONI:
+- NON eseguire MAI la cancellazione senza conferma esplicita ("sì", "confermo", "procedi", ecc.).
+- Se lo studente dice "no", "annulla" o cambia idea → annulla l'operazione con un messaggio rassicurante.
+- Dopo la cancellazione, conferma l'avvenuta operazione e suggerisci il passo successivo.
+- Non mostrare MAI ID numerici interni all'utente: usa solo i nomi dei corsi/piani.
 """
 
 
@@ -533,6 +597,54 @@ def tool_leggi_contesto() -> str:
                     )
             except Exception:
                 pass
+            # Elenco corsi universitari a cui lo studente è iscritto
+            try:
+                corsi_iscritti = db.esegui(
+                    "SELECT cu.id, cu.nome, sc.stato "
+                    "FROM studenti_corsi sc "
+                    "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+                    "WHERE sc.studente_id = ? "
+                    "ORDER BY sc.stato ASC, cu.nome ASC",
+                    [studente_id],
+                )
+                if corsi_iscritti:
+                    elenco_corsi = "\n".join(
+                        f"  - Corso ID {c['id']}: '{c['nome']}' (stato: {c.get('stato', 'iscritto')})"
+                        for c in corsi_iscritti
+                    )
+                    parti.append(
+                        f"Corsi universitari a cui lo studente è iscritto ({len(corsi_iscritti)}):\n{elenco_corsi}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente non è iscritto a nessun corso universitario."
+                    )
+            except Exception:
+                pass
+            # Elenco materiali didattici personali caricati dallo studente
+            try:
+                materiali_personali = db.esegui(
+                    "SELECT id, titolo, tipo, is_processed, caricato_il "
+                    "FROM materiali_didattici "
+                    "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                    "ORDER BY caricato_il DESC",
+                    [studente_id],
+                )
+                if materiali_personali:
+                    elenco_mat = "\n".join(
+                        f"  - materiale_id={m['id']}: '{m['titolo']}' ({m['tipo']}"
+                        f", {'✅ elaborato' if m.get('is_processed') else '⏳ in attesa'})"
+                        for m in materiali_personali
+                    )
+                    parti.append(
+                        f"Materiali didattici personali caricati dallo studente ({len(materiali_personali)}):\n{elenco_mat}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente non ha ancora caricato materiali didattici personali."
+                    )
+            except Exception:
+                pass
         return "\n".join(parti)
 
     parti = []
@@ -550,7 +662,11 @@ def tool_leggi_contesto() -> str:
             "I corsi NON sono modificabili dagli studenti. Se lo studente chiede di "
             "modificare, accorciare, riscrivere o cambiare qualsiasi contenuto del corso, "
             "rispondi che i corsi sono gestiti dai docenti e non modificabili. "
-            "Suggerisci di creare un piano personalizzato per avere una versione propria dei contenuti."
+            "Suggerisci di creare un piano personalizzato per avere una versione propria dei contenuti.\n"
+            "IMPORTANTE: se lo studente chiede spiegazioni su un paragrafo, capitolo o contenuto "
+            "del corso che sta visualizzando, usa tool_rispondi_domanda passando il titolo della "
+            "sezione come contesto_aggiuntivo. Il contenuto delle lezioni del corso è disponibile "
+            "e verrà recuperato automaticamente — NON serve cercarlo nel materiale RAG."
         )
     elif tipo == "piano":
         parti.append("L'utente sta studiando nel proprio PIANO PERSONALIZZATO.")
@@ -558,6 +674,39 @@ def tool_leggi_contesto() -> str:
     if contesto.get("corso_id"):
         nome = contesto.get("corso_nome", "nome non disponibile")
         parti.append(f"Corso: ID {contesto['corso_id']} — {nome}")
+
+        # Se vista corso, mostra la struttura del piano docente (lezioni visibili)
+        if tipo == "corso":
+            try:
+                _piano_doc = db.esegui(
+                    "SELECT id FROM piani_personalizzati "
+                    "WHERE corso_universitario_id = ? AND is_corso_docente = 1 "
+                    "ORDER BY id DESC LIMIT 1",
+                    [contesto["corso_id"]],
+                )
+                if _piano_doc:
+                    _pd_id = _piano_doc[0]["id"]
+                    _struttura = db.esegui(
+                        "SELECT pc.id AS cap_id, pc.titolo AS cap_titolo, "
+                        "pp.id AS par_id, pp.titolo AS par_titolo "
+                        "FROM piano_capitoli pc "
+                        "LEFT JOIN piano_paragrafi pp ON pp.capitolo_id = pc.id "
+                        "WHERE pc.piano_id = ? "
+                        "ORDER BY pc.ordine, pp.ordine",
+                        [_pd_id],
+                    )
+                    if _struttura:
+                        righe = ["Lezioni del corso (contenuto visibile allo studente):"]
+                        cap_visto = None
+                        for row in _struttura:
+                            if row["cap_id"] != cap_visto:
+                                cap_visto = row["cap_id"]
+                                righe.append(f"  Capitolo: {row['cap_titolo']}")
+                            if row.get("par_id"):
+                                righe.append(f"    - Paragrafo: {row['par_titolo']}")
+                        parti.append("\n".join(righe))
+            except Exception:
+                pass
 
     # Analytics filter: il docente sta guardando le statistiche di un corso specifico
     analytics_id = contesto.get("analytics_corso_id")
@@ -677,6 +826,56 @@ def tool_leggi_contesto() -> str:
         except Exception:
             pass
 
+        # Elenco corsi universitari a cui lo studente è iscritto
+        try:
+            corsi_iscritti = db.esegui(
+                "SELECT cu.id, cu.nome, sc.stato "
+                "FROM studenti_corsi sc "
+                "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+                "WHERE sc.studente_id = ? "
+                "ORDER BY sc.stato ASC, cu.nome ASC",
+                [studente_id],
+            )
+            if corsi_iscritti:
+                elenco_corsi = "\n".join(
+                    f"  - Corso ID {c['id']}: '{c['nome']}' (stato: {c.get('stato', 'iscritto')})"
+                    for c in corsi_iscritti
+                )
+                parti.append(
+                    f"Corsi universitari a cui lo studente è iscritto ({len(corsi_iscritti)}):\n{elenco_corsi}"
+                )
+            else:
+                parti.append(
+                    "Lo studente non è iscritto a nessun corso universitario."
+                )
+        except Exception:
+            pass
+
+        # Elenco materiali didattici personali caricati dallo studente
+        try:
+            materiali_personali = db.esegui(
+                "SELECT id, titolo, tipo, is_processed, caricato_il "
+                "FROM materiali_didattici "
+                "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                "ORDER BY caricato_il DESC",
+                [studente_id],
+            )
+            if materiali_personali:
+                elenco_mat = "\n".join(
+                    f"  - materiale_id={m['id']}: '{m['titolo']}' ({m['tipo']}"
+                    f", {'✅ elaborato' if m.get('is_processed') else '⏳ in attesa'})"
+                    for m in materiali_personali
+                )
+                parti.append(
+                    f"Materiali didattici personali caricati dallo studente ({len(materiali_personali)}):\n{elenco_mat}"
+                )
+            else:
+                parti.append(
+                    "Lo studente non ha ancora caricato materiali didattici personali."
+                )
+        except Exception:
+            pass
+
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
 
@@ -687,8 +886,9 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
     - tipo_ricerca='corsi'           → panoramica corsi raggruppati per area tematica.
                                        Con keyword: filtra corsi per nome/descrizione.
     - tipo_ricerca='argomenti'       → materiali del corso (richiede corso_universitario_id).
-    - tipo_ricerca='cerca_materiale' → cerca materiali per nome/keyword tra TUTTI i materiali
-                                       dello studente (personali e dei corsi). Richiede keyword.
+    - tipo_ricerca='cerca_materiale' → senza keyword: elenca TUTTI i materiali personali dello studente.
+                                       Con keyword: cerca materiali per nome tra tutti i materiali
+                                       dello studente (personali e dei corsi).
     """
     if tipo_ricerca == "corsi":
         corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
@@ -779,9 +979,26 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
             )
 
     elif tipo_ricerca == "cerca_materiale":
-        if not keyword or not keyword.strip():
-            return "Errore: specifica una keyword per cercare i materiali."
         studente_id = _STUDENTE_ID_CORRENTE
+        if not keyword or not keyword.strip():
+            # Senza keyword: elenca TUTTI i materiali personali dello studente
+            risultati = db.esegui(
+                "SELECT id, titolo, tipo, corso_universitario_id, is_processed, caricato_il "
+                "FROM materiali_didattici "
+                "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                "ORDER BY caricato_il DESC",
+                [studente_id],
+            )
+            if not risultati:
+                return "Lo studente non ha ancora caricato materiali didattici personali."
+            righe = [f"Materiali didattici personali dello studente ({len(risultati)}):"]
+            for m in risultati:
+                stato = "✅ elaborato" if m.get("is_processed") else "⏳ in attesa"
+                data = m.get("caricato_il", "")
+                if data:
+                    data = f", caricato il {data[:10]}"
+                righe.append(f"- materiale_id={m['id']}: {m['titolo']} ({m['tipo']}, {stato}{data})")
+            return "\n".join(righe)
         kw = f"%{keyword.strip()}%"
         risultati = db.esegui(
             "SELECT id, titolo, tipo, corso_universitario_id, is_processed "
@@ -1342,10 +1559,29 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     """
     contesto = _CONTESTO_CORRENTE
 
-    # --- 1. Raccogli contesto dal piano personalizzato (se attivo) ---
+    # --- 1. Raccogli contesto dal piano (personalizzato O corso docente) ---
     contenuto_piano = ""
-    if contesto.get("piano_id"):
-        piano_id = contesto["piano_id"]
+
+    # Determina il piano_id da cercare:
+    # - Se lo studente sta su un piano personalizzato → usa quello.
+    # - Se sta visualizzando un corso (sola lettura) → cerca il piano docente
+    #   del corso, che contiene le lezioni visibili sullo schermo.
+    piano_id_da_cercare = contesto.get("piano_id")
+    if not piano_id_da_cercare and contesto.get("tipo_vista") == "corso" and contesto.get("corso_id"):
+        try:
+            _piano_doc = db.esegui(
+                "SELECT id FROM piani_personalizzati "
+                "WHERE corso_universitario_id = ? AND is_corso_docente = 1 "
+                "ORDER BY id DESC LIMIT 1",
+                [contesto["corso_id"]],
+            )
+            if _piano_doc:
+                piano_id_da_cercare = _piano_doc[0]["id"]
+        except Exception:
+            pass
+
+    if piano_id_da_cercare:
+        piano_id = piano_id_da_cercare
         if contesto_aggiuntivo:
             # Singola query JOIN per capitoli + paragrafi + contenuti (evita N+1)
             struttura = db.esegui(
@@ -2088,6 +2324,204 @@ def tool_analizza_classe(corso_universitario_id: int = None) -> str:
     return "\n".join(risultato)
 
 
+@tool
+def tool_iscrivi_corso(corso_universitario_id: int = 0) -> str:
+    """
+    Iscrive lo studente a un corso universitario.
+    Se corso_universitario_id è 0, restituisce la lista dei corsi disponibili
+    a cui lo studente NON è ancora iscritto, così da poter chiedere a quale iscriversi.
+
+    Parametro corso_universitario_id: ID del corso a cui iscriversi (0 per vedere la lista).
+    """
+    from datetime import date as _date
+
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Anno accademico corrente
+    oggi = _date.today()
+    anno_acc = f"{oggi.year}-{oggi.year + 1}" if oggi.month >= 9 else f"{oggi.year - 1}-{oggi.year}"
+
+    # Corsi a cui lo studente è già iscritto
+    iscritti = db.esegui(
+        "SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?",
+        [studente_id],
+    )
+    ids_iscritti = {r["corso_universitario_id"] for r in iscritti}
+
+    if not corso_universitario_id or corso_universitario_id <= 0:
+        # Restituisci la lista dei corsi disponibili non ancora iscritti
+        corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
+        if not corsi:
+            return "Nessun corso universitario attivo nel sistema."
+        disponibili = [c for c in corsi if c["id"] not in ids_iscritti]
+        if not disponibili:
+            return "Lo studente è già iscritto a tutti i corsi disponibili."
+        righe = [f"Corsi disponibili ({len(disponibili)}):"]
+        for c in disponibili:
+            desc = f" — {c['descrizione']}" if c.get("descrizione") else ""
+            righe.append(f"  - ID {c['id']}: {c['nome']}{desc}")
+        righe.append(
+            "\nChiedi allo studente a QUALE corso vuole iscriversi, "
+            "poi richiama questo tool con il corso_universitario_id corretto."
+        )
+        return "\n".join(righe)
+
+    # Verifica che il corso esista e sia attivo
+    corso = db.trova_uno("corsi_universitari", {"id": corso_universitario_id, "attivo": 1})
+    if not corso:
+        return f"Corso ID {corso_universitario_id} non trovato o non attivo."
+
+    # Verifica che non sia già iscritto
+    if corso_universitario_id in ids_iscritti:
+        return f"Lo studente è già iscritto al corso '{corso['nome']}'."
+
+    # Esegui l'iscrizione
+    try:
+        db.inserisci("studenti_corsi", {
+            "studente_id": studente_id,
+            "corso_universitario_id": corso_universitario_id,
+            "anno_accademico": anno_acc,
+            "stato": "iscritto",
+        })
+    except Exception as e:
+        return f"Errore durante l'iscrizione al corso '{corso['nome']}': {e}"
+
+    return (
+        f"Iscrizione al corso '{corso['nome']}' completata con successo! "
+        f"Anno accademico: {anno_acc}. "
+        f"Lo studente può ora accedere al corso e ai suoi materiali."
+    )
+
+
+@tool
+def tool_cancella_iscrizione(corso_universitario_id: int = 0) -> str:
+    """
+    Cancella l'iscrizione dello studente a un corso universitario.
+    IMPORTANTE: chiama questo tool SOLO dopo aver chiesto conferma esplicita allo studente.
+    Se corso_universitario_id è 0, restituisce la lista dei corsi a cui lo studente è iscritto
+    così da poter chiedere quale corso cancellare.
+
+    Parametro corso_universitario_id: ID del corso da cui disiscriversi (0 per vedere la lista).
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Se non è specificato un corso, restituisci la lista
+    if not corso_universitario_id or corso_universitario_id <= 0:
+        corsi = db.esegui(
+            "SELECT cu.id, cu.nome, sc.stato, sc.anno_accademico "
+            "FROM studenti_corsi sc "
+            "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+            "WHERE sc.studente_id = ? "
+            "ORDER BY cu.nome",
+            [studente_id],
+        )
+        if not corsi:
+            return "Lo studente non è iscritto a nessun corso."
+        righe = ["Corsi a cui lo studente è iscritto:"]
+        for c in corsi:
+            righe.append(f"  - ID {c['id']}: {c['nome']} (stato: {c['stato']}, a.a. {c['anno_accademico']})")
+        righe.append(
+            "\nChiedi allo studente QUALE corso vuole cancellare, "
+            "poi richiama questo tool con il corso_universitario_id corretto "
+            "DOPO aver ottenuto la conferma esplicita."
+        )
+        return "\n".join(righe)
+
+    # Verifica che l'iscrizione esista
+    iscrizione = db.esegui(
+        "SELECT sc.id, cu.nome FROM studenti_corsi sc "
+        "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+        "WHERE sc.studente_id = ? AND sc.corso_universitario_id = ?",
+        [studente_id, corso_universitario_id],
+    )
+    if not iscrizione:
+        return f"Lo studente non è iscritto al corso ID {corso_universitario_id}. Nessuna azione eseguita."
+
+    nome_corso = iscrizione[0]["nome"]
+
+    # Esegui la cancellazione
+    try:
+        db.esegui(
+            "DELETE FROM studenti_corsi WHERE studente_id = ? AND corso_universitario_id = ?",
+            [studente_id, corso_universitario_id],
+        )
+    except Exception as e:
+        return f"Errore durante la cancellazione dell'iscrizione a '{nome_corso}': {e}"
+
+    return (
+        f"Iscrizione al corso '{nome_corso}' cancellata con successo. "
+        f"I piani personalizzati associati a questo corso sono stati conservati."
+    )
+
+
+@tool
+def tool_elimina_piano(piano_id: int = 0) -> str:
+    """
+    Elimina un piano personalizzato dello studente e tutto il suo contenuto (capitoli, paragrafi, contenuti).
+    IMPORTANTE: chiama questo tool SOLO dopo aver chiesto conferma esplicita allo studente.
+    Se piano_id è 0, restituisce la lista dei piani dello studente così da poter chiedere quale eliminare.
+
+    Parametro piano_id: ID del piano da eliminare (0 per vedere la lista).
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Se non è specificato un piano, restituisci la lista
+    if not piano_id or piano_id <= 0:
+        piani = db.esegui(
+            "SELECT pp.id, pp.titolo, pp.created_at, cu.nome AS corso_nome "
+            "FROM piani_personalizzati pp "
+            "LEFT JOIN corsi_universitari cu ON cu.id = pp.corso_universitario_id "
+            "WHERE pp.studente_id = ? AND pp.is_corso_docente = 0 "
+            "ORDER BY pp.created_at DESC",
+            [studente_id],
+        )
+        if not piani:
+            return "Lo studente non ha nessun piano personalizzato."
+        righe = ["Piani personalizzati dello studente:"]
+        for p in piani:
+            corso_info = f" (corso: {p['corso_nome']})" if p.get("corso_nome") else " (libero)"
+            righe.append(f"  - Piano ID {p['id']}: '{p['titolo']}'{corso_info}")
+        righe.append(
+            "\nChiedi allo studente QUALE piano vuole eliminare, "
+            "poi richiama questo tool con il piano_id corretto "
+            "DOPO aver ottenuto la conferma esplicita."
+        )
+        return "\n".join(righe)
+
+    # Verifica che il piano appartenga allo studente e non sia un corso docente
+    piano = db.esegui(
+        "SELECT id, titolo, is_corso_docente FROM piani_personalizzati "
+        "WHERE id = ? AND studente_id = ?",
+        [piano_id, studente_id],
+    )
+    if not piano:
+        return f"Piano ID {piano_id} non trovato o non appartiene allo studente. Nessuna azione eseguita."
+    if piano[0].get("is_corso_docente"):
+        return "Questo è un corso creato da un docente e non può essere eliminato dallo studente."
+
+    titolo_piano = piano[0]["titolo"]
+
+    # Elimina in cascata: contenuti → paragrafi → capitoli → piano
+    try:
+        paragrafi = db.esegui(
+            "SELECT pp.id FROM piano_paragrafi pp "
+            "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+            "WHERE pc.piano_id = ?",
+            [piano_id],
+        )
+        par_ids = [p["id"] for p in paragrafi]
+        if par_ids:
+            placeholders = ",".join("?" * len(par_ids))
+            db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({placeholders})", par_ids)
+            db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({placeholders})", par_ids)
+        db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
+        db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
+    except Exception as e:
+        return f"Errore durante l'eliminazione del piano '{titolo_piano}': {e}"
+
+    return f"Piano personalizzato '{titolo_piano}' eliminato con successo, insieme a tutti i suoi capitoli, sezioni e contenuti."
+
+
 # ===========================================================================
 # Singleton helpers (tutti in session_state)
 # ===========================================================================
@@ -2142,6 +2576,9 @@ def _get_orchestratore():
                 tool_modifica_piano,
                 tool_riscrivi_paragrafo,
                 tool_analizza_coerenza_materiali,
+                tool_iscrivi_corso,
+                tool_cancella_iscrizione,
+                tool_elimina_piano,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,

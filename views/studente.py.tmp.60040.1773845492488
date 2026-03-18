@@ -2805,6 +2805,35 @@ def _render_chatbot(
         st.rerun()
 
 
+def _seed_iscrizioni_se_mancanti(studente_id: int) -> None:
+    """
+    Se lo studente non ha iscrizioni in studenti_corsi, lo iscrive a tutti
+    i corsi attivi con stato 'iscritto' e anno accademico corrente.
+    Serve per gli utenti demo che non hanno dati nel DB di seed.
+    """
+    iscrizioni = db.trova_tutti("studenti_corsi", {"studente_id": studente_id})
+    if iscrizioni:
+        return  # già iscritto, niente da fare
+
+    # Se l'utente ha volontariamente cancellato le sue iscrizioni, non ri-iscrivere
+    if st.session_state.get("_user_has_unsubscribed"):
+        return
+
+    corsi_attivi = db.trova_tutti("corsi_universitari", {"attivo": 1})
+    # Iscrive al massimo ai primi 2 corsi (ordinati per anno) per lasciare
+    # almeno un corso come candidato per il motore di raccomandazioni.
+    corsi_per_seed = sorted(corsi_attivi, key=lambda c: c.get("anno_di_corso") or 0)[:2]
+    for corso in corsi_per_seed:
+        try:
+            db.inserisci("studenti_corsi", {
+                "studente_id":            studente_id,
+                "corso_universitario_id": corso["id"],
+                "anno_accademico":        "2025-2026",
+                "stato":                  "iscritto",
+            })
+        except Exception:
+            pass  # ignora duplicati o errori di vincolo
+
 
 # ---------------------------------------------------------------------------
 # Eliminazione piani personalizzati
@@ -3226,7 +3255,7 @@ def mostra_homepage_studente():
     _render_footer()
 
     # Seed iscrizioni se lo studente non ha corsi nel DB (es. utenti demo)
-
+    _seed_iscrizioni_se_mancanti(studente_id)
 
     # Carica corsi e stato di navigazione corrente
     corsi          = _get_corsi_studente(studente_id)

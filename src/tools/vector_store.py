@@ -399,29 +399,38 @@ def _ricostruisci_vectorstore(motivo: str) -> int:
     print(f"  Motivo: {motivo}")
     print()
 
-    # Elimina fisicamente la directory chroma_db per garantire pulizia completa.
-    # L'eliminazione via API può fallire su indici HNSW corrotti, quindi
-    # usiamo sempre shutil.rmtree come strategia primaria.
+    # Strategia di pulizia a 3 fasi per garantire eliminazione completa.
+    # Su Windows i file HNSW restano bloccati se il client non è chiuso,
+    # quindi: (1) API deletion, (2) rilascio handle, (3) rmtree fisico.
+    import gc
     import shutil
 
-    print("  [1/3] Pulizia fisica directory chroma_db...")
+    print("  [1/3] Pulizia vector store...")
+
+    # Fase A: prova a eliminare via API (ChromaDB gestisce i file internamente)
     try:
-        # Reset singleton PRIMA di eliminare i file (rilascia lock)
-        _chroma_client = None
+        client = _get_chroma_client()
+        for col in client.list_collections():
+            try:
+                client.delete_collection(col.name)
+            except Exception:
+                pass
+        print("         Collection eliminate via API.")
+    except Exception as e:
+        print(f"         Pulizia API non riuscita: {e}")
+
+    # Fase B: rilascia tutti gli handle (singleton + garbage collection)
+    _chroma_client = None
+    gc.collect()
+
+    # Fase C: rimuovi fisicamente la directory per eliminare file orfani
+    try:
         shutil.rmtree(config.CHROMA_PERSIST_DIR, ignore_errors=True)
         os.makedirs(config.CHROMA_PERSIST_DIR, exist_ok=True)
         print("         Directory chroma_db ricreata da zero.")
     except Exception as e:
-        print(f"         ERRORE CRITICO: impossibile rimuovere chroma_db: {e}")
-        # Tentativo fallback via API
-        try:
-            client = _get_chroma_client()
-            for col in client.list_collections():
-                client.delete_collection(col.name)
-            _chroma_client = None
-            print("         Fallback API: collection eliminate.")
-        except Exception as e2:
-            print(f"         Anche il fallback API è fallito: {e2}")
+        print(f"         Pulizia filesystem parziale: {e}")
+        os.makedirs(config.CHROMA_PERSIST_DIR, exist_ok=True)
 
     # Reset embedding_sync=0 per tutti i chunk
     n_reset = db.conta("materiali_chunks", {"embedding_sync": 1})
