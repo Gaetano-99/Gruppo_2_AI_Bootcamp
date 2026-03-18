@@ -251,6 +251,7 @@ def cerca_simili(
     top_k: int = 8,
     materiale_id: int | None = None,
     materiale_ids: list[int] | None = None,
+    _auto_rebuild: bool = True,
 ) -> list[int]:
     """Ricerca semantica per similarita coseno nella collection del corso.
 
@@ -260,6 +261,8 @@ def cerca_simili(
         top_k: Numero massimo di risultati.
         materiale_id: Filtra per singolo materiale (opzionale).
         materiale_ids: Filtra per piu materiali (opzionale, ha priorita).
+        _auto_rebuild: Uso interno. Se True e l'indice HNSW è corrotto,
+            tenta una ricostruzione automatica e riprova una volta.
 
     Returns:
         Lista di chunk_id ordinati per rilevanza semantica decrescente.
@@ -310,6 +313,29 @@ def cerca_simili(
         raise  # Rilancia le nostre eccezioni senza wrapping
 
     except Exception as e:
+        # Auto-healing: se l'indice HNSW è corrotto, ricostruisci e riprova
+        err_lower = str(e).lower()
+        is_hnsw_error = (
+            "hnsw" in err_lower
+            or "nothing found on disk" in err_lower
+            or "segment reader" in err_lower
+        )
+        if is_hnsw_error and _auto_rebuild:
+            print(f"[WARN vector_store] Indice HNSW corrotto, ricostruzione automatica...")
+            try:
+                _ricostruisci_vectorstore(
+                    f"Errore HNSW rilevato durante ricerca: {e}"
+                )
+                return cerca_simili(
+                    query, corso_id, top_k,
+                    materiale_id, materiale_ids,
+                    _auto_rebuild=False,
+                )
+            except Exception as rebuild_err:
+                raise RicercaSemanticaFallita(
+                    f"Ricostruzione vector store fallita: {rebuild_err}"
+                ) from rebuild_err
+
         raise RicercaSemanticaFallita(
             f"Errore durante la ricerca nel database vettoriale: {e}"
         ) from e
@@ -373,31 +399,29 @@ def _ricostruisci_vectorstore(motivo: str) -> int:
     print(f"  Motivo: {motivo}")
     print()
 
-    # Elimina tutte le collection esistenti
-    print("  [1/3] Pulizia collection corrotte...")
-    n_deleted = 0
+    # Elimina fisicamente la directory chroma_db per garantire pulizia completa.
+    # L'eliminazione via API può fallire su indici HNSW corrotti, quindi
+    # usiamo sempre shutil.rmtree come strategia primaria.
+    import shutil
+
+    print("  [1/3] Pulizia fisica directory chroma_db...")
     try:
-        client = _get_chroma_client()
-        collections = client.list_collections()
-        n_deleted = len(collections)
-        for col in collections:
-            client.delete_collection(col.name)
-            print(f"         Eliminata: {col.name}")
-        # Reset singleton per forzare ri-creazione pulita
+        # Reset singleton PRIMA di eliminare i file (rilascia lock)
         _chroma_client = None
-        print(f"         {n_deleted} collection eliminate.")
+        shutil.rmtree(config.CHROMA_PERSIST_DIR, ignore_errors=True)
+        os.makedirs(config.CHROMA_PERSIST_DIR, exist_ok=True)
+        print("         Directory chroma_db ricreata da zero.")
     except Exception as e:
-        print(f"         Pulizia API fallita: {e}")
-        print("         Fallback: rimozione fisica della directory chroma_db...")
-        # Fallback: elimina fisicamente la directory e reset singleton
-        import shutil
+        print(f"         ERRORE CRITICO: impossibile rimuovere chroma_db: {e}")
+        # Tentativo fallback via API
         try:
-            shutil.rmtree(config.CHROMA_PERSIST_DIR, ignore_errors=True)
-            os.makedirs(config.CHROMA_PERSIST_DIR, exist_ok=True)
+            client = _get_chroma_client()
+            for col in client.list_collections():
+                client.delete_collection(col.name)
             _chroma_client = None
-            print("         Directory chroma_db ricreata.")
+            print("         Fallback API: collection eliminate.")
         except Exception as e2:
-            print(f"         ERRORE CRITICO: impossibile rimuovere chroma_db: {e2}")
+            print(f"         Anche il fallback API è fallito: {e2}")
 
     # Reset embedding_sync=0 per tutti i chunk
     n_reset = db.conta("materiali_chunks", {"embedding_sync": 1})

@@ -200,8 +200,8 @@ def _verifica_vectorstore():
         n_materiali = db.conta("materiali_didattici")
         n_corsi = db.conta("corsi_universitari")
 
-        import chromadb, config
-        client = chromadb.PersistentClient(path=config.CHROMA_PERSIST_DIR)
+        from src.tools.vector_store import _get_chroma_client
+        client = _get_chroma_client()
         collections = client.list_collections()
         chroma_totale = 0
         chroma_dettaglio: list[str] = []

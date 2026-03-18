@@ -537,7 +537,12 @@ def tool_leggi_contesto() -> str:
 
     parti = []
     tipo = contesto.get("tipo_vista")
-    if tipo == "docente":
+    if tipo == "home":
+        parti.append(
+            "L'utente è nella HOME PAGE. Non sta visualizzando nessun corso o piano specifico. "
+            "Non fare riferimento a corsi o piani precedenti a meno che l'utente non li menzioni esplicitamente."
+        )
+    elif tipo == "docente":
         parti.append("L'utente è un DOCENTE. Usa la modalità docente: analisi classe, gestione corso.")
     elif tipo == "corso":
         parti.append(
@@ -2281,6 +2286,10 @@ def chat_con_orchestratore(
                 _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
             if contesto.get("piano_titolo"):
                 _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        # Se siamo nella Home (nessun corso/piano selezionato), segnalalo
+        # esplicitamente per evitare che l'agente usi contesto stantio.
+        if not _ctx_parts and contesto.get("tipo_vista") == "home":
+            _ctx_parts.append("Home — nessun corso o piano selezionato")
         if _ctx_parts:
             messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 
@@ -2357,6 +2366,8 @@ def chat_con_orchestratore_stream(
                 _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
             if contesto.get("piano_titolo"):
                 _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        if not _ctx_parts and contesto.get("tipo_vista") == "home":
+            _ctx_parts.append("Home — nessun corso o piano selezionato")
         if _ctx_parts:
             messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 
