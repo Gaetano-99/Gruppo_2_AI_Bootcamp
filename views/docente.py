@@ -269,7 +269,7 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
 
     studenti = one(
         """
-        SELECT COUNT(DISTINCT sc.studente_id) AS n
+        SELECT COUNT(sc.studente_id) AS n
         FROM corsi_universitari cu
         LEFT JOIN studenti_corsi sc ON sc.corso_universitario_id = cu.id
         WHERE cu.docente_id = ?""" + filtri
@@ -289,9 +289,17 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
         JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
         WHERE cu.docente_id = ?""" + filtri
     )
+    quiz_tentati = one(
+        """
+        SELECT COUNT(DISTINCT t.quiz_id) AS n
+        FROM tentativi_quiz t
+        JOIN quiz q ON q.id = t.quiz_id
+        JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
+        WHERE cu.docente_id = ?""" + filtri
+    )
     corsi = one("SELECT COUNT(*) AS n FROM corsi_universitari cu WHERE cu.docente_id = ?" + filtri)
 
-    return {"studenti": studenti, "quiz": quiz_appr, "tentativi": tentativi, "corsi": corsi}
+    return {"studenti": studenti, "quiz": quiz_appr, "tentativi": tentativi, "quiz_tentati": quiz_tentati, "corsi": corsi}
 
 
 def _stato_corso(corso: dict) -> tuple[str, str]:
@@ -422,10 +430,10 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
     # --- KPI cards ---
     col_a, col_b, col_c, col_d = st.columns(4)
     for col, label, val, color in [
-        (col_a, "Studenti unici", dati["studenti"], "#001A4D"),
+        (col_a, "Studenti Iscritti", dati["studenti"], "#001A4D"),
         (col_b, "Punteggio medio", f"{media_globale}/100", colore_media),
         (col_c, "Tasso superamento", f"{tasso_sup}%", colore_tasso),
-        (col_d, "Tentativi quiz", dati["tentativi"], "#001A4D"),
+        (col_d, "% quiz tentati", f"{round(dati['quiz_tentati'] * 100 / dati['quiz'], 1)}%" if dati["quiz"] else "N/A", "#001A4D"),
     ]:
         with col:
             st.markdown(
@@ -446,29 +454,101 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
     col1, col2 = st.columns([3, 2])
 
     with col1:
-        righe_media_corso = db.esegui(
-            "SELECT cu.nome AS corso, ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n "
-            "FROM tentativi_quiz t "
-            "JOIN quiz q ON q.id = t.quiz_id "
-            "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-            "WHERE cu.docente_id = ?" + filtro +
-            " GROUP BY cu.id, cu.nome ORDER BY media DESC", p
-        )
-        if righe_media_corso:
-            serie_mc = [{"Corso": r["corso"], "Punteggio medio": r["media"], "Tentativi": r["n"]}
-                        for r in righe_media_corso]
-            fig_mc = px.bar(
-                serie_mc, x="Corso", y="Punteggio medio",
-                title="Punteggio medio per corso",
-                color="Punteggio medio",
-                color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
-                range_color=[0, 100],
-                text="Punteggio medio",
+        if not corso_sel_id:
+            righe_media_corso = db.esegui(
+                "SELECT cu.nome AS corso, ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n "
+                "FROM tentativi_quiz t "
+                "JOIN quiz q ON q.id = t.quiz_id "
+                "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+                "WHERE cu.docente_id = ?" + filtro +
+                " GROUP BY cu.id, cu.nome ORDER BY media DESC", p
             )
-            fig_mc.update_traces(texttemplate="%{text:.0f}", textposition="outside")
-            fig_mc.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
-                                 yaxis=dict(range=[0, 110]), showlegend=False)
-            st.plotly_chart(fig_mc, use_container_width=True)
+            if righe_media_corso:
+                serie_mc = [{"Corso": r["corso"], "Punteggio medio": r["media"], "Tentativi": r["n"]}
+                            for r in righe_media_corso]
+                fig_mc = px.bar(
+                    serie_mc, x="Corso", y="Punteggio medio",
+                    title="Punteggio medio per corso",
+                    color="Punteggio medio",
+                    color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
+                    range_color=[0, 100],
+                    text="Punteggio medio",
+                )
+                fig_mc.update_traces(texttemplate="%{text:.0f}", textposition="outside")
+                fig_mc.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
+                                     yaxis=dict(range=[0, 110]), showlegend=False)
+                st.plotly_chart(fig_mc, use_container_width=True)
+        else:
+            righe_media_domanda = db.esegui(
+                "SELECT dq.testo, "
+                "ROUND(AVG(CASE WHEN rd.corretta=1 THEN 100.0 ELSE 0.0 END), 1) AS media_pct, "
+                "COUNT(rd.id) AS tot "
+                "FROM risposte_domande rd "
+                "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+                "JOIN quiz q ON dq.quiz_id = q.id "
+                "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+                "WHERE cu.docente_id = ? AND cu.id = ? "
+                "GROUP BY dq.id ORDER BY media_pct ASC",
+                [docente_id, corso_sel_id],
+            )
+            if righe_media_domanda:
+                serie_mq = [
+                    {
+                        "Domanda": f"D{i + 1}: " + (r["testo"] or "")[:35] + ("…" if len(r["testo"] or "") > 35 else ""),
+                        "% Corrette": r["media_pct"],
+                    }
+                    for i, r in enumerate(righe_media_domanda)
+                ]
+                n_dom = len(serie_mq)
+                bar_width = max(700, n_dom * 90)
+                st.markdown(
+                    "<div style='font-size:0.88rem;font-weight:600;color:#5A6A7E;"
+                    "margin-bottom:2px;font-family:Source Sans 3,sans-serif;'>"
+                    "Punteggio medio per domanda <span style='font-weight:400;'>"
+                    "(% risposte corrette)</span></div>",
+                    unsafe_allow_html=True,
+                )
+                fig_mq = px.bar(
+                    serie_mq, x="Domanda", y="% Corrette",
+                    color="% Corrette",
+                    color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
+                    range_color=[0, 100],
+                    text="% Corrette",
+                )
+                fig_mq.update_traces(texttemplate="%{text:.0f}%", textposition="outside")
+                fig_mq.update_layout(
+                    height=310,
+                    width=bar_width,
+                    margin=dict(t=16, b=100, l=62, r=16),
+                    yaxis=dict(
+                        range=[0, 115],
+                        title=dict(text="% Corrette", font=dict(size=11, color="#5A6A7E")),
+                        gridcolor="#E3EAF3",
+                        tickfont=dict(size=11, color="#5A6A7E"),
+                    ),
+                    xaxis=dict(
+                        tickangle=-40,
+                        tickfont=dict(size=10, color="#5A6A7E"),
+                        gridcolor="#E3EAF3",
+                    ),
+                    showlegend=False,
+                    paper_bgcolor="#F0F4F8",
+                    plot_bgcolor="#F0F4F8",
+                    font=dict(family="Source Sans 3, sans-serif", color="#5A6A7E"),
+                )
+                fig_mq.update_coloraxes(showscale=False)
+                import plotly.io as _pio
+                import streamlit.components.v1 as _components
+                _fig_html = _pio.to_html(fig_mq, full_html=False, include_plotlyjs="cdn")
+                _html = (
+                    f"<html><body style='margin:0;padding:0;overflow-x:auto;overflow-y:hidden;"
+                    f"background:#F0F4F8;'>"
+                    f"<div style='width:{bar_width}px;'>{_fig_html}</div>"
+                    f"</body></html>"
+                )
+                _components.html(_html, height=330, scrolling=True)
+            else:
+                st.info("Nessuna risposta per domanda registrata.")
 
     with col2:
         righe_dist = db.esegui(
@@ -1581,7 +1661,7 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         st.rerun()
 
 
-@st.dialog("Federico360 — LearnAI Platform", width="large")
+@st.dialog("Federico360 — LearnAI Platform", width="small",dismissible=False)
 def _popup_accettazione():
     """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
     st.markdown("""

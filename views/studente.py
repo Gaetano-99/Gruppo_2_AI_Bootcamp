@@ -3166,16 +3166,11 @@ def _dialog_view_materiale_libero(user_id: int):
 # Entry point principale
 # ---------------------------------------------------------------------------
 
-@st.dialog("Federico360 — LearnAI Platform", width="small", dismissible=False)
+@st.dialog("Federico360 — LearnAI Platform", width="small",dismissible=False)
 def _popup_accettazione():
     """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
     st.markdown("""
     <style>
-    div[data-testid="stModal"] > div:first-child {
-        max-height: 80vh !important;
-        max-width: 550px !important;
-        width: 550px !important;
-    }
     /* Hide ALL possible close button selectors */
     button[data-testid="stBaseButton-headerNoPadding"],
     div[data-testid="stModal"] button[aria-label="Close"],
@@ -3194,17 +3189,13 @@ def _popup_accettazione():
     </style>
     """, unsafe_allow_html=True)
 
-    logo_b64 = _get_logo_base64()
-    logo_img = (
-        f'<img src="data:image/png;base64,{logo_b64}" '
-        f'style="height:50px;width:auto;" alt="Federico360">'
-        if logo_b64 else ""
-    )
-
-    st.markdown(f"""
+    st.markdown("""
     <div style="text-align:center; padding: 8px 0 4px;">
         <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:20px;">
-            {logo_img}
+            <span style="font-family:'Playfair Display','Source Sans 3',serif; font-size:1.3rem;
+                         font-weight:700; color:#001A4D;">
+                Federico<span style="color:#C5A028;">360</span>
+            </span>
             <span style="color:#C8D5E3; font-size:1.4rem; font-weight:300;">|</span>
             <span style="font-family:'Source Sans 3',sans-serif; font-size:1.05rem; font-weight:600; color:#5A6A7E;">
                 LearnAI Platform
