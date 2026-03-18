@@ -30,6 +30,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+from views.accessibilita import get_css_accessibilita
 
 
 def _get_logo_base64() -> str:
@@ -68,7 +69,7 @@ def _import_recommender():
 # ---------------------------------------------------------------------------
 _CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;600&display=swap');
 
 :root {
     --blue:      #003087;
@@ -252,9 +253,10 @@ _CSS = """
     gap: 14px;
 }
 .app-header .header-brand img {
-    height: 38px;
+    height: 82px;
     width: auto;
     object-fit: contain;
+    filter: brightness(0) invert(1);
 }
 .app-header .header-brand-text {
     color: rgba(255,255,255,0.35);
@@ -453,7 +455,7 @@ _CSS = """
 
 /* ---- SEZIONE CENTRALE — CONTENUTO ---- */
 .section-header {
-    font-family: 'Playfair Display', serif;
+    font-family: 'Source Sans 3', sans-serif;
     font-size: 1.55rem;
     color: #001A4D;
     font-weight: 700;
@@ -515,7 +517,7 @@ _CSS = """
     color: #5A6A7E;
 }
 .empty-state .icon { font-size: 3rem; margin-bottom: 12px; }
-.empty-state h3 { color: #001A4D; font-family: 'Playfair Display', serif; }
+.empty-state h3 { color: #001A4D; font-family: 'Source Sans 3', sans-serif; }
 
 /* ---- CHATBOT LEA ---- */
 .chat-header {
@@ -752,6 +754,7 @@ div[data-testid="stModal"] > div:first-child {
     border: 1.5px solid #C8D5E3 !important;
     font-family: 'Source Sans 3', sans-serif !important;
     font-size: 0.88rem !important;
+    padding-left: 16px !important;
 }
 .stChatInput textarea:focus {
     border-color: #003087 !important;
@@ -1274,6 +1277,64 @@ def _get_docenti() -> list[dict]:
         return []
 
 
+def _get_opzioni_filtro(
+    nome: str = "",
+    docente_id: int | None = None,
+    cfu: int | None = None,
+    cdl_id: int | None = None,
+) -> dict:
+    """Restituisce le opzioni disponibili per ciascun filtro in base alle selezioni correnti."""
+    base_from = """
+        FROM corsi_universitari cu
+        JOIN users u ON u.id = cu.docente_id
+        LEFT JOIN corsi_laurea_universitari clu ON clu.corso_universitario_id = cu.id
+        LEFT JOIN corsi_di_laurea cdl ON cdl.id = clu.corso_di_laurea_id
+    """
+
+    def _where(exclude: str) -> tuple[str, list]:
+        conds = ["cu.attivo = 1"]
+        params: list = []
+        if nome:
+            conds.append("cu.nome LIKE ?")
+            params.append(f"%{nome}%")
+        if exclude != "docente" and docente_id is not None:
+            conds.append("cu.docente_id = ?")
+            params.append(docente_id)
+        if exclude != "cfu" and cfu is not None:
+            conds.append("cu.cfu = ?")
+            params.append(cfu)
+        if exclude != "cdl" and cdl_id is not None:
+            conds.append("clu.corso_di_laurea_id = ?")
+            params.append(cdl_id)
+        return " AND ".join(conds), params
+
+    result: dict = {"docenti": [], "cdl": [], "cfu": []}
+    try:
+        w, p = _where("docente")
+        result["docenti"] = db.esegui(
+            f"SELECT DISTINCT u.id, u.nome, u.cognome {base_from} WHERE {w} ORDER BY u.cognome, u.nome", p
+        )
+    except Exception:
+        pass
+    try:
+        w, p = _where("cdl")
+        result["cdl"] = db.esegui(
+            f"SELECT DISTINCT cdl.id, cdl.nome {base_from} WHERE {w} AND cdl.id IS NOT NULL ORDER BY cdl.nome", p
+        )
+    except Exception:
+        pass
+    try:
+        w, p = _where("cfu")
+        result["cfu"] = [
+            r["cfu"] for r in db.esegui(
+                f"SELECT DISTINCT cu.cfu {base_from} WHERE {w} AND cu.cfu IS NOT NULL ORDER BY cu.cfu", p
+            )
+        ]
+    except Exception:
+        pass
+    return result
+
+
 def _cerca_corsi(nome: str, docente_id: int | None, cfu: int | None, cdl_id: int | None) -> list[dict]:
     conditions = ["cu.attivo = 1"]
     params: list = []
@@ -1411,6 +1472,9 @@ def _render_footer():
         '<div class="footer-copy">',
         '&copy; 2026 <strong>Federico<span>360</span></strong>',
         '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
+        '<div style="font-size:0.65rem;color:rgba(255,255,255);margin-top:2px;">',
+        'I contenuti generati dall&rsquo;AI possono contenere errori o imprecisioni. Verifica sempre le informazioni.',
+        '</div>',
         '</div>',
         '<div class="footer-links">',
         '<a href="#">Aiuto</a>',
@@ -1903,9 +1967,11 @@ def _render_raccomandazioni(studente_id: int):
         return
 
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
     except Exception:
         raccomandazioni = []
+
+    raccomandazioni = raccomandazioni[:6]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -1982,9 +2048,11 @@ def _render_raccomandazioni_orizzontale(studente_id: int):
         return
 
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=3)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
     except Exception:
         raccomandazioni = []
+
+    raccomandazioni = raccomandazioni[:6]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -2053,10 +2121,15 @@ def _render_raccomandazioni_slideshow(studente_id: int):
         _fallback("Raccomandazioni non disponibili.")
         return
 
+    _MAX_RACCOMANDAZIONI = 6
+
     try:
-        raccomandazioni = raccomanda_corsi(studente_id, top_n=6)
+        raccomandazioni = raccomanda_corsi(studente_id, top_n=_MAX_RACCOMANDAZIONI)
     except Exception:
         raccomandazioni = []
+
+    # Limite massimo di sicurezza
+    raccomandazioni = raccomandazioni[:_MAX_RACCOMANDAZIONI]
 
     if not raccomandazioni:
         candidati = db.esegui("""
@@ -2267,39 +2340,76 @@ def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
         'Puoi filtrare per nome, docente, CFU o corso di laurea.',
     )
 
-    tutti_cdl = _get_tutti_cdl()
-    docenti = _get_docenti()
+    # ---- Leggi selezioni correnti dal session_state ----
+    nome_cerca = st.session_state.get("search_nome", "")
+    doc_map_prev: dict = st.session_state.get("_doc_map", {})
+    cdl_map_prev: dict = st.session_state.get("_cdl_map", {})
 
-    # Mappa etichetta → id per docenti e CDL
+    sel_doc_label = st.session_state.get("search_docente", "Tutti")
+    sel_doc_id = doc_map_prev.get(sel_doc_label)
+
+    sel_cdl_label = st.session_state.get("search_cdl", "Tutti")
+    sel_cdl_id = cdl_map_prev.get(sel_cdl_label)
+
+    sel_cfu_label = st.session_state.get("search_cfu_sel", "Tutti")
+    sel_cfu = int(sel_cfu_label) if sel_cfu_label != "Tutti" else None
+
+    # ---- Opzioni dinamiche (ogni filtro esclude se stesso) ----
+    opzioni = _get_opzioni_filtro(nome_cerca, sel_doc_id, sel_cfu, sel_cdl_id)
+
+    # Docenti
     docenti_map: dict[str, int | None] = {"Tutti": None}
-    for d in docenti:
-        label = f"{d['nome']} {d['cognome']} (ID {d['id']})"
-        docenti_map[label] = d["id"]
+    for d in opzioni["docenti"]:
+        docenti_map[f"{d['nome']} {d['cognome']} (ID {d['id']})"] = d["id"]
+    doc_options = list(docenti_map.keys())
+    if st.session_state.get("search_docente") not in doc_options:
+        st.session_state["search_docente"] = "Tutti"
 
+    # Corsi di Laurea
     cdl_map: dict[str, int | None] = {"Tutti": None}
-    for c in tutti_cdl:
+    for c in opzioni["cdl"]:
         cdl_map[c["nome"]] = c["id"]
+    cdl_options = list(cdl_map.keys())
+    if st.session_state.get("search_cdl") not in cdl_options:
+        st.session_state["search_cdl"] = "Tutti"
 
+    # CFU
+    cfu_options: list[str] = ["Tutti"] + [str(v) for v in opzioni["cfu"]]
+    if st.session_state.get("search_cfu_sel") not in cfu_options:
+        st.session_state["search_cfu_sel"] = "Tutti"
+
+    # Salva le mappe per decodifica al prossimo run
+    st.session_state["_doc_map"] = docenti_map
+    st.session_state["_cdl_map"] = cdl_map
+
+    # ---- Render filtri ----
     col1, col2 = st.columns(2)
     with col1:
-        nome_cerca = st.text_input("Nome del corso", placeholder="Es. Basi di Dati", key="search_nome")
-        cfu_cerca = st.number_input("CFU (0 = qualsiasi)", min_value=0, max_value=30, step=1, value=0, key="search_cfu")
+        nome_input = st.text_input("Nome del corso", placeholder="Es. Basi di Dati", key="search_nome")
+        cfu_sel = st.selectbox("CFU", cfu_options, key="search_cfu_sel")
     with col2:
-        doc_label = st.selectbox("Docente", list(docenti_map.keys()), key="search_docente")
-        cdl_label = st.selectbox("Corso di Laurea", list(cdl_map.keys()), key="search_cdl")
+        doc_label = st.selectbox("Docente", doc_options, key="search_docente")
+        cdl_label = st.selectbox("Corso di Laurea", cdl_options, key="search_cdl")
 
+    # ---- Valori filtro effettivi (dal widget appena renderizzato) ----
+    eff_doc_id = docenti_map.get(doc_label)
+    eff_cdl_id = cdl_map.get(cdl_label)
+    eff_cfu = int(cfu_sel) if cfu_sel != "Tutti" else None
+
+    # Mostra risultati solo dopo il click su Cerca
     if st.button("Cerca", type="primary", key="search_btn"):
-        risultati = _cerca_corsi(
-            nome=nome_cerca,
-            docente_id=docenti_map[doc_label],
-            cfu=cfu_cerca if cfu_cerca > 0 else None,
-            cdl_id=cdl_map[cdl_label],
-        )
-        st.session_state["_search_results"] = risultati
+        st.session_state["_search_active"] = True
 
-    risultati = st.session_state.get("_search_results")
-    if risultati is None:
+    if not st.session_state.get("_search_active"):
         return
+
+    # ---- Risultati (aggiornati automaticamente ad ogni cambio filtro) ----
+    risultati = _cerca_corsi(
+        nome=nome_input,
+        docente_id=eff_doc_id,
+        cfu=eff_cfu,
+        cdl_id=eff_cdl_id,
+    )
 
     st.markdown(f"**{len(risultati)} risultati trovati**")
     if not risultati:
@@ -2333,7 +2443,6 @@ def _dialog_ricerca_corsi(corsi_iscritto: list[dict], studente_id: int) -> None:
                         st.session_state["_corso_desc"] = r.get("descrizione", "")
                         st.session_state["_view_mode"] = "corso"
                         st.session_state["_piano_sel"] = None
-                        st.session_state["_search_results"] = None
                         st.rerun()
                 else:
                     if st.button("Iscriviti", key=f"search_iscriviti_{r['id']}", type="primary"):
@@ -2367,15 +2476,24 @@ def _render_chatbot(
 
     # Aggiorna il contesto ad ogni render (non solo al primo messaggio)
     # così Lea sa subito su quale piano/corso sta lavorando lo studente.
-    # Nota: aggiorna anche quando corso_id è None ma piano_id è impostato.
-    if aggiorna_contesto and (corso_id or piano_id or view_mode):
-        aggiorna_contesto(
-            corso_id=corso_id,
-            corso_nome=corso_nome,
-            tipo_vista=view_mode,
-            piano_id=piano_id,
-            piano_titolo=piano_titolo,
-        )
+    # Quando siamo sulla Home (tutti None) resettiamo il contesto per evitare
+    # che l'orchestratore conservi lo stato della pagina precedente.
+    if aggiorna_contesto:
+        if corso_id or piano_id or view_mode:
+            aggiorna_contesto(
+                corso_id=corso_id,
+                corso_nome=corso_nome,
+                tipo_vista=view_mode,
+                piano_id=piano_id,
+                piano_titolo=piano_titolo,
+            )
+        else:
+            # Home page: resetta contesto navigazione
+            aggiorna_contesto(
+                tipo_vista="home",
+                clear_corso=True,
+                clear_materiale=True,
+            )
 
     # Flag per bloccare l'interazione durante l'elaborazione di Lea
     is_processing = st.session_state.get("_lea_processing", False)
@@ -2687,31 +2805,6 @@ def _render_chatbot(
         st.rerun()
 
 
-def _seed_iscrizioni_se_mancanti(studente_id: int) -> None:
-    """
-    Se lo studente non ha iscrizioni in studenti_corsi, lo iscrive a tutti
-    i corsi attivi con stato 'iscritto' e anno accademico corrente.
-    Serve per gli utenti demo che non hanno dati nel DB di seed.
-    """
-    iscrizioni = db.trova_tutti("studenti_corsi", {"studente_id": studente_id})
-    if iscrizioni:
-        return  # già iscritto, niente da fare
-
-    corsi_attivi = db.trova_tutti("corsi_universitari", {"attivo": 1})
-    # Iscrive al massimo ai primi 2 corsi (ordinati per anno) per lasciare
-    # almeno un corso come candidato per il motore di raccomandazioni.
-    corsi_per_seed = sorted(corsi_attivi, key=lambda c: c.get("anno_di_corso") or 0)[:2]
-    for corso in corsi_per_seed:
-        try:
-            db.inserisci("studenti_corsi", {
-                "studente_id":            studente_id,
-                "corso_universitario_id": corso["id"],
-                "anno_accademico":        "2025-2026",
-                "stato":                  "iscritto",
-            })
-        except Exception:
-            pass  # ignora duplicati o errori di vincolo
-
 
 # ---------------------------------------------------------------------------
 # Eliminazione piani personalizzati
@@ -2965,7 +3058,7 @@ def _dialog_upload_materiale_libero():
                 st.error(f"Errore durante l'elaborazione: {e}")
 
 
-@st.dialog("Materiale didattico")
+@st.dialog("Materiale didattico", width="medium")
 def _dialog_view_materiale_libero(user_id: int):
     st.markdown("**Il tuo materiale didattico**")
     st.caption("Seleziona un documento per chattare con Lea su di esso, oppure genera una lezione strutturata.")
@@ -3049,9 +3142,77 @@ def _dialog_view_materiale_libero(user_id: int):
 # Entry point principale
 # ---------------------------------------------------------------------------
 
+@st.dialog("Federico360 — LearnAI Platform", width="small",dismissible=False)
+def _popup_accettazione():
+    """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
+    st.markdown("""
+    <style>
+    /* Hide ALL possible close button selectors */
+    button[data-testid="stBaseButton-headerNoPadding"],
+    div[data-testid="stModal"] button[aria-label="Close"],
+    div[data-testid="stModal"] [data-testid="stModalCloseButton"],
+    div[data-testid="stModal"] header button,
+    div[data-testid="stModal"] [data-testid="stHeader"] button,
+    div[data-testid="stModal"] > div > div > div > button {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        pointer-events: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="text-align:center; padding: 8px 0 4px;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:20px;">
+            <span style="font-family:'Playfair Display','Source Sans 3',serif; font-size:1.3rem;
+                         font-weight:700; color:#001A4D;">
+                Federico<span style="color:#C5A028;">360</span>
+            </span>
+            <span style="color:#C8D5E3; font-size:1.4rem; font-weight:300;">|</span>
+            <span style="font-family:'Source Sans 3',sans-serif; font-size:1.05rem; font-weight:600; color:#5A6A7E;">
+                LearnAI Platform
+            </span>
+        </div>
+        <h3 style="color:#001A4D; font-size:1.12rem; font-weight:700; margin:0 0 18px 0;
+                    font-family:'Source Sans 3',sans-serif;">
+            Benvenuto nella piattaforma LearnAI
+        </h3>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto 12px; font-family:'Source Sans 3',sans-serif;">
+            Stai interagendo con un sistema basato sull'<strong style="color:#001A4D;">Intelligenza
+            Artificiale</strong>, pertanto ricorda che qualsiasi contenuto generato o analizzato
+            sar&agrave; prodotto dall'AI.
+        </p>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto; font-family:'Source Sans 3',sans-serif;">
+            Ti ricordiamo che la piattaforma Federico360 deve essere utilizzata nel rispetto dei
+            <strong style="color:#001A4D;">&ldquo;Termini e Condizioni&rdquo;</strong>. Il trattamento
+            dei dati personali sar&agrave; effettuato in conformit&agrave; con la nostra
+            <strong style="color:#001A4D;">Privacy Policy</strong>.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    if st.button("Accetta", type="primary", use_container_width=True, key="btn_accetta_popup"):
+        st.session_state["_accettazione_accettata"] = True
+        st.rerun()
+
+
 def mostra_homepage_studente():
     """Renderizza l'intera homepage studente."""
     st.markdown(_CSS, unsafe_allow_html=True)
+    _css_acc = get_css_accessibilita()
+    if _css_acc:
+        st.markdown(_css_acc, unsafe_allow_html=True)
+
+    if not st.session_state.get("_accettazione_accettata"):
+        _popup_accettazione()
 
     utente = st.session_state.user
     studente_id = st.session_state.current_user_id
@@ -3065,7 +3226,7 @@ def mostra_homepage_studente():
     _render_footer()
 
     # Seed iscrizioni se lo studente non ha corsi nel DB (es. utenti demo)
-    _seed_iscrizioni_se_mancanti(studente_id)
+
 
     # Carica corsi e stato di navigazione corrente
     corsi          = _get_corsi_studente(studente_id)
@@ -3090,7 +3251,6 @@ def mostra_homepage_studente():
             st.session_state["_piano_sel"] = None
             st.session_state["_corso_nome"] = ""
             st.session_state["_corso_desc"] = ""
-            st.session_state["_search_results"] = None
             st.rerun()
 
         # Pulsante ricerca corsi (apre dialog)
@@ -3131,7 +3291,7 @@ def mostra_homepage_studente():
             # Welcome screen
             nome = _esc(utente["nome"])
             st.markdown(f"""
-            <div class="empty-state" style="padding-top:24px; padding-bottom:8px">
+            <div class="empty-state" style="padding-top:48px; padding-bottom:8px">
                 <div class="icon"></div>
                 <h3>Ciao, {nome}!</h3>
             </div>

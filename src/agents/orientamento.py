@@ -43,7 +43,7 @@ def carica_catalogo_da_db() -> list[dict]:
     if db is None:
         return []
     try:
-        corsi = db.trova_tutti("corsi_di_laurea", ordine="facolta ASC, nome ASC")
+        corsi = db.trova_tutti("corsi_di_laurea_onboarding", ordine="facolta ASC, nome ASC")
         return corsi or []
     except Exception:
         return []
@@ -57,7 +57,14 @@ def _build_contesto_corsi(corsi: list[dict]) -> str:
     for c in corsi:
         righe.append(f"--- {c.get('nome', 'N/D')} ({c.get('facolta', 'N/D')}) ---")
         desc = c.get("descrizione") or "Nessuna descrizione disponibile."
-        righe.append(f"Descrizione: {desc}\n")
+        righe.append(f"Descrizione: {desc}")
+        if c.get("durata"):
+            righe.append(f"Durata: {c['durata']}")
+        if c.get("tipo_accesso"):
+            righe.append(f"Tipo di accesso: {c['tipo_accesso']}")
+        if c.get("sbocchi_lavorativi"):
+            righe.append(f"Sbocchi lavorativi: {c['sbocchi_lavorativi']}")
+        righe.append("")
     return "\n".join(righe)
 
 

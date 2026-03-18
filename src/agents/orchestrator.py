@@ -20,7 +20,8 @@ Gestione della memoria (fix Streamlit):
     per sopravvivere ai rerun e mantenere la memoria conversazionale di LangGraph.
 
 API pubblica:
-    - ``chat_con_orchestratore()``: unica funzione chiamata dalle pagine Streamlit.
+    - ``chat_con_orchestratore()``: risposta bloccante (stringa), usata dalle pagine Streamlit.
+    - ``chat_con_orchestratore_stream()``: risposta in streaming (generatore), per UX reattiva.
     - ``aggiorna_contesto_sessione()``: chiamare quando l'utente cambia pagina/corso.
     - ``reset_sessione_chat()``: chiamare al logout.
 """
@@ -83,6 +84,13 @@ _STUDENTE_ID_CORRENTE: int = 1
 # tool_leggi_contesto legge da qui invece che da st.session_state.
 _CONTESTO_CORRENTE: dict = {}
 
+# Cache dei chunk RAG recuperati da tool_verifica_materiale_disponibile.
+# Evita di eseguire la RAG due volte: il pre-check salva qui i chunk,
+# tool_genera_corso/tool_genera_corso_libero li riusa come chunks_precaricati.
+# Struttura: {"argomento": str, "chunks": list[dict], "metodo": str}
+# Viene svuotata dopo ogni utilizzo da parte di tool_genera_corso.
+_CACHE_CHUNKS_VERIFICATI: dict = {}
+
 
 def _aggiorna_studente_corrente() -> None: 
     """Legge studente_id da session_state (thread principale) e lo salva
@@ -120,25 +128,33 @@ COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto       → sapere quale corso è attualmente visualizzato.
 2. tool_analizza_classe      → analizzare performance studenti, argomenti più difficili, rischio abbandono.
 3. tool_esplora_catalogo     → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
-                                tipo_ricerca='corsi' → lista corsi attivi.
+                                tipo_ricerca='corsi' → panoramica corsi raggruppati per area tematica.
+                                tipo_ricerca='corsi' + keyword → filtra corsi per nome/descrizione.
                                 tipo_ricerca='argomenti' → materiali di un corso specifico.
                                 tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                 tra tutti i materiali del corso e quelli caricati dal docente.
-4. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+4. tool_verifica_materiale_disponibile → VERIFICA OBBLIGATORIA prima di generare lezioni.
+                                Controlla se esiste materiale pertinente all'argomento richiesto.
+5. tool_genera_corso         → generare una lezione teorica su un argomento del corso.
+                                CHIAMARE SOLO DOPO tool_verifica_materiale_disponibile positivo.
                                 Accetta un parametro opzionale materiale_id per generare
                                 la lezione SOLO dal contenuto di quel materiale specifico.
                                 IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
-5. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
-6. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
+6. tool_genera_pratica       → creare quiz o flashcard per gli studenti.
+8. tool_modifica_piano       → leggere il testo di capitoli/paragrafi del corso,
                                 rinominare, riordinare, eliminare, aggiungere capitoli e paragrafi.
                                 Per RISCRIVERE il testo usa tool_riscrivi_paragrafo.
-7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+9. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                 Utile per decidere come integrare materiali in un corso esistente.
-8. tool_riscrivi_paragrafo   → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+10. tool_riscrivi_paragrafo  → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
                                 didattico della piattaforma. Usa SEMPRE questo per riscritture.
 
 REGOLE DI COMPORTAMENTO:
 - Usa SEMPRE tool_leggi_contesto come PRIMA azione per sapere dove si trova il docente.
+- ESPLORAZIONE CORSI — REGOLA ANTI-ELENCO:
+  Se il docente chiede genericamente di vedere i corsi disponibili, NON elencare tutti i corsi.
+  Chiama tool_esplora_catalogo(tipo_ricerca='corsi') per la panoramica per area tematica,
+  e chiedi quale area o argomento interessa. Se specifica un argomento, richiama con keyword.
 - Se tool_leggi_contesto riporta "ANALYTICS del corso: ...", il docente sta guardando le statistiche
   di quel corso. Qualsiasi domanda vaga (andamento, risultati, studenti, quiz, difficoltà) va
   interpretata come riferita a quel corso → chiama tool_analizza_classe con quel corso_id IMMEDIATAMENTE.
@@ -146,6 +162,10 @@ REGOLE DI COMPORTAMENTO:
 - Quando il docente chiede "andamento della classe", "studenti in difficoltà", "argomenti ostici",
   "chi è a rischio", "nessuno ha fatto quiz", "risultati" o simili → usa SEMPRE tool_analizza_classe.
 - I contenuti generati (lezioni, quiz) sono associati al corso ufficiale.
+- VERIFICA OBBLIGATORIA PRIMA DI GENERARE LEZIONI:
+  Prima di chiamare tool_genera_corso, chiama SEMPRE tool_verifica_materiale_disponibile.
+  Se i materiali trovati non sono pertinenti all'argomento, NON generare la lezione.
+  Informa il docente e suggerisci di caricare materiale appropriato.
 - Non parlare mai di "piano personalizzato": i docenti gestiscono corsi, non piani.
 - Dopo ogni analisi, suggerisci azioni concrete: es. rivedere un argomento, creare esercizi mirati.
 - Se il docente non ha ancora studenti o quiz, comunicalo chiaramente e suggerisci come procedere.
@@ -170,9 +190,17 @@ REGOLE DI COMPORTAMENTO:
   NON dire mai che non puoi modificare il contenuto: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN CORSO CON MATERIALE: quando il docente chiede di arricchire, integrare o ampliare
   un corso usando un materiale specifico, segui lo stesso flusso della modifica ma per contenuti nuovi:
-  1. Chiama tool_leggi_contesto → ottieni piano_id e struttura.
+  1. Chiama tool_leggi_contesto → ottieni piano_id e struttura (capitoli e paragrafi esistenti).
   2. Cerca il materiale con tool_esplora_catalogo.
-  3. Per ogni nuovo argomento: aggiungi capitolo con 'aggiungi_capitolo',
+  3. VERIFICA DI COERENZA OBBLIGATORIA — confronta il tema del corso (desunto dai capitoli
+     esistenti) con gli argomenti del materiale trovato. Se il corso ha già capitoli,
+     valuta se il materiale è tematicamente coerente con il corso:
+     - Se COERENTE → procedi al passo 4.
+     - Se NON coerente (es. corso su "Cybersecurity" e materiale su "Marketing"):
+       a. INFORMA il docente della discrepanza tra il tema del corso e il materiale.
+       b. Chiedi conferma esplicita prima di procedere all'integrazione.
+       c. NON integrare automaticamente materiale non coerente.
+  4. Per ogni nuovo argomento: aggiungi capitolo con 'aggiungi_capitolo',
      poi paragrafi con 'aggiungi_paragrafo', poi scrivi il contenuto con
      tool_riscrivi_paragrafo(piano_id, paragrafo_id, istruzioni, materiale_id)
      passando SEMPRE il materiale_id per tracciare la fonte.
@@ -209,29 +237,44 @@ piacevole. Dopo ogni azione completata, proponi proattivamente il passo successi
 COSA SAI FARE (tool a tua disposizione):
 1. tool_leggi_contesto          → sapere quale corso sta visualizzando lo studente e il piano attivo.
 2. tool_esplora_catalogo        → scoprire corsi, materiali di un corso, o CERCARE materiali per nome.
-                                  tipo_ricerca='corsi' → lista corsi attivi.
+                                  tipo_ricerca='corsi' → panoramica corsi raggruppati per area tematica.
+                                  tipo_ricerca='corsi' + keyword → filtra corsi per nome/descrizione.
                                   tipo_ricerca='argomenti' → materiali di un corso specifico.
                                   tipo_ricerca='cerca_materiale' + keyword → cerca materiali per nome
                                   tra tutti i materiali dello studente (personali e dei corsi).
-3. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+3. tool_verifica_materiale_disponibile → VERIFICA OBBLIGATORIA prima di generare qualsiasi piano.
+                                  Controlla se esiste materiale didattico pertinente all'argomento.
+                                  Restituisce gli argomenti dei materiali trovati: TU giudichi se
+                                  sono coerenti con la richiesta. Se non lo sono, NON generare il piano.
+4. tool_genera_corso            → creare una nuova lezione teorica su un argomento.
+                                  CHIAMARE SOLO DOPO tool_verifica_materiale_disponibile positivo.
                                   Accetta un parametro opzionale materiale_id per generare
                                   la lezione SOLO dal contenuto di quel materiale specifico.
                                   IMPORTANTE: genera SEMPRE una lezione da UN SOLO materiale alla volta.
-4. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
-5. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
-6. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
+5. tool_genera_pratica          → creare quiz, flashcard o schemi su una sezione studiata.
+6. tool_analizza_preparazione   → analizzare i risultati di un quiz e identificare lacune.
+7. tool_modifica_piano          → rinominare, riordinare, eliminare, aggiungere capitoli/paragrafi,
                                   LEGGERE il testo di una lezione. Per RISCRIVERE usa tool_riscrivi_paragrafo.
-10. tool_riscrivi_paragrafo     → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
+8. tool_riscrivi_paragrafo      → RISCRIVERE il testo di un paragrafo basandosi SOLO su materiale
                                   didattico della piattaforma. Usa SEMPRE questo tool per riscritture.
-7. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
+9. tool_analizza_coerenza_materiali → analizzare la coerenza tematica tra più materiali.
                                   Utile per decidere come integrare materiali in un piano esistente.
-8. tool_genera_corso_libero        → generare una lezione attingendo a TUTTI i materiali della piattaforma
+10. tool_genera_corso_libero       → generare una lezione attingendo a TUTTI i materiali della piattaforma
                                   (modalità "Lea sceglie"). Lea cerca autonomamente il materiale più
                                   pertinente tra tutto ciò che è disponibile nel sistema.
                                   Il piano generato include automaticamente i riferimenti bibliografici.
-9. tool_rispondi_domanda        → RISPONDERE a domande, dubbi e curiosità dello studente su argomenti,
-                                  concetti, paragrafi o capitoli SENZA creare piani o lezioni.
-                                  Cerca materiale rilevante con RAG e risponde in modo conversazionale.
+11. tool_rispondi_domanda       → RECUPERA materiale didattico pertinente per rispondere a domande,
+                                  dubbi e curiosità dello studente. Restituisce il contesto (piano + RAG):
+                                  formula TU la risposta basandoti SOLO sul materiale restituito.
+12. tool_iscrivi_corso          → iscrive lo studente a un corso universitario.
+                                  Con corso_universitario_id=0 restituisce i corsi disponibili (non ancora iscritti).
+                                  Mostra allo studente i corsi disponibili e chiedi a quale vuole iscriversi.
+13. tool_cancella_iscrizione    → cancella l'iscrizione dello studente a un corso universitario.
+                                  Con corso_universitario_id=0 restituisce la lista dei corsi iscritti.
+                                  RICHIEDE SEMPRE conferma esplicita dallo studente PRIMA di eseguire.
+14. tool_elimina_piano          → elimina un piano personalizzato e tutto il suo contenuto.
+                                  Con piano_id=0 restituisce la lista dei piani dello studente.
+                                  RICHIEDE SEMPRE conferma esplicita dallo studente PRIMA di eseguire.
 
 REGOLA FONDAMENTALE — RISPONDERE vs GENERARE:
 Non tutte le richieste richiedono la creazione di un piano o una lezione!
@@ -250,6 +293,12 @@ Usa tool_rispondi_domanda quando lo studente:
 
 Se lo studente menziona un paragrafo o capitolo specifico, passa il nome come contesto_aggiuntivo
 a tool_rispondi_domanda per recuperare il contenuto esatto dal piano.
+
+Dopo aver ricevuto il risultato di tool_rispondi_domanda, formula la risposta:
+- Usa SOLO il materiale restituito dal tool, MAI conoscenze generali proprie.
+- Rispondi in italiano con tono caldo e motivante, usando formattazione Markdown.
+- Se il materiale è insufficiente, comunicalo e suggerisci alternative.
+- Segui le ISTRUZIONI contenute nella risposta del tool.
 
 MODALITÀ CHAT CON DOCUMENTO:
 Quando tool_leggi_contesto riporta "MODALITÀ CHAT CON DOCUMENTO ATTIVA", lo studente
@@ -273,6 +322,52 @@ REGOLE DI COMPORTAMENTO:
   precedente eri in modalità chat documento, ignora il vecchio contesto e considera il contesto
   attuale come unica verità. Chiama comunque tool_leggi_contesto per i dettagli completi.
 - Usa SEMPRE tool_leggi_contesto come prima azione per capire quale corso è visualizzato.
+- ESPLORAZIONE CORSI — REGOLA ANTI-ELENCO:
+  Quando lo studente chiede genericamente "quali corsi ci sono?", "cosa posso studiare?",
+  "elenca i corsi" o domande simili senza specificare un'area o argomento:
+  1. NON elencare MAI tutti i corsi uno per uno. L'elenco completo è lungo e poco utile.
+  2. Chiama tool_esplora_catalogo(tipo_ricerca='corsi') SENZA keyword per ottenere la
+     panoramica raggruppata per area tematica.
+  3. Presenta allo studente SOLO le aree tematiche disponibili (es. "Ingegneria",
+     "Lettere e Filosofia", "Scienze MMFFNN"...) con il numero di corsi per area.
+  4. Chiedi quale area o argomento specifico gli interessa.
+  5. Quando lo studente indica un'area o argomento, richiama tool_esplora_catalogo
+     con tipo_ricerca='corsi' e keyword=<area o argomento indicato> per filtrare.
+  6. Presenta SOLO i corsi filtrati pertinenti con una breve descrizione.
+- RICERCA CORSI PER ARGOMENTO SPECIFICO:
+  Quando lo studente chiede un corso su un argomento specifico (es. "c'è un corso sul
+  deep learning?", "vorrei studiare machine learning"):
+  1. Chiama tool_esplora_catalogo(tipo_ricerca='corsi', keyword='<argomento>').
+  2. Se trova un corso specifico → proponilo con la descrizione.
+  3. Se non trova un corso esatto ma trova corsi correlati → mostra i 2-3 più pertinenti
+     spiegando che non esiste un corso specifico sull'argomento ma questi lo trattano.
+  4. Se non trova nulla → comunicalo e proponi di:
+     a) Creare un piano di studio personalizzato sull'argomento usando materiale disponibile
+     b) Usare la modalità "Lea sceglie" per cercare materiale su tutta la piattaforma
+     c) Caricare materiale proprio sull'argomento
+- VERIFICA OBBLIGATORIA PRIMA DI GENERARE UN PIANO:
+  Prima di chiamare tool_genera_corso o tool_genera_corso_libero, e PRIMA di chiedere
+  allo studente dettagli su come strutturare il piano, DEVI SEMPRE chiamare
+  tool_verifica_materiale_disponibile per controllare che esista materiale pertinente.
+  Flusso OBBLIGATORIO per la generazione di un piano:
+  1. Studente chiede di generare un piano/lezione su un argomento.
+  2. Chiama SUBITO tool_verifica_materiale_disponibile(argomento, corso_universitario_id,
+     materiale_id) — NON chiedere prima dettagli sulla struttura del piano.
+  3. Leggi la risposta: contiene gli argomenti dei materiali trovati dalla ricerca RAG.
+  4. GIUDICA se i materiali sono pertinenti alla richiesta:
+     - Se PERTINENTI → chiedi allo studente eventuali chiarimenti sulla struttura
+       (livello, argomenti specifici, ecc.), poi chiama tool_genera_corso.
+       I chunk RAG sono già memorizzati: tool_genera_corso li riuserà automaticamente
+       senza ripetere la ricerca (zero latenza aggiuntiva per la RAG).
+     - Se NON PERTINENTI (es. lo studente chiede "Diritto Privato Romano" ma i materiali
+       parlano di "Marketing" o argomenti diversi) → NON chiamare tool_genera_corso.
+       NON chiedere chiarimenti sulla struttura. Informa SUBITO lo studente che il materiale
+       disponibile non copre l'argomento richiesto e proponi:
+       a) Caricare dispense, slide o documenti propri sull'argomento
+       b) Cercare un argomento correlato tra i corsi disponibili
+       c) Usare la modalità "Lea sceglie" per cercare su tutta la piattaforma
+  NON generare MAI un piano con materiale non pertinente. È meglio non generare nulla
+  che generare contenuti fuorvianti su argomenti sbagliati.
 - I CORSI UNIVERSITARI sono in sola lettura e modificabili SOLO dai docenti. Se lo studente
   chiede di modificare, accorciare, riscrivere o cambiare contenuti di un CORSO universitario,
   rispondi che i corsi non sono modificabili dagli studenti e suggerisci di creare un piano
@@ -287,15 +382,22 @@ REGOLE DI COMPORTAMENTO:
   conferma. Se trovi più risultati, mostrali e chiedi quale intende. Se non trovi nulla,
   comunicalo e suggerisci di controllare i materiali caricati.
 - MATERIALE SELEZIONATO (SINGOLO): se tool_leggi_contesto riporta "Materiale selezionato" con
-  UN SOLO materiale_id, lo studente vuole una lezione su quel materiale specifico. Usa SUBITO
-  tool_genera_corso passando il materiale_id indicato nel contesto. Se non c'è un corso
-  associato, usa corso_universitario_id=0. Non chiedere conferme.
+  UN SOLO materiale_id, lo studente vuole una lezione su quel materiale specifico.
+  Se lo studente specifica un argomento: chiama PRIMA tool_verifica_materiale_disponibile
+  con quell'argomento e il materiale_id per verificare che il materiale copra l'argomento.
+  Se la verifica è positiva → procedi con tool_genera_corso.
+  Se la verifica è negativa → informa lo studente che il materiale selezionato non copre
+  l'argomento richiesto e suggerisci alternative.
+  Se lo studente NON specifica un argomento (vuole una lezione generica dal materiale):
+  procedi direttamente con tool_genera_corso. Se non c'è un corso associato, usa
+  corso_universitario_id=0. Non chiedere conferme.
 - MATERIALI MULTIPLI SELEZIONATI: se tool_leggi_contesto riporta "Materiali selezionati"
   con più materiale_ids, DEVI generare una lezione SEPARATA per CIASCUN materiale.
   NON tentare MAI di combinare più materiali in una sola lezione (causa errori di generazione).
   Flusso OBBLIGATORIO:
-  1. Informa lo studente che genererai un piano separato per ogni materiale selezionato.
-  2. Per CIASCUN materiale nella lista, chiama tool_genera_corso con il singolo materiale_id
+  1. Se lo studente specifica un argomento, verifica la pertinenza di CIASCUN materiale
+     con tool_verifica_materiale_disponibile prima di generare.
+  2. Per CIASCUN materiale pertinente, chiama tool_genera_corso con il singolo materiale_id
      e corso_universitario_id=0.
   3. Al termine, comunica allo studente che sono stati creati i piani e suggerisci di
      consultarli singolarmente.
@@ -320,10 +422,27 @@ REGOLE DI COMPORTAMENTO:
   NON dire mai che non puoi modificare il testo: hai sempre tool_riscrivi_paragrafo a disposizione.
 - ARRICCHIRE UN PIANO CON MATERIALE DIDATTICO: quando lo studente chiede di arricchire,
   integrare o ampliare un piano personalizzato usando un materiale specifico:
-  1. Chiama tool_leggi_contesto → ottieni piano_id e la struttura attuale del piano.
+  1. Chiama tool_leggi_contesto → ottieni piano_id e la struttura attuale del piano
+     (titolo del piano, elenco capitoli e paragrafi esistenti → questi definiscono il TEMA del piano).
   2. Cerca il materiale con tool_esplora_catalogo(tipo_ricerca='cerca_materiale', keyword='...').
-  3. Leggi il contenuto del materiale per capire gli argomenti che copre.
-  4. Per OGNI argomento rilevante del materiale:
+  3. VERIFICA DI COERENZA OBBLIGATORIA — prima di procedere, confronta il tema del piano
+     (desunto dai capitoli esistenti) con gli argomenti del materiale trovato.
+     Se il piano ha già capitoli (non è vuoto), chiama tool_analizza_coerenza_materiali
+     passando gli ID dei materiali già usati nel piano insieme al nuovo materiale_id.
+     In alternativa, valuta tu stesso la coerenza confrontando i titoli dei capitoli del piano
+     con il titolo e gli argomenti chiave del materiale:
+     - Se il materiale è COERENTE con il tema del piano → procedi al passo 4.
+     - Se il materiale NON è coerente (es. piano su "Deep Learning" e materiale su "Marketing",
+       o piano su "Skills per Claude" e materiale su "Sistemi Verticali di Marketing"):
+       a. INFORMA lo studente che il materiale non è coerente con il tema del piano attuale.
+       b. Mostra il tema del piano e gli argomenti del materiale per rendere chiara la discrepanza.
+       c. Proponi alternative:
+          - Creare un NUOVO piano dedicato al materiale selezionato
+          - Integrare comunque, se lo studente conferma esplicitamente
+          - Scegliere un materiale diverso, più coerente con il piano
+       d. NON procedere all'integrazione senza conferma esplicita dello studente.
+  4. Leggi il contenuto del materiale per capire gli argomenti che copre.
+  5. Per OGNI argomento rilevante del materiale:
      a. Aggiungi un capitolo: tool_modifica_piano(piano_id, 'aggiungi_capitolo', 0, titolo_capitolo)
         → ottieni il capitolo_id dalla risposta.
      b. Per ogni sotto-argomento, aggiungi un paragrafo:
@@ -343,12 +462,16 @@ REGOLE DI COMPORTAMENTO:
      b) Usare il proprio materiale didattico caricato
      c) "Lea sceglie" — tu cercherai tra TUTTI i materiali disponibili sulla piattaforma
   2. Se lo studente sceglie l'opzione c) ("Lea sceglie" o equivalente):
-     - Fai al MASSIMO 3 domande di chiarimento per capire:
+     - Chiama SUBITO tool_verifica_materiale_disponibile(argomento, 0, 0) per verificare
+       che esista materiale pertinente sulla piattaforma PRIMA di fare domande.
+     - Se la verifica è NEGATIVA → informa lo studente, proponi alternative. STOP.
+     - Se la verifica è POSITIVA → poi fai al MASSIMO 3 domande di chiarimento per capire:
        * L'argomento specifico (non generico) su cui vuole la lezione
        * Il livello di approfondimento desiderato (introduttivo, intermedio, avanzato)
        * Eventuali aree specifiche da includere o escludere
      - Dopo aver raccolto abbastanza informazioni (o dopo 3 messaggi di chiarimento),
        chiama tool_genera_corso_libero con l'argomento raffinato e le istruzioni raccolte.
+       I chunk RAG sono già memorizzati dal pre-check e verranno riutilizzati.
      - NON chiedere MAI più di 3 domande: dopo la terza, procedi con le informazioni disponibili.
   3. Il piano generato includerà automaticamente un capitolo "Riferimenti bibliografici"
      con l'elenco dei materiali della piattaforma usati come fonte.
@@ -377,6 +500,61 @@ Quando lo studente chiede di creare quiz, flashcard o strumenti pratici:
    - Elenca i piani disponibili (li trovi nell'output di tool_leggi_contesto) per facilitare la scelta.
 4. Se lo studente sta visualizzando un piano specifico (tipo_vista="piano" con piano_id presente):
    - Procedi normalmente con tool_genera_pratica per le sezioni del piano attivo.
+
+ISCRIZIONE A UN CORSO:
+Quando lo studente chiede di iscriversi a un corso:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente specifica un corso per nome o argomento:
+   - Usa tool_esplora_catalogo(tipo_ricerca='corsi', keyword='...') per trovare il corso.
+   - Se trovi un solo corso corrispondente, chiama tool_iscrivi_corso con l'ID trovato.
+   - Se trovi più corsi, mostra le opzioni e chiedi quale preferisce.
+3. Se lo studente non specifica quale corso:
+   - Chiama tool_iscrivi_corso(corso_universitario_id=0) per ottenere la lista dei corsi disponibili.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi a quale vuole iscriversi.
+4. Non serve conferma esplicita per le iscrizioni (non è un'operazione distruttiva).
+5. Dopo l'iscrizione, conferma e suggerisci di esplorare il corso o i suoi materiali.
+
+REGOLA CANCELLAZIONE ISCRIZIONI E PIANI — CONFERMA OBBLIGATORIA:
+Quando lo studente chiede di cancellare un'iscrizione a un corso o di eliminare un piano personalizzato,
+segui SEMPRE questo flusso:
+
+CANCELLAZIONE ISCRIZIONE A UN CORSO:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente sta visualizzando un CORSO specifico (tipo_vista="corso" con corso_id presente):
+   - Lo studente probabilmente vuole cancellare l'iscrizione a QUEL corso.
+   - Chiedi conferma esplicita: "Vuoi cancellare l'iscrizione al corso '<nome corso>'? Questa azione
+     è irreversibile: non potrai più accedere al corso, ma i tuoi piani personalizzati verranno conservati."
+   - SOLO dopo che lo studente conferma → chiama tool_cancella_iscrizione(corso_universitario_id).
+3. Se lo studente è nella HOME o non specifica quale corso:
+   - Chiama tool_cancella_iscrizione(corso_universitario_id=0) per ottenere la lista dei corsi iscritti.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi quale corso vuole cancellare.
+   - Dopo che lo studente sceglie, chiedi conferma esplicita prima di procedere.
+4. Se lo studente chiede di cancellare PIÙ iscrizioni:
+   - Presenta la lista, chiedi quali corsi vuole cancellare.
+   - Chiedi conferma per TUTTI i corsi selezionati in un unico messaggio.
+   - Dopo la conferma, chiama tool_cancella_iscrizione una volta per CIASCUN corso.
+
+ELIMINAZIONE PIANO PERSONALIZZATO:
+1. Chiama tool_leggi_contesto per capire dove si trova lo studente.
+2. Se lo studente sta visualizzando un PIANO specifico (tipo_vista="piano" con piano_id presente):
+   - Lo studente probabilmente vuole eliminare QUEL piano.
+   - Chiedi conferma esplicita: "Vuoi eliminare il piano '<titolo piano>'? Questa azione
+     è irreversibile: tutti i capitoli, le sezioni e i contenuti verranno eliminati definitivamente."
+   - SOLO dopo che lo studente conferma → chiama tool_elimina_piano(piano_id).
+3. Se lo studente è nella HOME o non specifica quale piano:
+   - Chiama tool_elimina_piano(piano_id=0) per ottenere la lista dei piani.
+   - Presenta la lista allo studente (SENZA mostrare ID interni) e chiedi quale piano vuole eliminare.
+   - Dopo che lo studente sceglie, chiedi conferma esplicita prima di procedere.
+4. Se lo studente chiede di eliminare PIÙ piani:
+   - Presenta la lista, chiedi quali piani vuole eliminare.
+   - Chiedi conferma per TUTTI i piani selezionati in un unico messaggio.
+   - Dopo la conferma, chiama tool_elimina_piano una volta per CIASCUN piano.
+
+REGOLE COMUNI PER ENTRAMBE LE OPERAZIONI:
+- NON eseguire MAI la cancellazione senza conferma esplicita ("sì", "confermo", "procedi", ecc.).
+- Se lo studente dice "no", "annulla" o cambia idea → annulla l'operazione con un messaggio rassicurante.
+- Dopo la cancellazione, conferma l'avvenuta operazione e suggerisci il passo successivo.
+- Non mostrare MAI ID numerici interni all'utente: usa solo i nomi dei corsi/piani.
 """
 
 
@@ -419,11 +597,64 @@ def tool_leggi_contesto() -> str:
                     )
             except Exception:
                 pass
+            # Elenco corsi universitari a cui lo studente è iscritto
+            try:
+                corsi_iscritti = db.esegui(
+                    "SELECT cu.id, cu.nome, sc.stato "
+                    "FROM studenti_corsi sc "
+                    "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+                    "WHERE sc.studente_id = ? "
+                    "ORDER BY sc.stato ASC, cu.nome ASC",
+                    [studente_id],
+                )
+                if corsi_iscritti:
+                    elenco_corsi = "\n".join(
+                        f"  - Corso ID {c['id']}: '{c['nome']}' (stato: {c.get('stato', 'iscritto')})"
+                        for c in corsi_iscritti
+                    )
+                    parti.append(
+                        f"Corsi universitari a cui lo studente è iscritto ({len(corsi_iscritti)}):\n{elenco_corsi}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente non è iscritto a nessun corso universitario."
+                    )
+            except Exception:
+                pass
+            # Elenco materiali didattici personali caricati dallo studente
+            try:
+                materiali_personali = db.esegui(
+                    "SELECT id, titolo, tipo, is_processed, caricato_il "
+                    "FROM materiali_didattici "
+                    "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                    "ORDER BY caricato_il DESC",
+                    [studente_id],
+                )
+                if materiali_personali:
+                    elenco_mat = "\n".join(
+                        f"  - materiale_id={m['id']}: '{m['titolo']}' ({m['tipo']}"
+                        f", {'✅ elaborato' if m.get('is_processed') else '⏳ in attesa'})"
+                        for m in materiali_personali
+                    )
+                    parti.append(
+                        f"Materiali didattici personali caricati dallo studente ({len(materiali_personali)}):\n{elenco_mat}"
+                    )
+                else:
+                    parti.append(
+                        "Lo studente non ha ancora caricato materiali didattici personali."
+                    )
+            except Exception:
+                pass
         return "\n".join(parti)
 
     parti = []
     tipo = contesto.get("tipo_vista")
-    if tipo == "docente":
+    if tipo == "home":
+        parti.append(
+            "L'utente è nella HOME PAGE. Non sta visualizzando nessun corso o piano specifico. "
+            "Non fare riferimento a corsi o piani precedenti a meno che l'utente non li menzioni esplicitamente."
+        )
+    elif tipo == "docente":
         parti.append("L'utente è un DOCENTE. Usa la modalità docente: analisi classe, gestione corso.")
     elif tipo == "corso":
         parti.append(
@@ -431,7 +662,11 @@ def tool_leggi_contesto() -> str:
             "I corsi NON sono modificabili dagli studenti. Se lo studente chiede di "
             "modificare, accorciare, riscrivere o cambiare qualsiasi contenuto del corso, "
             "rispondi che i corsi sono gestiti dai docenti e non modificabili. "
-            "Suggerisci di creare un piano personalizzato per avere una versione propria dei contenuti."
+            "Suggerisci di creare un piano personalizzato per avere una versione propria dei contenuti.\n"
+            "IMPORTANTE: se lo studente chiede spiegazioni su un paragrafo, capitolo o contenuto "
+            "del corso che sta visualizzando, usa tool_rispondi_domanda passando il titolo della "
+            "sezione come contesto_aggiuntivo. Il contenuto delle lezioni del corso è disponibile "
+            "e verrà recuperato automaticamente — NON serve cercarlo nel materiale RAG."
         )
     elif tipo == "piano":
         parti.append("L'utente sta studiando nel proprio PIANO PERSONALIZZATO.")
@@ -439,6 +674,39 @@ def tool_leggi_contesto() -> str:
     if contesto.get("corso_id"):
         nome = contesto.get("corso_nome", "nome non disponibile")
         parti.append(f"Corso: ID {contesto['corso_id']} — {nome}")
+
+        # Se vista corso, mostra la struttura del piano docente (lezioni visibili)
+        if tipo == "corso":
+            try:
+                _piano_doc = db.esegui(
+                    "SELECT id FROM piani_personalizzati "
+                    "WHERE corso_universitario_id = ? AND is_corso_docente = 1 "
+                    "ORDER BY id DESC LIMIT 1",
+                    [contesto["corso_id"]],
+                )
+                if _piano_doc:
+                    _pd_id = _piano_doc[0]["id"]
+                    _struttura = db.esegui(
+                        "SELECT pc.id AS cap_id, pc.titolo AS cap_titolo, "
+                        "pp.id AS par_id, pp.titolo AS par_titolo "
+                        "FROM piano_capitoli pc "
+                        "LEFT JOIN piano_paragrafi pp ON pp.capitolo_id = pc.id "
+                        "WHERE pc.piano_id = ? "
+                        "ORDER BY pc.ordine, pp.ordine",
+                        [_pd_id],
+                    )
+                    if _struttura:
+                        righe = ["Lezioni del corso (contenuto visibile allo studente):"]
+                        cap_visto = None
+                        for row in _struttura:
+                            if row["cap_id"] != cap_visto:
+                                cap_visto = row["cap_id"]
+                                righe.append(f"  Capitolo: {row['cap_titolo']}")
+                            if row.get("par_id"):
+                                righe.append(f"    - Paragrafo: {row['par_titolo']}")
+                        parti.append("\n".join(righe))
+            except Exception:
+                pass
 
     # Analytics filter: il docente sta guardando le statistiche di un corso specifico
     analytics_id = contesto.get("analytics_corso_id")
@@ -455,22 +723,26 @@ def tool_leggi_contesto() -> str:
         titolo = contesto.get("piano_titolo", "Piano personalizzato")
         parti.append(f"Piano personalizzato attivo: ID {piano_id} — '{titolo}'")
 
-        # Fetch live struttura capitoli+paragrafi dal DB (con capitolo_id per spostamenti).
+        # Fetch live struttura capitoli+paragrafi dal DB con singola JOIN (evita N+1).
         try:
-            capitoli_db = db.esegui(
-                "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
+            struttura_db = db.esegui(
+                "SELECT pc.id AS cap_id, pc.titolo AS cap_titolo, "
+                "pp.id AS par_id, pp.titolo AS par_titolo "
+                "FROM piano_capitoli pc "
+                "LEFT JOIN piano_paragrafi pp ON pp.capitolo_id = pc.id "
+                "WHERE pc.piano_id = ? "
+                "ORDER BY pc.ordine, pp.ordine",
                 [piano_id],
             )
-            if capitoli_db:
+            if struttura_db:
                 righe = ["Struttura del piano (capitoli e paragrafi):"]
-                for cap in capitoli_db:
-                    righe.append(f"  Capitolo ID {cap['id']}: {cap['titolo']}")
-                    pp = db.esegui(
-                        "SELECT id, titolo FROM piano_paragrafi WHERE capitolo_id = ? ORDER BY ordine",
-                        [cap["id"]],
-                    )
-                    for p in pp:
-                        righe.append(f"    - Paragrafo ID {p['id']}: {p['titolo']}")
+                cap_visto = None
+                for row in struttura_db:
+                    if row["cap_id"] != cap_visto:
+                        cap_visto = row["cap_id"]
+                        righe.append(f"  Capitolo ID {row['cap_id']}: {row['cap_titolo']}")
+                    if row.get("par_id"):
+                        righe.append(f"    - Paragrafo ID {row['par_id']}: {row['par_titolo']}")
                 parti.append("\n".join(righe))
             else:
                 parti.append("Il piano non ha ancora sezioni generate.")
@@ -554,6 +826,56 @@ def tool_leggi_contesto() -> str:
         except Exception:
             pass
 
+        # Elenco corsi universitari a cui lo studente è iscritto
+        try:
+            corsi_iscritti = db.esegui(
+                "SELECT cu.id, cu.nome, sc.stato "
+                "FROM studenti_corsi sc "
+                "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+                "WHERE sc.studente_id = ? "
+                "ORDER BY sc.stato ASC, cu.nome ASC",
+                [studente_id],
+            )
+            if corsi_iscritti:
+                elenco_corsi = "\n".join(
+                    f"  - Corso ID {c['id']}: '{c['nome']}' (stato: {c.get('stato', 'iscritto')})"
+                    for c in corsi_iscritti
+                )
+                parti.append(
+                    f"Corsi universitari a cui lo studente è iscritto ({len(corsi_iscritti)}):\n{elenco_corsi}"
+                )
+            else:
+                parti.append(
+                    "Lo studente non è iscritto a nessun corso universitario."
+                )
+        except Exception:
+            pass
+
+        # Elenco materiali didattici personali caricati dallo studente
+        try:
+            materiali_personali = db.esegui(
+                "SELECT id, titolo, tipo, is_processed, caricato_il "
+                "FROM materiali_didattici "
+                "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                "ORDER BY caricato_il DESC",
+                [studente_id],
+            )
+            if materiali_personali:
+                elenco_mat = "\n".join(
+                    f"  - materiale_id={m['id']}: '{m['titolo']}' ({m['tipo']}"
+                    f", {'✅ elaborato' if m.get('is_processed') else '⏳ in attesa'})"
+                    for m in materiali_personali
+                )
+                parti.append(
+                    f"Materiali didattici personali caricati dallo studente ({len(materiali_personali)}):\n{elenco_mat}"
+                )
+            else:
+                parti.append(
+                    "Lo studente non ha ancora caricato materiali didattici personali."
+                )
+        except Exception:
+            pass
+
     return "\n".join(parti) if parti else "Contesto parziale: nessuna sezione generata ancora."
 
 
@@ -561,23 +883,122 @@ def tool_leggi_contesto() -> str:
 def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None, keyword: str = "") -> str:
     """
     Scopri i corsi universitari disponibili o cerca materiali didattici.
-    - tipo_ricerca='corsi'           → lista tutti i corsi attivi.
+    - tipo_ricerca='corsi'           → panoramica corsi raggruppati per area tematica.
+                                       Con keyword: filtra corsi per nome/descrizione.
     - tipo_ricerca='argomenti'       → materiali del corso (richiede corso_universitario_id).
-    - tipo_ricerca='cerca_materiale' → cerca materiali per nome/keyword tra TUTTI i materiali
-                                       dello studente (personali e dei corsi). Richiede keyword.
+    - tipo_ricerca='cerca_materiale' → senza keyword: elenca TUTTI i materiali personali dello studente.
+                                       Con keyword: cerca materiali per nome tra tutti i materiali
+                                       dello studente (personali e dei corsi).
     """
     if tipo_ricerca == "corsi":
         corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
         if not corsi:
             return "Nessun corso universitario attivo nel sistema."
-        return "Corsi disponibili:\n" + "\n".join(
-            f"- ID {c['id']}: {c['nome']}" for c in corsi
-        )
+
+        # Se c'è una keyword, filtra i corsi per nome o descrizione
+        if keyword and keyword.strip():
+            kw_lower = keyword.strip().lower()
+            corsi_filtrati = [
+                c for c in corsi
+                if kw_lower in c.get("nome", "").lower()
+                or kw_lower in c.get("descrizione", "").lower()
+            ]
+            if not corsi_filtrati:
+                # Nessun match esatto: cerca corsi con parole parzialmente simili
+                parole_kw = kw_lower.split()
+                corsi_simili = [
+                    c for c in corsi
+                    if any(
+                        p in c.get("nome", "").lower() or p in c.get("descrizione", "").lower()
+                        for p in parole_kw
+                    )
+                ]
+                if corsi_simili:
+                    return (
+                        f"Nessun corso specifico trovato per '{keyword}'. "
+                        f"Corsi con argomenti correlati ({len(corsi_simili)}):\n"
+                        + "\n".join(f"- ID {c['id']}: {c['nome']} — {c.get('descrizione', '')}" for c in corsi_simili)
+                        + "\n\nSe nessuno corrisponde, puoi proporre allo studente di creare "
+                        "un piano personalizzato sull'argomento usando il materiale disponibile."
+                    )
+                return (
+                    f"Nessun corso trovato per '{keyword}'. "
+                    "Suggerisci allo studente di cercare con un termine diverso, "
+                    "oppure proponi di creare un piano personalizzato sull'argomento."
+                )
+            return (
+                f"Corsi trovati per '{keyword}' ({len(corsi_filtrati)}):\n"
+                + "\n".join(f"- ID {c['id']}: {c['nome']} — {c.get('descrizione', '')}" for c in corsi_filtrati)
+            )
+
+        # Senza keyword: raggruppa per area tematica (facoltà) tramite corsi_di_laurea
+        try:
+            mappatura = db.esegui(
+                "SELECT clu.corso_universitario_id, cdl.facolta "
+                "FROM corsi_laurea_universitari clu "
+                "JOIN corsi_di_laurea cdl ON cdl.id = clu.corso_di_laurea_id"
+            )
+            # Costruisci mappa corso_id → set di facoltà
+            corso_facolta: dict[int, set] = {}
+            for row in mappatura:
+                cid = row["corso_universitario_id"]
+                corso_facolta.setdefault(cid, set()).add(row["facolta"])
+
+            # Raggruppa corsi per facoltà
+            aree: dict[str, list] = {}
+            senza_area: list = []
+            for c in corsi:
+                facolta_set = corso_facolta.get(c["id"])
+                if facolta_set:
+                    for fac in facolta_set:
+                        aree.setdefault(fac, []).append(c)
+                else:
+                    senza_area.append(c)
+
+            righe = [f"Sulla piattaforma ci sono {len(corsi)} corsi attivi, suddivisi per area:"]
+            for area in sorted(aree.keys()):
+                nomi = [c["nome"] for c in aree[area]]
+                righe.append(f"\n{area} ({len(nomi)} corsi): {', '.join(nomi)}")
+            if senza_area:
+                nomi = [c["nome"] for c in senza_area]
+                righe.append(f"\nAltri ({len(nomi)} corsi): {', '.join(nomi)}")
+
+            righe.append(
+                "\n\nNON elencare tutti i corsi all'utente. Chiedi all'utente quale AREA "
+                "o ARGOMENTO gli interessa, poi richiama questo tool con la keyword "
+                "per filtrare i risultati e proporre solo i corsi pertinenti."
+            )
+            return "\n".join(righe)
+
+        except Exception:
+            # Fallback: restituisci comunque raggruppamento semplice
+            return (
+                f"Ci sono {len(corsi)} corsi attivi sulla piattaforma.\n"
+                "Chiedi all'utente quale area o argomento gli interessa "
+                "per filtrare i risultati."
+            )
 
     elif tipo_ricerca == "cerca_materiale":
-        if not keyword or not keyword.strip():
-            return "Errore: specifica una keyword per cercare i materiali."
         studente_id = _STUDENTE_ID_CORRENTE
+        if not keyword or not keyword.strip():
+            # Senza keyword: elenca TUTTI i materiali personali dello studente
+            risultati = db.esegui(
+                "SELECT id, titolo, tipo, corso_universitario_id, is_processed, caricato_il "
+                "FROM materiali_didattici "
+                "WHERE docente_id = ? AND corso_universitario_id IS NULL "
+                "ORDER BY caricato_il DESC",
+                [studente_id],
+            )
+            if not risultati:
+                return "Lo studente non ha ancora caricato materiali didattici personali."
+            righe = [f"Materiali didattici personali dello studente ({len(risultati)}):"]
+            for m in risultati:
+                stato = "✅ elaborato" if m.get("is_processed") else "⏳ in attesa"
+                data = m.get("caricato_il", "")
+                if data:
+                    data = f", caricato il {data[:10]}"
+                righe.append(f"- materiale_id={m['id']}: {m['titolo']} ({m['tipo']}, {stato}{data})")
+            return "\n".join(righe)
         kw = f"%{keyword.strip()}%"
         risultati = db.esegui(
             "SELECT id, titolo, tipo, corso_universitario_id, is_processed "
@@ -626,10 +1047,108 @@ def tool_esplora_catalogo(tipo_ricerca: str, corso_universitario_id: int = None,
 
 
 @tool
+def tool_verifica_materiale_disponibile(
+    argomento: str,
+    corso_universitario_id: int = 0,
+    materiale_id: int = 0,
+) -> str:
+    """
+    Verifica se esiste materiale didattico pertinente PRIMA di generare un piano.
+    Chiama SEMPRE questo tool prima di tool_genera_corso o tool_genera_corso_libero,
+    e PRIMA di chiedere all'utente dettagli su come strutturare il piano.
+
+    Esegue la ricerca RAG e MEMORIZZA i chunk trovati: quando successivamente chiamerai
+    tool_genera_corso, i chunk verranno riutilizzati senza ripetere la ricerca.
+
+    Parametro argomento: l'argomento richiesto dallo studente.
+    Parametro corso_universitario_id: ID del corso (0 se nessun corso specifico).
+    Parametro materiale_id: ID del materiale specifico (0 se nessuno).
+    """
+    global _CACHE_CHUNKS_VERIFICATI
+
+    corso_id_eff = corso_universitario_id if corso_universitario_id and corso_universitario_id > 0 else None
+    mat_id_eff = materiale_id if materiale_id and materiale_id > 0 else None
+
+    # 1. Ricerca RAG (unica: i chunk verranno riusati da tool_genera_corso)
+    # Se non c'è né corso né materiale specifico → ricerca platform-wide
+    if corso_id_eff is None and mat_id_eff is None:
+        risultato_rag = cerca_chunk_piattaforma(
+            query=argomento, top_k=16,
+        )
+    else:
+        risultato_rag = cerca_chunk_rilevanti(
+            corso_id=corso_id_eff,
+            query=argomento,
+            top_k=8,
+            materiale_id=mat_id_eff,
+        )
+
+    # Se la ricerca semantica è fallita
+    if risultato_rag.errore_semantico:
+        _CACHE_CHUNKS_VERIFICATI = {}
+        return (
+            f"La ricerca semantica non è riuscita: {risultato_rag.errore_semantico}\n"
+            "Non è possibile verificare la disponibilità del materiale in questo momento. "
+            "Chiedi all'utente se vuole provare con la ricerca per parole chiave."
+        )
+
+    chunks = risultato_rag.chunks
+    if not chunks:
+        _CACHE_CHUNKS_VERIFICATI = {}
+        return (
+            f"NESSUN materiale trovato per l'argomento '{argomento}'.\n"
+            "Non generare il piano. Informa lo studente che non è disponibile "
+            "materiale didattico sull'argomento richiesto e suggerisci alternative:\n"
+            "- Caricare materiale proprio sull'argomento\n"
+            "- Cercare un argomento correlato tra i corsi disponibili\n"
+            "- Usare la modalità 'Lea sceglie' per cercare su tutta la piattaforma"
+        )
+
+    # 2. Salva i chunk nella cache per tool_genera_corso
+    _CACHE_CHUNKS_VERIFICATI = {
+        "argomento": argomento,
+        "chunks": chunks,
+        "metodo": risultato_rag.metodo_utilizzato,
+        "corso_id": corso_id_eff,
+        "materiale_id": mat_id_eff,
+    }
+    print(f"[DEBUG tool_verifica] Cache salvata: {len(chunks)} chunks per '{argomento}'")
+
+    # 3. Estrai i materiali coinvolti e i loro argomenti
+    materiale_ids_trovati = list({c["materiale_id"] for c in chunks if c.get("materiale_id")})
+    sommari = recupera_sommari_materiali(materiale_ids_trovati)
+
+    # 4. Costruisci il riepilogo per l'orchestratore
+    righe = [
+        f"Verifica materiale per '{argomento}':",
+        f"Metodo di ricerca: {risultato_rag.metodo_utilizzato}",
+        f"Chunk trovati: {len(chunks)}, da {len(materiale_ids_trovati)} materiale/i.\n",
+        "MATERIALI RECUPERATI E LORO ARGOMENTI:",
+    ]
+    for s in sommari:
+        argomenti_str = ", ".join(s["argomenti_chiave"][:10]) if s["argomenti_chiave"] else "nessun argomento estratto"
+        righe.append(f"- '{s['titolo']}' (ID {s['materiale_id']}, tipo: {s['tipo']})")
+        righe.append(f"  Argomenti: {argomenti_str}")
+
+    righe.append(
+        f"\nISTRUZIONI: Confronta gli argomenti dei materiali trovati con la richiesta "
+        f"dello studente ('{argomento}'). "
+        f"Se i materiali sono PERTINENTI → procedi con tool_genera_corso (i chunk RAG "
+        f"sono già memorizzati e verranno riutilizzati, nessuna seconda ricerca). "
+        f"Se i materiali NON sono pertinenti (argomenti completamente diversi) → "
+        f"NON generare il piano. Informa lo studente che il materiale disponibile "
+        f"non copre l'argomento richiesto e proponi alternative."
+    )
+    return "\n".join(righe)
+
+
+@tool
 def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id: int = 0, materiale_ids_csv: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera e salva un corso teorico completo su un argomento specifico.
-    Usa quando l'utente chiede di creare una lezione, un corso o approfondire un tema.
+    PREREQUISITO: chiama SEMPRE tool_verifica_materiale_disponibile PRIMA di questo tool
+    per verificare che esista materiale pertinente. NON chiamare se la verifica ha dato
+    esito negativo (materiale non pertinente o assente).
 
     Parametro corso_universitario_id: usa 0 se non c'è un corso associato (es. materiale personale).
     Parametro opzionale materiale_id: se > 0, la lezione viene generata usando SOLO
@@ -663,9 +1182,19 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
     elif materiale_id and materiale_id > 0:
         mat_id_singolo = materiale_id
 
+    # Recupera chunk dalla cache del pre-check (se disponibili)
+    global _CACHE_CHUNKS_VERIFICATI
+    chunks_da_cache: list[dict] | None = None
+    if _CACHE_CHUNKS_VERIFICATI and _CACHE_CHUNKS_VERIFICATI.get("chunks"):
+        chunks_da_cache = _CACHE_CHUNKS_VERIFICATI["chunks"]
+        print(f"[DEBUG tool_genera_corso] Riuso {len(chunks_da_cache)} chunk dalla cache "
+              f"(verifica pre-generazione per '{_CACHE_CHUNKS_VERIFICATI.get('argomento')}')")
+        _CACHE_CHUNKS_VERIFICATI = {}  # Svuota dopo l'uso
+
     print(f"[DEBUG tool_genera_corso] corso_id_eff={corso_id_eff}, argomento='{argomento}', "
           f"mat_id_singolo={mat_id_singolo}, mat_ids={mat_ids}, studente_id={studente_id}, "
-          f"forza_ricerca_keyword={forza_ricerca_keyword}")
+          f"forza_ricerca_keyword={forza_ricerca_keyword}, "
+          f"chunks_precaricati={'sì (' + str(len(chunks_da_cache)) + ')' if chunks_da_cache else 'no'}")
 
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
@@ -675,6 +1204,7 @@ def tool_genera_corso(corso_universitario_id: int, argomento: str, materiale_id:
         is_corso_docente=False,
         materiale_id=mat_id_singolo,
         materiale_ids=mat_ids,
+        chunks_precaricati=chunks_da_cache,
         forza_keyword=bool(forza_ricerca_keyword),
     )
 
@@ -834,6 +1364,7 @@ Materiali molto diversi (es. marketing e cybersecurity) NON sono coerenti."""
 def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_ricerca_keyword: int = 0) -> str:
     """
     Genera una lezione attingendo da TUTTI i materiali della piattaforma (modalità 'Lea sceglie').
+    PREREQUISITO: chiama SEMPRE tool_verifica_materiale_disponibile PRIMA di questo tool.
     Usa questo tool SOLO dopo aver chiarito le intenzioni dello studente (max 3 messaggi).
 
     Il piano generato include automaticamente un capitolo "Riferimenti bibliografici"
@@ -848,49 +1379,57 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_
     """
     studente_id = _STUDENTE_ID_CORRENTE
 
-    # Verifica che ci siano materiali sulla piattaforma
-    n_totali = conta_chunk_piattaforma()
-    if n_totali == 0:
-        return (
-            "Nessun materiale didattico disponibile sulla piattaforma. "
-            "Non è possibile generare una lezione senza materiale di riferimento."
+    # Recupera chunk dalla cache del pre-check (se disponibili)
+    global _CACHE_CHUNKS_VERIFICATI
+    chunks_da_cache: list[dict] | None = None
+    if _CACHE_CHUNKS_VERIFICATI and _CACHE_CHUNKS_VERIFICATI.get("chunks"):
+        chunks_da_cache = _CACHE_CHUNKS_VERIFICATI["chunks"]
+        print(f"[DEBUG tool_genera_corso_libero] Riuso {len(chunks_da_cache)} chunk dalla cache")
+        _CACHE_CHUNKS_VERIFICATI = {}  # Svuota dopo l'uso
+
+    if chunks_da_cache:
+        # Usa i chunk già verificati dal pre-check
+        chunks = chunks_da_cache
+    else:
+        # Fallback: ricerca platform-wide (caso in cui il pre-check non è stato chiamato)
+        n_totali = conta_chunk_piattaforma()
+        if n_totali == 0:
+            return (
+                "Nessun materiale didattico disponibile sulla piattaforma. "
+                "Non è possibile generare una lezione senza materiale di riferimento."
+            )
+
+        risultato_rag = cerca_chunk_piattaforma(
+            query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
         )
 
-    # Ricerca platform-wide
-    risultato_rag = cerca_chunk_piattaforma(
-        query=argomento, top_k=16, forza_keyword=bool(forza_ricerca_keyword),
-    )
+        if risultato_rag.errore_semantico and not forza_ricerca_keyword:
+            return (
+                f"La ricerca nel database vettoriale non è riuscita.\n"
+                f"Motivo: {risultato_rag.errore_semantico}\n\n"
+                f"È disponibile una ricerca alternativa basata su parole chiave "
+                f"(keyword matching sui metadati), che potrebbe essere meno precisa "
+                f"rispetto alla ricerca semantica.\n\n"
+                f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
+                f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
+                f"ma con forza_ricerca_keyword=1."
+            )
 
-    # Se la ricerca semantica è fallita, chiedi consenso all'utente
-    if risultato_rag.errore_semantico and not forza_ricerca_keyword:
-        return (
-            f"La ricerca nel database vettoriale non è riuscita.\n"
-            f"Motivo: {risultato_rag.errore_semantico}\n\n"
-            f"È disponibile una ricerca alternativa basata su parole chiave "
-            f"(keyword matching sui metadati), che potrebbe essere meno precisa "
-            f"rispetto alla ricerca semantica.\n\n"
-            f"Chiedi all'utente se desidera procedere con la ricerca per parole chiave. "
-            f"Se l'utente acconsente, richiama questo stesso tool con gli stessi parametri "
-            f"ma con forza_ricerca_keyword=1."
-        )
-
-    chunks = risultato_rag.chunks
-    if not chunks:
-        return (
-            "Non ho trovato materiale pertinente sull'argomento richiesto. "
-            "Prova a riformulare con termini più specifici o scegli un altro argomento."
-        )
+        chunks = risultato_rag.chunks
+        if not chunks:
+            return (
+                "Non ho trovato materiale pertinente sull'argomento richiesto. "
+                "Prova a riformulare con termini più specifici o scegli un altro argomento."
+            )
 
     # Log info sui materiali coinvolti
     materiale_ids_unici = list({c["materiale_id"] for c in chunks if c.get("materiale_id")})
 
     print(f"[DEBUG tool_genera_corso_libero] argomento='{argomento}', "
           f"chunks_trovati={len(chunks)}, materiali_coinvolti={len(materiale_ids_unici)}, "
-          f"studente_id={studente_id}")
+          f"studente_id={studente_id}, da_cache={'sì' if chunks_da_cache else 'no'}")
 
-    # Genera il piano usando i chunk già recuperati dalla ricerca platform-wide.
-    # Passa i chunk direttamente (chunks_precaricati) per evitare che il nodo RAG
-    # ri-cerchi su tutti i materiale_ids e includa materiali non pertinenti.
+    # Genera il piano usando i chunk (da cache o dalla ricerca platform-wide).
     stato_finale = esegui_generazione(
         agente=_get_agente_teorico(),
         corso_id=None,
@@ -974,12 +1513,15 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_
     except Exception:
         pass
 
-    # Nomi dei materiali usati per il messaggio di ritorno
+    # Nomi dei materiali usati per il messaggio di ritorno (batch, evita N+1)
     nomi_materiali = []
-    for mid in materiale_ids_unici:
-        info = db.esegui("SELECT titolo FROM materiali_didattici WHERE id = ?", [mid])
-        if info:
-            nomi_materiali.append(info[0]["titolo"])
+    if materiale_ids_unici:
+        _ph = ",".join("?" * len(materiale_ids_unici))
+        _info_mat = db.esegui(
+            f"SELECT titolo FROM materiali_didattici WHERE id IN ({_ph})",
+            materiale_ids_unici,
+        )
+        nomi_materiali = [m["titolo"] for m in _info_mat if m.get("titolo")]
 
     elenco = "\n".join(f"- ID {p['id']}: {p['titolo']}" for p in paragrafi)
     fonti = "\n".join(f"- {n}" for n in nomi_materiali) if nomi_materiali else "(nessuna fonte specifica)"
@@ -996,8 +1538,9 @@ def tool_genera_corso_libero(argomento: str, istruzioni_utente: str = "", forza_
 @tool
 def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     """
-    Rispondi a una domanda dello studente su un argomento, concetto o contenuto
-    del corso/piano, SENZA generare un piano o una lezione completa.
+    Recupera materiale didattico pertinente per rispondere a una domanda dello studente.
+    Restituisce il contesto recuperato (piano + materiale RAG): formula TU la risposta
+    basandoti ESCLUSIVAMENTE sul materiale restituito da questo tool.
 
     Usa questo tool quando lo studente:
     - Chiede una spiegazione su un argomento (es. "Parlami del Deep Learning")
@@ -1014,57 +1557,75 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     capitolo specifico, testo da approfondire). Se lo studente fa riferimento a un
     paragrafo o capitolo specifico del piano, includi qui il titolo.
     """
-    studente_id = _STUDENTE_ID_CORRENTE
     contesto = _CONTESTO_CORRENTE
 
-    # --- 1. Raccogli contesto dal piano personalizzato (se attivo) ---
+    # --- 1. Raccogli contesto dal piano (personalizzato O corso docente) ---
     contenuto_piano = ""
-    if contesto.get("piano_id"):
-        piano_id = contesto["piano_id"]
-        # Se c'è un riferimento a un paragrafo/capitolo specifico nel contesto_aggiuntivo,
-        # cerca il contenuto di quel paragrafo
-        if contesto_aggiuntivo:
-            # Cerca paragrafi il cui titolo corrisponde parzialmente
-            paragrafi = db.esegui(
-                """SELECT pp.id, pp.titolo, pc.contenuto_json
-                   FROM piano_paragrafi pp
-                   JOIN piano_capitoli cap ON pp.capitolo_id = cap.id
-                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
-                   WHERE cap.piano_id = ?""",
-                [piano_id],
+
+    # Determina il piano_id da cercare:
+    # - Se lo studente sta su un piano personalizzato → usa quello.
+    # - Se sta visualizzando un corso (sola lettura) → cerca il piano docente
+    #   del corso, che contiene le lezioni visibili sullo schermo.
+    piano_id_da_cercare = contesto.get("piano_id")
+    if not piano_id_da_cercare and contesto.get("tipo_vista") == "corso" and contesto.get("corso_id"):
+        try:
+            _piano_doc = db.esegui(
+                "SELECT id FROM piani_personalizzati "
+                "WHERE corso_universitario_id = ? AND is_corso_docente = 1 "
+                "ORDER BY id DESC LIMIT 1",
+                [contesto["corso_id"]],
             )
-            # Cerca anche i capitoli
-            capitoli = db.esegui(
-                "SELECT id, titolo FROM piano_capitoli WHERE piano_id = ? ORDER BY ordine",
+            if _piano_doc:
+                piano_id_da_cercare = _piano_doc[0]["id"]
+        except Exception:
+            pass
+
+    if piano_id_da_cercare:
+        piano_id = piano_id_da_cercare
+        if contesto_aggiuntivo:
+            # Singola query JOIN per capitoli + paragrafi + contenuti (evita N+1)
+            struttura = db.esegui(
+                """SELECT cap.id AS cap_id, cap.titolo AS cap_titolo,
+                   pp.id AS par_id, pp.titolo AS par_titolo,
+                   pc.contenuto_json
+                   FROM piano_capitoli cap
+                   LEFT JOIN piano_paragrafi pp ON pp.capitolo_id = cap.id
+                   LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
+                   WHERE cap.piano_id = ?
+                   ORDER BY cap.ordine, pp.ordine""",
                 [piano_id],
             )
 
             contesto_lower = contesto_aggiuntivo.lower()
             parti_piano = []
+            # Raggruppa paragrafi per capitolo (per match su capitolo intero)
+            cap_paragrafi: dict[int, list] = {}
+            for row in struttura:
+                if row.get("par_id") and row.get("contenuto_json"):
+                    cap_paragrafi.setdefault(row["cap_id"], []).append(row)
 
             # Match su capitoli
-            for cap in capitoli:
-                if cap["titolo"].lower() in contesto_lower or contesto_lower in cap["titolo"].lower():
-                    # Recupera tutti i paragrafi di questo capitolo
-                    par_cap = db.esegui(
-                        """SELECT pp.titolo, pc.contenuto_json
-                           FROM piano_paragrafi pp
-                           LEFT JOIN piano_contenuti pc ON pc.paragrafo_id = pp.id AND pc.tipo = 'lezione'
-                           WHERE pp.capitolo_id = ? ORDER BY pp.ordine""",
-                        [cap["id"]],
-                    )
-                    for p in par_cap:
-                        if p.get("contenuto_json"):
-                            parti_piano.append(f"### {p['titolo']}\n{p['contenuto_json'][:3000]}")
+            cap_ids_matchati = set()
+            for row in struttura:
+                cap_titolo = row["cap_titolo"]
+                cap_id = row["cap_id"]
+                if cap_id not in cap_ids_matchati and (
+                    cap_titolo.lower() in contesto_lower or contesto_lower in cap_titolo.lower()
+                ):
+                    cap_ids_matchati.add(cap_id)
+                    for p in cap_paragrafi.get(cap_id, []):
+                        parti_piano.append(f"### {p['par_titolo']}\n{p['contenuto_json'][:3000]}")
 
-            # Match su paragrafi
-            for par in paragrafi:
-                if par["titolo"].lower() in contesto_lower or contesto_lower in par["titolo"].lower():
-                    if par.get("contenuto_json"):
-                        parti_piano.append(f"### {par['titolo']}\n{par['contenuto_json'][:5000]}")
+            # Match su paragrafi (solo quelli non già inclusi dai capitoli)
+            for row in struttura:
+                if row.get("par_id") and row["cap_id"] not in cap_ids_matchati:
+                    par_titolo = row.get("par_titolo", "")
+                    if par_titolo.lower() in contesto_lower or contesto_lower in par_titolo.lower():
+                        if row.get("contenuto_json"):
+                            parti_piano.append(f"### {par_titolo}\n{row['contenuto_json'][:5000]}")
 
             if parti_piano:
-                contenuto_piano = "\n\n".join(parti_piano[:3])  # max 3 sezioni
+                contenuto_piano = "\n\n".join(parti_piano[:3])
 
         # Se non c'è match specifico, prendi un sommario del piano
         if not contenuto_piano:
@@ -1089,14 +1650,12 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     doc_chat = contesto.get("documento_chat")
     mat_sel = contesto.get("materiale_selezionato")
 
-    # Costruisci la query di ricerca combinando domanda e contesto
     query_ricerca = domanda
     if contesto_aggiuntivo:
         query_ricerca = f"{domanda} {contesto_aggiuntivo}"
 
     try:
         if doc_chat or mat_sel:
-            # Modalità chat documento o materiale selezionato: cerca SOLO in quel documento
             mat_id = (doc_chat or mat_sel)["id"]
             mat_corso_id = (doc_chat or mat_sel).get("corso_id")
             risultato = cerca_chunk_rilevanti(
@@ -1104,10 +1663,8 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
                 materiale_id=mat_id,
             )
         elif corso_id:
-            # Cerca nel corso specifico
             risultato = cerca_chunk_rilevanti(corso_id, query_ricerca, top_k=6)
         else:
-            # Cerca su tutta la piattaforma
             risultato = cerca_chunk_piattaforma(query_ricerca, top_k=6)
 
         if risultato.chunks:
@@ -1115,82 +1672,49 @@ def tool_rispondi_domanda(domanda: str, contesto_aggiuntivo: str = "") -> str:
     except Exception as e:
         print(f"[DEBUG tool_rispondi_domanda] Errore RAG: {e}")
 
-    # --- 3. Costruisci il prompt per la risposta ---
-    parti_contesto = []
-    if contenuto_piano:
-        parti_contesto.append(f"CONTENUTO DAL PIANO PERSONALIZZATO DELLO STUDENTE:\n{contenuto_piano}")
-    if contesto_rag:
-        parti_contesto.append(f"MATERIALE DIDATTICO RILEVANTE (da RAG):\n{contesto_rag}")
-
-    contesto_completo = "\n\n---\n\n".join(parti_contesto) if parti_contesto else "(Nessun materiale specifico trovato)"
+    # --- 3. Restituisci il contesto all'orchestratore (nessuna chiamata LLM) ---
+    parti_risultato = []
 
     corso_nome = contesto.get("corso_nome", "")
     piano_titolo = contesto.get("piano_titolo", "")
-    info_contesto = ""
     if doc_chat:
-        info_contesto += f"MODALITÀ CHAT DOCUMENTO: lo studente sta chattando sul documento '{doc_chat['titolo']}'. "
+        parti_risultato.append(
+            f"MODALITÀ CHAT DOCUMENTO: lo studente sta chattando sul documento '{doc_chat['titolo']}'."
+        )
     if corso_nome:
-        info_contesto += f"Corso attivo: {corso_nome}. "
+        parti_risultato.append(f"Corso attivo: {corso_nome}.")
     if piano_titolo:
-        info_contesto += f"Piano attivo: {piano_titolo}. "
+        parti_risultato.append(f"Piano attivo: {piano_titolo}.")
 
-    # Istruzioni specifiche per modalità documento
+    if contenuto_piano:
+        parti_risultato.append(f"CONTENUTO DAL PIANO DELLO STUDENTE:\n{contenuto_piano}")
+    if contesto_rag:
+        parti_risultato.append(f"MATERIALE DIDATTICO (RAG):\n{contesto_rag}")
+
+    if not contenuto_piano and not contesto_rag:
+        return (
+            "Nessun materiale didattico pertinente trovato sulla piattaforma per questa domanda. "
+            "Comunicalo allo studente e suggerisci di cercare materiale tra i corsi, "
+            "caricare materiale proprio o consultare il docente."
+        )
+
+    # Istruzioni per l'orchestratore su come usare il contesto
     if doc_chat:
-        istruzioni_extra = (
-            "- Lo studente sta chattando su un DOCUMENTO SPECIFICO. Basa la risposta "
-            "ESCLUSIVAMENTE sul contenuto del documento fornito.\n"
-            "- Se la domanda riguarda qualcosa che il documento non tratta, segnalalo "
-            "chiaramente e indica che l'informazione richiesta non è presente nel documento. "
-            "NON rispondere con conoscenze generali proprie. Suggerisci allo studente di "
-            "consultare altri materiali del corso o della piattaforma.\n"
-            "- Quando citi informazioni dal documento, indicalo naturalmente "
-            "(es. 'Come descritto nel documento...', 'Il materiale spiega che...').\n"
-            "- NON proporre di creare piani o lezioni: lo studente vuole chattare sul documento."
+        istruzioni = (
+            "ISTRUZIONI: Rispondi alla domanda basandoti ESCLUSIVAMENTE sul materiale del documento sopra. "
+            "Se la domanda riguarda qualcosa che il documento non tratta, segnalalo chiaramente. "
+            "NON proporre di creare piani o lezioni. Usa formattazione Markdown, tono caldo e motivante."
         )
     else:
-        istruzioni_extra = (
-            "- Basa la risposta ESCLUSIVAMENTE sul materiale didattico fornito sopra "
-            "(contenuto del piano e/o materiale RAG). NON usare MAI conoscenze generali "
-            "o informazioni che non provengono dal materiale della piattaforma.\n"
-            "- Se il materiale disponibile non copre l'argomento richiesto o è insufficiente, "
-            "comunicalo chiaramente allo studente. Suggerisci di cercare materiale pertinente "
-            "tra i corsi o di caricare materiale proprio, oppure di chiedere al docente.\n"
-            "- Cita sempre la fonte delle informazioni (es. 'Secondo il materiale del corso...', "
-            "'Come riportato nel documento...').\n"
-            "- NON proporre di creare piani o lezioni: lo studente vuole una risposta diretta."
+        istruzioni = (
+            "ISTRUZIONI: Usa ESCLUSIVAMENTE il materiale sopra per rispondere alla domanda "
+            "in modo chiaro, esaustivo e coinvolgente. Usa formattazione Markdown. "
+            "Se il materiale è insufficiente, comunicalo e suggerisci alternative. "
+            "Cita la fonte (es. 'Secondo il materiale del corso...'). "
+            "NON proporre di creare piani o lezioni: lo studente vuole una risposta diretta."
         )
 
-    prompt = f"""Sei Lea, tutor didattico della piattaforma LearnAI. Rispondi alla domanda dello
-studente in modo chiaro, esaustivo e coinvolgente, basandoti ESCLUSIVAMENTE sul materiale
-didattico fornito di seguito. NON usare MAI conoscenze generali proprie del modello AI.
-Se il materiale è insufficiente, dichiaralo esplicitamente.
-
-{info_contesto}
-
-DOMANDA DELLO STUDENTE:
-{domanda}
-
-{f"CONTESTO AGGIUNTIVO: {contesto_aggiuntivo}" if contesto_aggiuntivo else ""}
-
-MATERIALE DI RIFERIMENTO:
-{contesto_completo}
-
-ISTRUZIONI PER LA RISPOSTA:
-- Rispondi in italiano con tono caldo e motivante.
-- Spiega in modo chiaro, usando esempi concreti quando possibile.
-{istruzioni_extra}
-- Se appropriato, alla fine suggerisci domande di approfondimento o argomenti correlati.
-- Usa formattazione Markdown (grassetto, elenchi, titoli) per rendere la risposta leggibile.
-- Se lo studente chiede un riassunto, sii sintetico ma completo sui punti chiave.
-- Se lo studente chiede esempi, fornisci esempi pratici e concreti."""
-
-    try:
-        llm = get_llm(max_tokens=4096)
-        from langchain_core.messages import HumanMessage as HM
-        risposta = llm.invoke([HM(content=prompt)])
-        return risposta.content
-    except Exception as e:
-        return f"Mi dispiace, ho avuto un problema nel rispondere alla tua domanda: {e}"
+    return "\n\n".join(parti_risultato) + f"\n\n{istruzioni}"
 
 
 @tool
@@ -1800,6 +2324,204 @@ def tool_analizza_classe(corso_universitario_id: int = None) -> str:
     return "\n".join(risultato)
 
 
+@tool
+def tool_iscrivi_corso(corso_universitario_id: int = 0) -> str:
+    """
+    Iscrive lo studente a un corso universitario.
+    Se corso_universitario_id è 0, restituisce la lista dei corsi disponibili
+    a cui lo studente NON è ancora iscritto, così da poter chiedere a quale iscriversi.
+
+    Parametro corso_universitario_id: ID del corso a cui iscriversi (0 per vedere la lista).
+    """
+    from datetime import date as _date
+
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Anno accademico corrente
+    oggi = _date.today()
+    anno_acc = f"{oggi.year}-{oggi.year + 1}" if oggi.month >= 9 else f"{oggi.year - 1}-{oggi.year}"
+
+    # Corsi a cui lo studente è già iscritto
+    iscritti = db.esegui(
+        "SELECT corso_universitario_id FROM studenti_corsi WHERE studente_id = ?",
+        [studente_id],
+    )
+    ids_iscritti = {r["corso_universitario_id"] for r in iscritti}
+
+    if not corso_universitario_id or corso_universitario_id <= 0:
+        # Restituisci la lista dei corsi disponibili non ancora iscritti
+        corsi = db.trova_tutti("corsi_universitari", {"attivo": 1})
+        if not corsi:
+            return "Nessun corso universitario attivo nel sistema."
+        disponibili = [c for c in corsi if c["id"] not in ids_iscritti]
+        if not disponibili:
+            return "Lo studente è già iscritto a tutti i corsi disponibili."
+        righe = [f"Corsi disponibili ({len(disponibili)}):"]
+        for c in disponibili:
+            desc = f" — {c['descrizione']}" if c.get("descrizione") else ""
+            righe.append(f"  - ID {c['id']}: {c['nome']}{desc}")
+        righe.append(
+            "\nChiedi allo studente a QUALE corso vuole iscriversi, "
+            "poi richiama questo tool con il corso_universitario_id corretto."
+        )
+        return "\n".join(righe)
+
+    # Verifica che il corso esista e sia attivo
+    corso = db.trova_uno("corsi_universitari", {"id": corso_universitario_id, "attivo": 1})
+    if not corso:
+        return f"Corso ID {corso_universitario_id} non trovato o non attivo."
+
+    # Verifica che non sia già iscritto
+    if corso_universitario_id in ids_iscritti:
+        return f"Lo studente è già iscritto al corso '{corso['nome']}'."
+
+    # Esegui l'iscrizione
+    try:
+        db.inserisci("studenti_corsi", {
+            "studente_id": studente_id,
+            "corso_universitario_id": corso_universitario_id,
+            "anno_accademico": anno_acc,
+            "stato": "iscritto",
+        })
+    except Exception as e:
+        return f"Errore durante l'iscrizione al corso '{corso['nome']}': {e}"
+
+    return (
+        f"Iscrizione al corso '{corso['nome']}' completata con successo! "
+        f"Anno accademico: {anno_acc}. "
+        f"Lo studente può ora accedere al corso e ai suoi materiali."
+    )
+
+
+@tool
+def tool_cancella_iscrizione(corso_universitario_id: int = 0) -> str:
+    """
+    Cancella l'iscrizione dello studente a un corso universitario.
+    IMPORTANTE: chiama questo tool SOLO dopo aver chiesto conferma esplicita allo studente.
+    Se corso_universitario_id è 0, restituisce la lista dei corsi a cui lo studente è iscritto
+    così da poter chiedere quale corso cancellare.
+
+    Parametro corso_universitario_id: ID del corso da cui disiscriversi (0 per vedere la lista).
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Se non è specificato un corso, restituisci la lista
+    if not corso_universitario_id or corso_universitario_id <= 0:
+        corsi = db.esegui(
+            "SELECT cu.id, cu.nome, sc.stato, sc.anno_accademico "
+            "FROM studenti_corsi sc "
+            "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+            "WHERE sc.studente_id = ? "
+            "ORDER BY cu.nome",
+            [studente_id],
+        )
+        if not corsi:
+            return "Lo studente non è iscritto a nessun corso."
+        righe = ["Corsi a cui lo studente è iscritto:"]
+        for c in corsi:
+            righe.append(f"  - ID {c['id']}: {c['nome']} (stato: {c['stato']}, a.a. {c['anno_accademico']})")
+        righe.append(
+            "\nChiedi allo studente QUALE corso vuole cancellare, "
+            "poi richiama questo tool con il corso_universitario_id corretto "
+            "DOPO aver ottenuto la conferma esplicita."
+        )
+        return "\n".join(righe)
+
+    # Verifica che l'iscrizione esista
+    iscrizione = db.esegui(
+        "SELECT sc.id, cu.nome FROM studenti_corsi sc "
+        "JOIN corsi_universitari cu ON cu.id = sc.corso_universitario_id "
+        "WHERE sc.studente_id = ? AND sc.corso_universitario_id = ?",
+        [studente_id, corso_universitario_id],
+    )
+    if not iscrizione:
+        return f"Lo studente non è iscritto al corso ID {corso_universitario_id}. Nessuna azione eseguita."
+
+    nome_corso = iscrizione[0]["nome"]
+
+    # Esegui la cancellazione
+    try:
+        db.esegui(
+            "DELETE FROM studenti_corsi WHERE studente_id = ? AND corso_universitario_id = ?",
+            [studente_id, corso_universitario_id],
+        )
+    except Exception as e:
+        return f"Errore durante la cancellazione dell'iscrizione a '{nome_corso}': {e}"
+
+    return (
+        f"Iscrizione al corso '{nome_corso}' cancellata con successo. "
+        f"I piani personalizzati associati a questo corso sono stati conservati."
+    )
+
+
+@tool
+def tool_elimina_piano(piano_id: int = 0) -> str:
+    """
+    Elimina un piano personalizzato dello studente e tutto il suo contenuto (capitoli, paragrafi, contenuti).
+    IMPORTANTE: chiama questo tool SOLO dopo aver chiesto conferma esplicita allo studente.
+    Se piano_id è 0, restituisce la lista dei piani dello studente così da poter chiedere quale eliminare.
+
+    Parametro piano_id: ID del piano da eliminare (0 per vedere la lista).
+    """
+    studente_id = _STUDENTE_ID_CORRENTE
+
+    # Se non è specificato un piano, restituisci la lista
+    if not piano_id or piano_id <= 0:
+        piani = db.esegui(
+            "SELECT pp.id, pp.titolo, pp.created_at, cu.nome AS corso_nome "
+            "FROM piani_personalizzati pp "
+            "LEFT JOIN corsi_universitari cu ON cu.id = pp.corso_universitario_id "
+            "WHERE pp.studente_id = ? AND pp.is_corso_docente = 0 "
+            "ORDER BY pp.created_at DESC",
+            [studente_id],
+        )
+        if not piani:
+            return "Lo studente non ha nessun piano personalizzato."
+        righe = ["Piani personalizzati dello studente:"]
+        for p in piani:
+            corso_info = f" (corso: {p['corso_nome']})" if p.get("corso_nome") else " (libero)"
+            righe.append(f"  - Piano ID {p['id']}: '{p['titolo']}'{corso_info}")
+        righe.append(
+            "\nChiedi allo studente QUALE piano vuole eliminare, "
+            "poi richiama questo tool con il piano_id corretto "
+            "DOPO aver ottenuto la conferma esplicita."
+        )
+        return "\n".join(righe)
+
+    # Verifica che il piano appartenga allo studente e non sia un corso docente
+    piano = db.esegui(
+        "SELECT id, titolo, is_corso_docente FROM piani_personalizzati "
+        "WHERE id = ? AND studente_id = ?",
+        [piano_id, studente_id],
+    )
+    if not piano:
+        return f"Piano ID {piano_id} non trovato o non appartiene allo studente. Nessuna azione eseguita."
+    if piano[0].get("is_corso_docente"):
+        return "Questo è un corso creato da un docente e non può essere eliminato dallo studente."
+
+    titolo_piano = piano[0]["titolo"]
+
+    # Elimina in cascata: contenuti → paragrafi → capitoli → piano
+    try:
+        paragrafi = db.esegui(
+            "SELECT pp.id FROM piano_paragrafi pp "
+            "JOIN piano_capitoli pc ON pp.capitolo_id = pc.id "
+            "WHERE pc.piano_id = ?",
+            [piano_id],
+        )
+        par_ids = [p["id"] for p in paragrafi]
+        if par_ids:
+            placeholders = ",".join("?" * len(par_ids))
+            db.esegui(f"DELETE FROM piano_contenuti WHERE paragrafo_id IN ({placeholders})", par_ids)
+            db.esegui(f"DELETE FROM piano_paragrafi WHERE id IN ({placeholders})", par_ids)
+        db.esegui("DELETE FROM piano_capitoli WHERE piano_id = ?", [piano_id])
+        db.esegui("DELETE FROM piani_personalizzati WHERE id = ?", [piano_id])
+    except Exception as e:
+        return f"Errore durante l'eliminazione del piano '{titolo_piano}': {e}"
+
+    return f"Piano personalizzato '{titolo_piano}' eliminato con successo, insieme a tutti i suoi capitoli, sezioni e contenuti."
+
+
 # ===========================================================================
 # Singleton helpers (tutti in session_state)
 # ===========================================================================
@@ -1826,6 +2548,7 @@ def _get_orchestratore():
                 tools=[
                     tool_leggi_contesto,
                     tool_esplora_catalogo,
+                    tool_verifica_materiale_disponibile,
                     tool_genera_corso,
                     tool_genera_pratica,
                     tool_analizza_classe,
@@ -1844,6 +2567,7 @@ def _get_orchestratore():
             tools=[
                 tool_leggi_contesto,
                 tool_esplora_catalogo,
+                tool_verifica_materiale_disponibile,
                 tool_genera_corso,
                 tool_genera_corso_libero,
                 tool_rispondi_domanda,
@@ -1852,6 +2576,9 @@ def _get_orchestratore():
                 tool_modifica_piano,
                 tool_riscrivi_paragrafo,
                 tool_analizza_coerenza_materiali,
+                tool_iscrivi_corso,
+                tool_cancella_iscrizione,
+                tool_elimina_piano,
             ],
             system_prompt=_SYSTEM_PROMPT,
             memoria=True,
@@ -1996,6 +2723,10 @@ def chat_con_orchestratore(
                 _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
             if contesto.get("piano_titolo"):
                 _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        # Se siamo nella Home (nessun corso/piano selezionato), segnalalo
+        # esplicitamente per evitare che l'agente usi contesto stantio.
+        if not _ctx_parts and contesto.get("tipo_vista") == "home":
+            _ctx_parts.append("Home — nessun corso o piano selezionato")
         if _ctx_parts:
             messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 
@@ -2022,6 +2753,79 @@ def chat_con_orchestratore(
                 thread_id=_get_thread_id(),
             )
         raise
+
+
+def chat_con_orchestratore_stream(
+    messaggio_utente: str,
+    corso_contestuale_id: int | None = None,
+    corso_contestuale_nome: str | None = None,
+):
+    """Come chat_con_orchestratore, ma restituisce un generatore per lo streaming.
+
+    L'utente vede i token arrivare progressivamente invece di attendere la risposta
+    completa, riducendo drasticamente la latenza percepita.
+
+    Args:
+        messaggio_utente:       Testo scritto dall'utente.
+        corso_contestuale_id:   ID del corso visualizzato (opzionale).
+        corso_contestuale_nome: Nome del corso (opzionale).
+
+    Yields:
+        Pezzi di testo della risposta dell'agente.
+
+    Esempio con Streamlit::
+
+        from src.agents.orchestrator import chat_con_orchestratore_stream
+
+        with st.chat_message("assistant"):
+            risposta = st.write_stream(
+                chat_con_orchestratore_stream(st.session_state.input_utente)
+            )
+    """
+    from platform_sdk.agent import esegui_agente_stream
+
+    if corso_contestuale_id is not None:
+        aggiorna_contesto_sessione(
+            corso_id=corso_contestuale_id,
+            corso_nome=corso_contestuale_nome,
+        )
+
+    _aggiorna_studente_corrente()
+
+    contesto = _CONTESTO_CORRENTE
+    if contesto:
+        _ctx_parts: list[str] = []
+        doc_chat = contesto.get("documento_chat")
+        if doc_chat:
+            _ctx_parts.append(f"Chat documento '{doc_chat.get('titolo', '')}'")
+        else:
+            if contesto.get("corso_nome"):
+                _ctx_parts.append(f"Corso '{contesto['corso_nome']}'")
+            if contesto.get("piano_titolo"):
+                _ctx_parts.append(f"Piano '{contesto['piano_titolo']}'")
+        if not _ctx_parts and contesto.get("tipo_vista") == "home":
+            _ctx_parts.append("Home — nessun corso o piano selezionato")
+        if _ctx_parts:
+            messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
+
+    try:
+        yield from esegui_agente_stream(
+            _get_orchestratore(),
+            messaggio_utente,
+            thread_id=_get_thread_id(),
+        )
+    except Exception as e:
+        if "tool_calls" in str(e) and "ToolMessage" in str(e):
+            st.session_state.pop(_SK_ORCHESTRATORE, None)
+            st.session_state.pop(_SK_ORCHESTRATORE_DOCENTE, None)
+            st.session_state.pop(_SK_THREAD_ID, None)
+            yield from esegui_agente_stream(
+                _get_orchestratore(),
+                messaggio_utente,
+                thread_id=_get_thread_id(),
+            )
+        else:
+            raise
 
 
 def reset_sessione_chat() -> None:

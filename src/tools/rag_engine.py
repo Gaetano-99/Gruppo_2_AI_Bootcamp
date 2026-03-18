@@ -166,6 +166,38 @@ def cerca_chunk_rilevanti(
             )
             # Ricerca semantica riuscita
             chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
+            # Desync guard: ChromaDB ha ID che non esistono più in SQLite.
+            # Tenta auto-healing: ri-vettorizza i chunk del corso dalla sorgente SQLite.
+            if chunk_ids_semantici and not chunks:
+                print("[WARN rag_engine] Desync ChromaDB/SQLite: tentativo auto-healing...")
+                try:
+                    from src.tools.vector_store import vettorizza_chunks
+                    # Recupera tutti i chunk del corso da SQLite (fonte di verità)
+                    ids_sql = _recupera_ids_chunks_corso(corso_id_per_collection, ids_effettivi)
+                    if ids_sql:
+                        n_sync = vettorizza_chunks(ids_sql, corso_id_per_collection)
+                        print(f"[WARN rag_engine] Auto-healing: {n_sync} chunk ri-vettorizzati")
+                        # Riprova la ricerca con i nuovi embedding
+                        chunk_ids_semantici = cerca_simili(
+                            query=query,
+                            corso_id=corso_id_per_collection,
+                            top_k=top_k,
+                            materiale_id=ids_effettivi[0] if ids_effettivi and len(ids_effettivi) == 1 else None,
+                            materiale_ids=ids_effettivi if ids_effettivi and len(ids_effettivi) > 1 else None,
+                        )
+                        chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
+                except Exception as heal_err:
+                    print(f"[WARN rag_engine] Auto-healing fallito: {heal_err}")
+
+                if not chunks:
+                    return RisultatoRicercaRAG(
+                        chunks=[],
+                        metodo_utilizzato="nessuno",
+                        errore_semantico=(
+                            "Il database vettoriale contiene dati obsoleti. "
+                            "Prova la ricerca per parole chiave."
+                        ),
+                    )
             for i, chunk in enumerate(chunks):
                 chunk["score_rilevanza"] = top_k - i
                 chunk["parole_trovate"] = ["(semantico)"]
@@ -333,6 +365,37 @@ def conta_chunk_corso(
 # ===========================================================================
 # Helper: recupero chunk per ID (usato dal retrieval semantico)
 # ===========================================================================
+
+def _recupera_ids_chunks_corso(
+    corso_id: int | None,
+    ids_effettivi: list[int] | None,
+) -> list[int]:
+    """Recupera gli ID di tutti i chunk SQLite per il corso (o materiali specificati).
+
+    Usato dall'auto-healing per forzare la ri-vettorizzazione degli embedding.
+
+    Args:
+        corso_id: ID del corso universitario. None per materiali senza corso.
+        ids_effettivi: Lista di ID materiali specifici (prioritaria su corso_id).
+
+    Returns:
+        Lista di chunk_id presenti in SQLite.
+    """
+    if ids_effettivi:
+        placeholders = ",".join("?" for _ in ids_effettivi)
+        righe = db.esegui(
+            f"SELECT id FROM materiali_chunks WHERE materiale_id IN ({placeholders})",
+            ids_effettivi,
+        )
+    elif corso_id is not None:
+        righe = db.esegui(
+            "SELECT id FROM materiali_chunks WHERE corso_universitario_id = ?",
+            [corso_id],
+        )
+    else:
+        return []
+    return [r["id"] for r in righe] if righe else []
+
 
 def _recupera_chunks_per_ids(chunk_ids: list[int]) -> list[dict]:
     """Recupera chunk completi da SQLite mantenendo l'ordine degli ID.
@@ -793,14 +856,21 @@ def cerca_chunk_piattaforma(
             chunk_ids_semantici = cerca_simili_piattaforma(query, top_k=top_k)
             # Ricerca semantica riuscita
             chunks = _recupera_chunks_per_ids(chunk_ids_semantici)
-            for i, c in enumerate(chunks):
-                mat = db.esegui(
-                    "SELECT titolo, tipo FROM materiali_didattici WHERE id = ?",
-                    [c.get("materiale_id")],
+            # Batch lookup materiali (evita N+1 query)
+            _mat_ids = list({c.get("materiale_id") for c in chunks if c.get("materiale_id")})
+            _mat_map: dict = {}
+            if _mat_ids:
+                _ph = ",".join("?" * len(_mat_ids))
+                _mat_rows = db.esegui(
+                    f"SELECT id, titolo, tipo FROM materiali_didattici WHERE id IN ({_ph})",
+                    _mat_ids,
                 )
+                _mat_map = {m["id"]: m for m in _mat_rows}
+            for i, c in enumerate(chunks):
+                mat = _mat_map.get(c.get("materiale_id"))
                 if mat:
-                    c["materiale_titolo"] = mat[0]["titolo"]
-                    c["materiale_tipo"] = mat[0].get("tipo", "")
+                    c["materiale_titolo"] = mat["titolo"]
+                    c["materiale_tipo"] = mat.get("tipo", "")
                 c["score_rilevanza"] = top_k - i
                 c["parole_trovate"] = ["(semantico)"]
             return RisultatoRicercaRAG(

@@ -144,13 +144,57 @@ def analizza_gap(tentativo_id: int, studente_id: int) -> str:
             "Sei pronto/a per passare all'argomento successivo!"
         )
 
-    # Raccoglie argomenti e sezioni dagli errori
+    # Tentativo con punteggio per il contesto (query unica, riusata sotto)
+    tentativo = db.trova_uno("tentativi_quiz", {"id": tentativo_id})
+
+    # Fallback: se nessun chunk è collegato direttamente alle domande (quiz da practice_gen),
+    # recupera i sommari tramite piano_contenuti.chunk_ids_utilizzati
+    ha_chunk_info = any(r.get("sommario") or r.get("titolo_sezione") for r in risposte_errate)
+    sommari_chunk_fallback: list[str] = []
+    argomenti_fallback: set[str] = set()
+    if not ha_chunk_info and tentativo:
+        piano_row = db.trova_uno("piano_contenuti", {"quiz_id": tentativo.get("quiz_id")})
+        if piano_row and piano_row.get("chunk_ids_utilizzati"):
+            try:
+                cids = json.loads(piano_row["chunk_ids_utilizzati"])
+                if cids:
+                    placeholders = ",".join("?" * len(cids))
+                    chunks_fb = db.esegui(
+                        f"SELECT titolo_sezione, sommario, argomenti_chiave "
+                        f"FROM materiali_chunks WHERE id IN ({placeholders})",
+                        cids,
+                    )
+                    for ch in chunks_fb:
+                        if ch.get("sommario"):
+                            label = ch.get("titolo_sezione") or "Sezione"
+                            sommari_chunk_fallback.append(f"[{label}] {ch['sommario']}")
+                        if ch.get("argomenti_chiave"):
+                            try:
+                                for a in json.loads(ch["argomenti_chiave"]):
+                                    argomenti_fallback.add(a)
+                            except Exception:
+                                pass
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    # Raccoglie argomenti, sezioni e contenuti dagli errori
     argomenti: set[str] = set()
     sezioni: list[str] = []
     domande_errate: list[str] = []
+    dettagli_errori: list[str] = []  # contesto ricco per ogni errore
 
     for r in risposte_errate:
         domande_errate.append(r["domanda"])
+        # Costruisci dettaglio per ogni errore con spiegazione e sommario del chunk
+        dettaglio = f"- Domanda: {r['domanda']}"
+        if r.get("spiegazione"):
+            dettaglio += f"\n  Spiegazione: {r['spiegazione']}"
+        if r.get("sommario"):
+            dettaglio += f"\n  Contenuto del materiale: {r['sommario']}"
+        if r.get("titolo_sezione"):
+            dettaglio += f"\n  Sezione: {r['titolo_sezione']}"
+        dettagli_errori.append(dettaglio)
+
         if r.get("argomenti_chiave"):
             try:
                 for a in json.loads(r["argomenti_chiave"]):
@@ -160,17 +204,27 @@ def analizza_gap(tentativo_id: int, studente_id: int) -> str:
         if r.get("titolo_sezione") and r["titolo_sezione"] not in sezioni:
             sezioni.append(r["titolo_sezione"])
 
-    # Tentativo con punteggio per il contesto
-    tentativo = db.trova_uno("tentativi_quiz", {"id": tentativo_id})
+    # Integra argomenti dal fallback chunk
+    argomenti.update(argomenti_fallback)
+
     punteggio = tentativo.get("punteggio", 0) if tentativo else 0
     n_errate = len(domande_errate)
 
+    # Aggiunge sommari fallback se disponibili
+    fallback_str = ""
+    if sommari_chunk_fallback:
+        fallback_str = (
+            "\n\nContenuto del materiale da cui è stato generato il quiz:\n"
+            + chr(10).join(f"  {s}" for s in sommari_chunk_fallback)
+        )
+
     contesto = f"""Lo studente ha completato un quiz con punteggio {punteggio:.0f}/100.
-Ha sbagliato {n_errate} domanda/e:
-{chr(10).join(f'  - {d}' for d in domande_errate)}
+Ha sbagliato {n_errate} domanda/e. Ecco i dettagli di ogni errore con il contenuto del materiale correlato:
+
+{chr(10).join(dettagli_errori)}
 
 Argomenti chiave delle sezioni con errori: {', '.join(argomenti) if argomenti else 'Non specificati'}
-Sezioni del materiale da rivedere: {', '.join(sezioni) if sezioni else 'Non disponibili'}"""
+Sezioni del materiale da rivedere: {', '.join(sezioni) if sezioni else 'Non disponibili'}{fallback_str}"""
 
     istruzioni = (
         "Sei Lea, il tutor di LearnAI. Analizza i risultati del quiz dello studente.\n"
@@ -181,8 +235,13 @@ Sezioni del materiale da rivedere: {', '.join(sezioni) if sezioni else 'Non disp
         "2. Per ogni area, spiega brevemente cosa rivedere e perché è importante.\n"
         "3. Se ci sono sezioni specifiche del materiale, citale.\n"
         "4. Suggerisci 2-3 domande concrete che lo studente può fare a Lea in chat "
-        "per approfondire le lacune (es. 'Puoi spiegarmi meglio...', "
-        "'Fammi un riassunto di...', 'Generami un nuovo quiz su...').\n"
+        "per approfondire le lacune. REGOLA FONDAMENTALE: le domande suggerite devono "
+        "riguardare ESCLUSIVAMENTE i concetti presenti nelle spiegazioni e nei contenuti "
+        "del materiale riportati sopra. NON inventare domande su dati, statistiche, fonti "
+        "o dettagli che non compaiono nel contesto fornito. "
+        "Usa formule come: 'Puoi spiegarmi meglio il concetto di [concetto dalla spiegazione]?', "
+        "'Fammi un riassunto della sezione [nome sezione dal materiale]', "
+        "'Generami un nuovo quiz su [argomento presente nel materiale]'.\n"
         "5. Concludi con un breve incoraggiamento.\n"
         "Usa un tono empatico e motivante. Usa elenchi puntati. Massimo 250 parole."
     )

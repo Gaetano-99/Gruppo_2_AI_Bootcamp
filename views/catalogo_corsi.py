@@ -69,6 +69,33 @@ _CSS = """
     color: #555;
     line-height: 1.5;
 }
+.corso-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+}
+.corso-meta-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border-radius: 20px;
+    padding: 2px 10px;
+}
+.tag-durata {
+    background: #FFF8E1;
+    color: #C5A028;
+}
+.tag-accesso {
+    background: #E8F5E9;
+    color: #2E7D32;
+}
+.corso-sbocchi {
+    font-size: 0.82rem;
+    color: #666;
+    margin-top: 8px;
+    font-style: italic;
+}
 .badge-facolta {
     display: inline-block;
     background: #EEF4FF;
@@ -107,7 +134,7 @@ def mostra_catalogo():
     corsi = []
     if db is not None:
         try:
-            corsi = db.trova_tutti("corsi_di_laurea", ordine="facolta ASC, nome ASC")
+            corsi = db.trova_tutti("corsi_di_laurea_onboarding", ordine="facolta ASC, nome ASC")
         except Exception as e:
             st.error(f"Errore nel caricamento dei corsi: {e}")
 
@@ -142,12 +169,25 @@ def mostra_catalogo():
             nome = corso.get("nome", "Corso senza nome")
             desc = corso.get("descrizione") or "Descrizione non disponibile."
             fac = corso.get("facolta", "")
+            durata = corso.get("durata", "")
+            accesso = corso.get("tipo_accesso", "")
+            sbocchi = corso.get("sbocchi_lavorativi", "")
+            meta_html = ""
+            if durata:
+                meta_html += f'<span class="corso-meta-tag tag-durata">{durata}</span>'
+            if accesso:
+                meta_html += f'<span class="corso-meta-tag tag-accesso">Accesso: {accesso}</span>'
+            sbocchi_html = ""
+            if sbocchi:
+                sbocchi_html = f'<div class="corso-sbocchi">Sbocchi: {sbocchi}</div>'
             with cols[idx % 2]:
                 st.markdown(f"""
                 <div class="corso-card">
                     <div class="badge-facolta">{fac}</div>
-                    <div class="corso-nome">🎓 {nome}</div>
+                    <div class="corso-nome">{nome}</div>
                     <div class="corso-desc">{desc}</div>
+                    <div class="corso-meta">{meta_html}</div>
+                    {sbocchi_html}
                 </div>
                 """, unsafe_allow_html=True)
 
