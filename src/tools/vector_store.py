@@ -354,23 +354,107 @@ def _costruisci_filtro(
 # Sincronizzazione batch
 # ---------------------------------------------------------------------------
 
-def verifica_integrita_vectorstore() -> int:
-    """Rileva e ripara il desync tra SQLite (embedding_sync=1) e ChromaDB vuoto.
+def _ricostruisci_vectorstore(motivo: str) -> int:
+    """Cancella tutte le collection ChromaDB corrotte e ri-vettorizza da zero.
 
-    Scenario tipico: ``data/chroma_db/`` è in ``.gitignore`` e viene perso
-    dopo un clone, git clean o cancellazione manuale. SQLite conserva
-    ``embedding_sync=1`` ma ChromaDB non ha più gli embedding.
-
-    Se rileva chunk marcati come sincronizzati ma assenti nel vector store,
-    resetta ``embedding_sync=0`` e li ri-vettorizza.
+    Args:
+        motivo: Messaggio di log che descrive perché serve la ricostruzione.
 
     Returns:
         Numero di chunk ri-vettorizzati.
     """
+    import time
+    global _chroma_client
+
+    print()
+    print("!" * 60)
+    print("  VECTOR STORE — RICOSTRUZIONE NECESSARIA")
+    print("!" * 60)
+    print(f"  Motivo: {motivo}")
+    print()
+
+    # Elimina tutte le collection esistenti
+    print("  [1/3] Pulizia collection corrotte...")
+    n_deleted = 0
+    try:
+        client = _get_chroma_client()
+        collections = client.list_collections()
+        n_deleted = len(collections)
+        for col in collections:
+            client.delete_collection(col.name)
+            print(f"         Eliminata: {col.name}")
+        # Reset singleton per forzare ri-creazione pulita
+        _chroma_client = None
+        print(f"         {n_deleted} collection eliminate.")
+    except Exception as e:
+        print(f"         Pulizia API fallita: {e}")
+        print("         Fallback: rimozione fisica della directory chroma_db...")
+        # Fallback: elimina fisicamente la directory e reset singleton
+        import shutil
+        try:
+            shutil.rmtree(config.CHROMA_PERSIST_DIR, ignore_errors=True)
+            os.makedirs(config.CHROMA_PERSIST_DIR, exist_ok=True)
+            _chroma_client = None
+            print("         Directory chroma_db ricreata.")
+        except Exception as e2:
+            print(f"         ERRORE CRITICO: impossibile rimuovere chroma_db: {e2}")
+
+    # Reset embedding_sync=0 per tutti i chunk
+    n_reset = db.conta("materiali_chunks", {"embedding_sync": 1})
+    print(f"  [2/3] Reset embedding_sync: {n_reset} chunk da risincronizzare...")
+    db.esegui(
+        "UPDATE materiali_chunks SET embedding_sync = 0 WHERE embedding_sync = 1"
+    )
+
+    # Ri-vettorizza tutto
+    print(f"  [3/3] Ri-vettorizzazione in corso...")
+    t0 = time.time()
+    n_vettorizzati = sincronizza_embeddings_pendenti()
+    elapsed = time.time() - t0
+
+    print()
+    if n_vettorizzati > 0:
+        print(f"  RICOSTRUZIONE COMPLETATA: {n_vettorizzati} chunk ri-vettorizzati "
+              f"in {elapsed:.1f}s")
+    else:
+        print("  RICOSTRUZIONE COMPLETATA: nessun chunk da vettorizzare "
+              "(materiali assenti?)")
+    print("!" * 60)
+    print()
+
+    return n_vettorizzati
+
+
+def verifica_integrita_vectorstore() -> int:
+    """Rileva e ripara desync o corruzione tra SQLite e ChromaDB.
+
+    Scenari rilevati:
+    1. ChromaDB vuoto/mancante ma SQLite ha ``embedding_sync=1`` (tipico
+       dopo clone, git clean o cancellazione di ``data/chroma_db/``).
+    2. Indice HNSW corrotto: le collection esistono e ``count()`` funziona,
+       ma ``query()`` fallisce perché i file dell'indice (es. ``link_lists.bin``)
+       sono vuoti o danneggiati.
+
+    In entrambi i casi resetta ``embedding_sync=0`` e ri-vettorizza.
+
+    Returns:
+        Numero di chunk ri-vettorizzati.
+    """
+    print()
+    print("-" * 60)
+    print("  VECTOR STORE — Verifica integrita")
+    print("-" * 60)
+
     # Conta chunk che SQLite ritiene sincronizzati
     n_sync = db.conta("materiali_chunks", {"embedding_sync": 1})
+    n_totali = db.conta("materiali_chunks")
+    print(f"  Chunk in SQLite:   {n_totali} totali, {n_sync} con embedding_sync=1")
+
     if n_sync == 0:
-        return 0  # nulla da verificare
+        print("  Nessun chunk sincronizzato — nulla da verificare.")
+        print("-" * 60)
+        print()
+        return 0
 
     # Controlla se ChromaDB ha effettivamente dati
     try:
@@ -378,22 +462,38 @@ def verifica_integrita_vectorstore() -> int:
         n_chroma = collection_tutti.count()
     except Exception:
         n_chroma = 0
+    print(f"  Chunk in ChromaDB: {n_chroma} (collection piattaforma)")
 
-    if n_chroma >= n_sync:
-        return 0  # tutto coerente
+    if n_chroma < n_sync:
+        print(f"  PROBLEMA: ChromaDB ha meno embedding di quelli attesi "
+              f"({n_chroma} < {n_sync})")
+        print("-" * 60)
+        return _ricostruisci_vectorstore(
+            f"Desync rilevato: SQLite ha {n_sync} chunk con "
+            f"embedding_sync=1, ma ChromaDB ne contiene solo {n_chroma}."
+        )
 
-    # Desync rilevato: ChromaDB ha meno embedding di quelli attesi
-    print(f"[WARN vector_store] Desync rilevato: SQLite ha {n_sync} chunk con "
-          f"embedding_sync=1, ma ChromaDB ne contiene solo {n_chroma}. "
-          f"Reset e ri-vettorizzazione in corso...")
+    # Conteggi coerenti — verifica che l'indice HNSW funzioni davvero
+    # con una query di test. Se fallisce, l'indice è corrotto.
+    print("  Conteggi coerenti. Test query HNSW in corso...")
+    try:
+        model = get_embedding_model()
+        test_embedding = model.embed_query("test di integrità")
+        collection_tutti.query(
+            query_embeddings=[test_embedding],
+            n_results=1,
+        )
+    except Exception as e:
+        print(f"  PROBLEMA: query HNSW fallita — {e}")
+        print("-" * 60)
+        return _ricostruisci_vectorstore(
+            f"Indice HNSW corrotto (count OK ma query fallita): {e}"
+        )
 
-    # Reset embedding_sync=0 per tutti i chunk sincronizzati
-    db.esegui(
-        "UPDATE materiali_chunks SET embedding_sync = 0 WHERE embedding_sync = 1"
-    )
-
-    # Ri-vettorizza tutto
-    return sincronizza_embeddings_pendenti()
+    print("  Esito: OK — Vector store integro e funzionante")
+    print("-" * 60)
+    print()
+    return 0
 
 
 def sincronizza_embeddings_pendenti() -> int:

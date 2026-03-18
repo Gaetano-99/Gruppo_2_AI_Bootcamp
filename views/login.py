@@ -23,6 +23,30 @@ from platform_sdk.database import db
 
 
 # ---------------------------------------------------------------------------
+# Accessibilità
+# ---------------------------------------------------------------------------
+ACCESSIBILITY_OPTIONS = [
+    "Default",
+    "Contrasto elevato (ipovedenti)",
+    "Modalità daltonici",
+]
+
+
+@st.dialog( title = "Impostazioni di accessibilità",width = "medium")
+def _dialog_accessibilita():
+    """Dialog per scegliere la modalità di visualizzazione."""
+    corrente = st.session_state.get("accessibilita", "Default")
+    scelta = st.selectbox(
+        "Modalità di visualizzazione",
+        ACCESSIBILITY_OPTIONS,
+        index=ACCESSIBILITY_OPTIONS.index(corrente),
+    )
+    if st.button("Conferma", use_container_width=True):
+        st.session_state["accessibilita"] = scelta
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # *** PERCORSI IMMAGINI ***
 # ---------------------------------------------------------------------------
 _ASSETS_DIR   = Path(__file__).parent / "assets"
@@ -155,6 +179,31 @@ _CSS = """
 }
 .demo-box strong { color: var(--navy); }
 .demo-box code   { color: #2e7d32; background: #e8f5e9; border-radius: 4px; padding: 1px 5px; }
+
+/* Bottone accessibilità */
+.btn-accessibilita .stButton {
+    display: flex !important;
+    justify-content: flex-end !important;
+}
+.btn-accessibilita button {
+    background: transparent !important;
+    color: var(--muted) !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 4px 8px !important;
+    font-size: .85rem !important;
+    font-weight: 400 !important;
+    width: auto !important;
+    min-width: 0 !important;
+    box-shadow: none !important;
+    transition: color .2s !important;
+}
+.btn-accessibilita button:hover {
+    background: transparent !important;
+    color: var(--navy) !important;
+    transform: none !important;
+    text-decoration: underline !important;
+}
 
 /* Footer */
 .f360-footer {
@@ -299,7 +348,15 @@ def mostra_login():
         col1,col2,col3 = st.columns([1,4,1])
         with col2:
             st.image("views\logo\LOGO_FEDERICO.png",width=1200)            #png da qui
-        
+
+        # Bottone accessibilità sotto il logo (allineato a destra)
+        _acc_spacer, _acc_col = st.columns([4, 1])
+        with _acc_col:
+            if st.button(icon="♿", label="Accessibilità", key="btn_accessibilita", help="Impostazioni di accessibilità"):
+                _dialog_accessibilita()
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         # Errore login
         if st.session_state.get("_login_errore"):
             st.markdown(
@@ -314,6 +371,9 @@ def mostra_login():
             placeholder="Inserisci la mail",
             key="login_email",
         )
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
         password = st.text_input(
             "Password",
             type="password",
@@ -321,9 +381,19 @@ def mostra_login():
             key="login_password",
         )
 
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
 
+        accetta_termini = st.checkbox(
+            "Accetto i [Termini e Condizioni](http://localhost:8502/pages/termini_e_condizioni.html) e la [Privacy Policy](http://localhost:8502/pages/privacy_policy.html)",
+            key="accetta_termini",
+        )
+
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
         if st.button("Accedi", use_container_width=True):
+            if not accetta_termini:
+                st.session_state["_login_errore"] = "Devi accettare i Termini e Condizioni per accedere."
+                st.rerun()
             utente, errore = _esegui_login(email, password)
             if errore:
                 st.session_state["_login_errore"] = errore
@@ -374,8 +444,8 @@ def mostra_login():
   </div>
   <div style="display:flex;gap:22px;flex-wrap:wrap;">
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Aiuto</a>
-    <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Termini e Condizioni</a>
-        <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
+    <a href="http://localhost:8502/pages/termini_e_condizioni.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Termini e Condizioni</a>
+        <a href="http://localhost:8502/pages/privacy_policy.html" target="_blank" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Privacy Policy</a>
     <a href="#" style="text-decoration:none;color:rgba(255,255,255,.45);font-size:.79rem;">Accessibilità</a>
       </div>
 </div>

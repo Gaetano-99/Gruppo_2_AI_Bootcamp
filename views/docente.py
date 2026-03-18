@@ -1,5 +1,6 @@
 ﻿"""Homepage Docente - LearnAI Platform."""
 
+import base64
 import json
 import os
 import sys
@@ -27,18 +28,73 @@ def _import_orchestratore():
         return None, None, None
 
 
+def _get_logo_base64() -> str:
+    """Carica il logo Federico e lo restituisce come stringa base64 per uso in HTML."""
+    logo_path = os.path.join(_ROOT, "static", "views", "logo", "LOGO_FEDERICO.png")
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
+
+
+def _esc(text: str) -> str:
+    """Escapa caratteri HTML speciali per evitare XSS nei template unsafe_allow_html."""
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
 _CSS = r"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
 :root { --blue:#003087; --blue-dark:#001A4D; --blue-mid:#1351A8; --red:#C8102E; --gold:#C5A028; --light:#F0F4F8; --gray:#5A6A7E; --border:#C8D5E3; --white:#FFFFFF; --green:#1A7F4B; --card:#f8fafc; --input-bg:#f8fafc; --input-text:#1f2937; --placeholder:#4b5563; }
 .stApp { background:#F0F4F8 !important; font-family:'Source Sans 3',sans-serif !important; }
-#MainMenu, footer { visibility:hidden; }
-.block-container { padding-top:0 !important; padding-bottom:0 !important; }
-.topbar { background:linear-gradient(135deg,#001A4D 0%,#003087 60%,#1351A8 100%); border-bottom:3px solid #C5A028; padding:14px 32px; display:flex; align-items:center; justify-content:space-between; margin:-1rem -1rem 24px -1rem; }
-.topbar-brand { font-family:'Playfair Display',serif; color:#fff; font-size:1.25rem; font-weight:700; }
-.topbar-brand span { color:#C5A028; }
-.topbar-user { color:rgba(255,255,255,0.85); font-size:0.88rem; display:flex; align-items:center; gap:12px; }
-.topbar-avatar { width:34px; height:34px; border-radius:50%; background:#C5A028; color:#001A4D; font-weight:700; font-size:0.85rem; display:inline-flex; align-items:center; justify-content:center; }
+#MainMenu, footer, header { visibility:hidden; }
+.block-container { padding-top:120px !important; padding-bottom:70px !important; padding-left:1rem !important; padding-right:1rem !important; }
+
+/* ---- HEADER ISTITUZIONALE (fixed in primo piano) ---- */
+.app-header {
+    position: fixed; top: 0; left: 0; right: 0;
+    background: rgba(26,35,64,0.97);
+    border-bottom: 3px solid #C5A028;
+    padding: 16px 48px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px;
+    font-family: 'Source Sans 3', sans-serif;
+    z-index: 10000;
+    margin: 0;
+}
+.app-header .header-brand { display:flex; align-items:center; gap:14px; }
+.app-header .header-brand img { height:82px; width:auto; object-fit:contain; filter:brightness(0) invert(1); }
+.app-header .header-brand-text { color:rgba(255,255,255,0.35); font-size:0.77rem; font-weight:400; }
+.app-header .header-brand-text strong { color:#fff; }
+.app-header .header-brand-text strong span { color:#f0a500; }
+
+/* ---- FOOTER ISTITUZIONALE ---- */
+.app-footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: rgba(26,35,64,0.97);
+    padding: 16px 48px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 10px;
+    z-index: 9999;
+    font-family: 'Source Sans 3', sans-serif;
+}
+.app-footer .footer-copy { font-size:0.77rem; color:rgba(255,255,255,0.35); }
+.app-footer .footer-copy strong { color:#fff; }
+.app-footer .footer-copy strong span { color:#f0a500; }
+.app-footer .footer-links { display:flex; gap:22px; flex-wrap:wrap; }
+.app-footer .footer-links a { text-decoration:none; color:rgba(255,255,255,0.45); font-size:0.79rem; transition:color 0.2s; }
+.app-footer .footer-links a:hover { color:#fff; }
+
+/* ---- SIDEBAR DOCENTE (sfondo scuro solo sul container, non sui figli) ---- */
+.st-key-doc_sidebar > div[data-testid="stVerticalBlockBorderWrapper"] {
+    background: #E2E8F0;
+    border-radius: 12px;
+    padding: 12px 10px;
+    min-height: calc(100vh - 200px);
+}
+
+/* ---- SECTION CARDS ---- */
 .section-card { background:var(--card); border-radius:12px; padding:18px 20px; margin-bottom:18px; box-shadow:0 4px 18px rgba(0,48,135,0.08); border:1px solid #E3EAF3; }
 .section-title { font-family:'Playfair Display',serif; font-size:1.35rem; color:#001A4D; margin:0 0 8px 0; font-weight:700; }
 .section-sub { color:#5A6A7E; font-size:0.90rem; margin-bottom:12px; }
@@ -54,6 +110,8 @@ _CSS = r"""
 .chip { display:inline-block; background:#EEF4FF; color:#003087; padding:3px 9px; border-radius:10px; font-size:0.75rem; font-weight:700; margin-right:6px; }
 .tab-note { background:#F8FAFD; border:1px solid #E3EAF3; border-radius:10px; padding:10px 12px; color:#5A6A7E; font-size:0.85rem; }
 .upload-box { border:1.5px dashed #C8D5E3; border-radius:12px; padding:16px; background:var(--card); }
+
+/* ---- CHAT ---- */
 .chat-header { background:linear-gradient(135deg,#001A4D 0%,#003087 100%); color:#fff; padding:14px 18px; border-radius:12px 12px 0 0; display:flex; align-items:center; gap:10px; margin-bottom:0; }
 .chat-online { width:8px; height:8px; border-radius:50%; background:#4FE886; flex-shrink:0; }
 .chat-title { font-weight:700; font-size:0.95rem; }
@@ -68,12 +126,8 @@ _CSS = r"""
     border: 1px solid #E0E8F2;
     border-radius: 4px 14px 14px 14px;
     padding: 12px 16px;
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    align-self: flex-start;
-    margin-bottom: 10px;
-    max-width: 80px;
+    display: flex; gap: 4px; align-items: center; align-self: flex-start;
+    margin-bottom: 10px; max-width: 80px;
 }
 .dot {
     width: 6px; height: 6px;
@@ -113,8 +167,8 @@ div[data-testid="stVerticalBlock"] {
     font-size: 0.88rem !important;
 }
 
-/* ---- SUGGERIMENTI COMPATTI ---- */
-div[data-testid="column"] .stButton > button[kind="secondary"] {
+/* ---- SUGGERIMENTI COMPATTI (chat) ---- */
+div[data-testid="stHorizontalBlock"] > div[data-testid="column"]:last-child .stButton > button[kind="secondary"] {
     background: #F0F4F8 !important;
     color: #003087 !important;
     border: 1px solid #C8D5E3 !important;
@@ -123,6 +177,24 @@ div[data-testid="column"] .stButton > button[kind="secondary"] {
     padding: 5px 8px !important;
     font-weight: 600 !important;
     white-space: nowrap;
+}
+
+/* ---- SIDEBAR NAV BUTTONS ---- */
+div.st-key-doc_sidebar .stButton > button[kind="primary"] {
+    background: linear-gradient(135deg,#001A4D 0%,#003087 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+}
+div.st-key-doc_sidebar .stButton > button[kind="secondary"] {
+    background: transparent !important;
+    color: #001A4D !important;
+    border: 1px solid #C8D5E3 !important;
+    border-radius: 8px !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
 }
 </style>
 """
@@ -197,7 +269,7 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
 
     studenti = one(
         """
-        SELECT COUNT(DISTINCT sc.studente_id) AS n
+        SELECT COUNT(sc.studente_id) AS n
         FROM corsi_universitari cu
         LEFT JOIN studenti_corsi sc ON sc.corso_universitario_id = cu.id
         WHERE cu.docente_id = ?""" + filtri
@@ -217,35 +289,94 @@ def _metrics(docente_id: int, corso_id: int | None = None) -> Dict[str, Any]:
         JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
         WHERE cu.docente_id = ?""" + filtri
     )
+    quiz_tentati = one(
+        """
+        SELECT COUNT(DISTINCT t.quiz_id) AS n
+        FROM tentativi_quiz t
+        JOIN quiz q ON q.id = t.quiz_id
+        JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id
+        WHERE cu.docente_id = ?""" + filtri
+    )
     corsi = one("SELECT COUNT(*) AS n FROM corsi_universitari cu WHERE cu.docente_id = ?" + filtri)
 
-    return {"studenti": studenti, "quiz": quiz_appr, "tentativi": tentativi, "corsi": corsi}
+    return {"studenti": studenti, "quiz": quiz_appr, "tentativi": tentativi, "quiz_tentati": quiz_tentati, "corsi": corsi}
 
 
 def _stato_corso(corso: dict) -> tuple[str, str]:
     return ("Pubblicato", "pill-pub") if corso.get("attivo") else ("Da pubblicare", "pill-bozza")
 
 
-def _render_topbar(utente: dict) -> bool:
-    st.markdown(_CSS, unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class='topbar'>
-            <div class='topbar-brand'>LearnAI <span>Docente</span></div>
-            <div class='topbar-user'>
-                <div class='topbar-avatar'>{(utente.get('nome','')[:1] or '?').upper()}</div>
-                <div>
-                    <div>{utente.get('nome','')} {utente.get('cognome','')}</div>
-                    <div style='font-size:0.78rem; opacity:0.8'>Docente</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+def _render_header(utente: dict):
+    """Renderizza l'header istituzionale fisso in alto."""
+    logo_b64 = _get_logo_base64()
+    logo_html = (
+        f'<img src="data:image/png;base64,{logo_b64}" alt="Federico360">'
+        if logo_b64 else ''
     )
-    col_logout, _ = st.columns([1, 5])
-    with col_logout:
-        if st.button("Logout", type="secondary"):
+    header_parts = [
+        '<div class="app-header">',
+        '<div class="header-brand">',
+        logo_html,
+        '<div class="header-brand-text">',
+        '&copy; 2026 <strong>Federico<span>360</span></strong>',
+        '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
+        '</div></div>',
+        '</div>',
+    ]
+    st.markdown("".join(header_parts), unsafe_allow_html=True)
+
+
+def _render_footer():
+    """Renderizza il footer istituzionale fisso in basso."""
+    footer_parts = [
+        '<div class="app-footer">',
+        '<div class="footer-copy">',
+        '&copy; 2026 <strong>Federico<span>360</span></strong>',
+        '&mdash; Universit&agrave; degli Studi di Napoli Federico II',
+        '<div style="font-size:0.65rem;color:rgba(255,255,255);margin-top:2px;">',
+        'I contenuti generati dall&rsquo;AI possono contenere errori o imprecisioni. Verifica sempre le informazioni.',
+        '</div>',
+        '</div>',
+        '<div class="footer-links">',
+        '<a href="#">Aiuto</a>',
+        '<a href="#">Termini e Condizioni</a>',
+        '<a href="#">Privacy Policy</a>',
+        '<a href="#">Accessibilit&agrave;</a>',
+        '</div>',
+        '</div>',
+    ]
+    st.markdown("".join(footer_parts), unsafe_allow_html=True)
+
+
+def _render_sidebar_nav(utente: dict):
+    """Sidebar di navigazione: profilo, sezioni, logout."""
+    with st.container(key="doc_sidebar"):
+        iniziale = (utente.get('nome', '')[:1] or '?').upper()
+        st.markdown(
+            f"<div style='text-align:center;padding:10px 0 14px;'>"
+            f"<div style='width:48px;height:48px;border-radius:50%;background:#C5A028;color:#001A4D;"
+            f"font-weight:700;font-size:1.1rem;display:inline-flex;align-items:center;"
+            f"justify-content:center;margin-bottom:6px;'>{iniziale}</div>"
+            f"<div style='font-weight:700;color:#001A4D;font-size:0.90rem;'>"
+            f"{_esc(utente.get('nome',''))} {_esc(utente.get('cognome',''))}</div>"
+            f"<div style='color:#5A6A7E;font-size:0.76rem;'>Docente</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<hr style='border:none;border-top:1px solid #C8D5E3;margin:4px 0 12px;'>", unsafe_allow_html=True)
+
+        sezione = st.session_state.get("_doc_sezione", "analytics")
+        if st.button("Analytics", key="nav_analytics", use_container_width=True,
+                      type="primary" if sezione == "analytics" else "secondary"):
+            st.session_state["_doc_sezione"] = "analytics"
+            st.rerun()
+        if st.button("Corsi", key="nav_corsi", use_container_width=True,
+                      type="primary" if sezione == "corsi" else "secondary"):
+            st.session_state["_doc_sezione"] = "corsi"
+            st.rerun()
+
+        st.markdown("<div style='margin-top:32px;'></div>", unsafe_allow_html=True)
+        if st.button("Logout", key="btn_logout_sidebar", type="secondary", use_container_width=True):
             _, _, reset_fn = _import_orchestratore()
             if reset_fn:
                 try:
@@ -254,19 +385,13 @@ def _render_topbar(utente: dict) -> bool:
                     pass
             st.session_state.clear()
             st.rerun()
-            return True
-    return False
 
 
 def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
-    import json as _json
-
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">Analytics</div>', unsafe_allow_html=True)
 
     if not corsi:
         st.info("Carica almeno un corso per vedere le analytics.")
-        st.markdown('</div>', unsafe_allow_html=True)
         return
 
     scope_options = ["Generale"] + [f"Corso: {c['nome']} (ID {c['id']})" for c in corsi]
@@ -305,10 +430,10 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
     # --- KPI cards ---
     col_a, col_b, col_c, col_d = st.columns(4)
     for col, label, val, color in [
-        (col_a, "Studenti unici", dati["studenti"], "#001A4D"),
+        (col_a, "Studenti Iscritti", dati["studenti"], "#001A4D"),
         (col_b, "Punteggio medio", f"{media_globale}/100", colore_media),
         (col_c, "Tasso superamento", f"{tasso_sup}%", colore_tasso),
-        (col_d, "Tentativi quiz", dati["tentativi"], "#001A4D"),
+        (col_d, "% quiz tentati", f"{round(dati['quiz_tentati'] * 100 / dati['quiz'], 1)}%" if dati["quiz"] else "N/A", "#001A4D"),
     ]:
         with col:
             st.markdown(
@@ -321,7 +446,6 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
 
     if not dati["tentativi"]:
         st.info("Nessuna risposta ai quiz registrata ancora.")
-        st.markdown('</div>', unsafe_allow_html=True)
         return
 
     st.markdown("---")
@@ -330,29 +454,101 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
     col1, col2 = st.columns([3, 2])
 
     with col1:
-        righe_media_corso = db.esegui(
-            "SELECT cu.nome AS corso, ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n "
-            "FROM tentativi_quiz t "
-            "JOIN quiz q ON q.id = t.quiz_id "
-            "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-            "WHERE cu.docente_id = ?" + filtro +
-            " GROUP BY cu.id, cu.nome ORDER BY media DESC", p
-        )
-        if righe_media_corso:
-            serie_mc = [{"Corso": r["corso"], "Punteggio medio": r["media"], "Tentativi": r["n"]}
-                        for r in righe_media_corso]
-            fig_mc = px.bar(
-                serie_mc, x="Corso", y="Punteggio medio",
-                title="Punteggio medio per corso",
-                color="Punteggio medio",
-                color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
-                range_color=[0, 100],
-                text="Punteggio medio",
+        if not corso_sel_id:
+            righe_media_corso = db.esegui(
+                "SELECT cu.nome AS corso, ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS n "
+                "FROM tentativi_quiz t "
+                "JOIN quiz q ON q.id = t.quiz_id "
+                "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+                "WHERE cu.docente_id = ?" + filtro +
+                " GROUP BY cu.id, cu.nome ORDER BY media DESC", p
             )
-            fig_mc.update_traces(texttemplate="%{text:.0f}", textposition="outside")
-            fig_mc.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
-                                 yaxis=dict(range=[0, 110]), showlegend=False)
-            st.plotly_chart(fig_mc, use_container_width=True)
+            if righe_media_corso:
+                serie_mc = [{"Corso": r["corso"], "Punteggio medio": r["media"], "Tentativi": r["n"]}
+                            for r in righe_media_corso]
+                fig_mc = px.bar(
+                    serie_mc, x="Corso", y="Punteggio medio",
+                    title="Punteggio medio per corso",
+                    color="Punteggio medio",
+                    color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
+                    range_color=[0, 100],
+                    text="Punteggio medio",
+                )
+                fig_mc.update_traces(texttemplate="%{text:.0f}", textposition="outside")
+                fig_mc.update_layout(height=320, margin=dict(t=50, b=20, l=10, r=10),
+                                     yaxis=dict(range=[0, 110]), showlegend=False)
+                st.plotly_chart(fig_mc, use_container_width=True)
+        else:
+            righe_media_domanda = db.esegui(
+                "SELECT dq.testo, "
+                "ROUND(AVG(CASE WHEN rd.corretta=1 THEN 100.0 ELSE 0.0 END), 1) AS media_pct, "
+                "COUNT(rd.id) AS tot "
+                "FROM risposte_domande rd "
+                "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+                "JOIN quiz q ON dq.quiz_id = q.id "
+                "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
+                "WHERE cu.docente_id = ? AND cu.id = ? "
+                "GROUP BY dq.id ORDER BY media_pct ASC",
+                [docente_id, corso_sel_id],
+            )
+            if righe_media_domanda:
+                serie_mq = [
+                    {
+                        "Domanda": f"D{i + 1}: " + (r["testo"] or "")[:35] + ("…" if len(r["testo"] or "") > 35 else ""),
+                        "% Corrette": r["media_pct"],
+                    }
+                    for i, r in enumerate(righe_media_domanda)
+                ]
+                n_dom = len(serie_mq)
+                bar_width = max(700, n_dom * 90)
+                st.markdown(
+                    "<div style='font-size:0.88rem;font-weight:600;color:#5A6A7E;"
+                    "margin-bottom:2px;font-family:Source Sans 3,sans-serif;'>"
+                    "Punteggio medio per domanda <span style='font-weight:400;'>"
+                    "(% risposte corrette)</span></div>",
+                    unsafe_allow_html=True,
+                )
+                fig_mq = px.bar(
+                    serie_mq, x="Domanda", y="% Corrette",
+                    color="% Corrette",
+                    color_continuous_scale=["#C8102E", "#C5A028", "#1A7F4B"],
+                    range_color=[0, 100],
+                    text="% Corrette",
+                )
+                fig_mq.update_traces(texttemplate="%{text:.0f}%", textposition="outside")
+                fig_mq.update_layout(
+                    height=310,
+                    width=bar_width,
+                    margin=dict(t=16, b=100, l=62, r=16),
+                    yaxis=dict(
+                        range=[0, 115],
+                        title=dict(text="% Corrette", font=dict(size=11, color="#5A6A7E")),
+                        gridcolor="#E3EAF3",
+                        tickfont=dict(size=11, color="#5A6A7E"),
+                    ),
+                    xaxis=dict(
+                        tickangle=-40,
+                        tickfont=dict(size=10, color="#5A6A7E"),
+                        gridcolor="#E3EAF3",
+                    ),
+                    showlegend=False,
+                    paper_bgcolor="#F0F4F8",
+                    plot_bgcolor="#F0F4F8",
+                    font=dict(family="Source Sans 3, sans-serif", color="#5A6A7E"),
+                )
+                fig_mq.update_coloraxes(showscale=False)
+                import plotly.io as _pio
+                import streamlit.components.v1 as _components
+                _fig_html = _pio.to_html(fig_mq, full_html=False, include_plotlyjs="cdn")
+                _html = (
+                    f"<html><body style='margin:0;padding:0;overflow-x:auto;overflow-y:hidden;"
+                    f"background:#F0F4F8;'>"
+                    f"<div style='width:{bar_width}px;'>{_fig_html}</div>"
+                    f"</body></html>"
+                )
+                _components.html(_html, height=330, scrolling=True)
+            else:
+                st.info("Nessuna risposta per domanda registrata.")
 
     with col2:
         righe_dist = db.esegui(
@@ -373,107 +569,41 @@ def _render_analytics(docente_id: int, corsi: List[dict]) -> None:
                                    showlegend=False, bargap=0.05)
             st.plotly_chart(fig_dist, use_container_width=True)
 
-    # --- Riga 2: Argomenti difficili + Domande più sbagliate ---
-    col3, col4 = st.columns(2)
-
-    with col3:
-        righe_gap = db.esegui(
-            "SELECT mc.argomenti_chiave "
-            "FROM risposte_domande rd "
-            "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
-            "JOIN materiali_chunks mc ON dq.chunk_id = mc.id "
-            "JOIN quiz q ON dq.quiz_id = q.id "
-            "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
-            "WHERE cu.docente_id = ? AND rd.corretta = 0 AND mc.argomenti_chiave IS NOT NULL"
-            + filtro, p
-        )
-        conteggio: dict[str, int] = {}
-        for r in righe_gap:
-            try:
-                for a in _json.loads(r["argomenti_chiave"]):
-                    conteggio[a] = conteggio.get(a, 0) + 1
-            except Exception:
-                pass
-        if conteggio:
-            serie_gap = sorted(
-                [{"Argomento": k, "Errori": v} for k, v in conteggio.items()],
-                key=lambda x: x["Errori"], reverse=True,
-            )[:12]
-            fig_gap = px.bar(
-                serie_gap, x="Errori", y="Argomento", orientation="h",
-                title="Argomenti con più errori",
-                color="Errori", color_continuous_scale="Reds",
-            )
-            fig_gap.update_layout(height=400, margin=dict(t=50, b=20, l=10, r=10), showlegend=False)
-            st.plotly_chart(fig_gap, use_container_width=True)
-        else:
-            st.info("Nessun dato sugli argomenti (i quiz potrebbero non avere chunk collegati).")
-
-    with col4:
-        righe_dom = db.esegui(
-            "SELECT dq.testo, "
-            "COUNT(*) AS tot, "
-            "SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END) AS errate, "
-            "ROUND(SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END)*100.0/COUNT(*),0) AS pct_errore "
-            "FROM risposte_domande rd "
-            "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
-            "JOIN quiz q ON dq.quiz_id = q.id "
-            "JOIN corsi_universitari cu ON q.corso_universitario_id = cu.id "
-            "WHERE cu.docente_id = ?" + filtro +
-            " GROUP BY dq.id HAVING errate > 0 ORDER BY pct_errore DESC LIMIT 10", p
-        )
-        if righe_dom:
-            st.markdown("**Domande più difficili (% errori)**")
-            for r in righe_dom:
-                testo = (r["testo"] or "")[:80] + ("…" if len(r["testo"] or "") > 80 else "")
-                pct = int(r["pct_errore"] or 0)
-                color = "#C8102E" if pct >= 70 else ("#C5A028" if pct >= 40 else "#1A7F4B")
-                st.markdown(
-                    f'<div style="border-left:3px solid {color};padding:6px 10px;margin-bottom:6px;'
-                    f'background:#fafafa;border-radius:4px;font-size:0.82rem;">'
-                    f'<span style="color:{color};font-weight:700">{pct}% errori</span> — {testo}</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            st.info("Nessuna domanda con errori registrata.")
-
-    # --- Riga 3: Studenti a rischio ---
-    righe_rischio = db.esegui(
-        "SELECT u.nome || ' ' || u.cognome AS studente, "
-        "ROUND(AVG(t.punteggio),1) AS media, COUNT(t.id) AS tentativi "
-        "FROM tentativi_quiz t "
-        "JOIN quiz q ON q.id = t.quiz_id "
+    # --- Riga 2: Domande più sbagliate ---
+    righe_dom = db.esegui(
+        "SELECT dq.testo, "
+        "COUNT(*) AS tot, "
+        "SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END) AS errate, "
+        "ROUND(SUM(CASE WHEN rd.corretta=0 THEN 1 ELSE 0 END)*100.0/COUNT(*),0) AS pct_errore "
+        "FROM risposte_domande rd "
+        "JOIN domande_quiz dq ON rd.domanda_id = dq.id "
+        "JOIN quiz q ON dq.quiz_id = q.id "
         "JOIN corsi_universitari cu ON cu.id = q.corso_universitario_id "
-        "JOIN users u ON u.id = t.studente_id "
         "WHERE cu.docente_id = ?" + filtro +
-        " GROUP BY t.studente_id HAVING media < 60 ORDER BY media ASC LIMIT 10", p
+        " GROUP BY dq.id HAVING errate > 0 ORDER BY pct_errore DESC LIMIT 10", p
     )
-    if righe_rischio:
-        st.markdown("---")
-        st.markdown("**⚠️ Studenti a rischio** *(punteggio medio < 60)*")
-        for r in righe_rischio:
-            media_s = r["media"] or 0
-            colore_s = "#C8102E" if media_s < 40 else "#C5A028"
-            st.markdown(
-                f'<div style="border-left:3px solid {colore_s};padding:6px 10px;margin-bottom:6px;'
-                f'background:#fafafa;border-radius:4px;font-size:0.85rem;">'
-                f'<b>{r["studente"]}</b> — media <span style="color:{colore_s};font-weight:700">'
-                f'{media_s}/100</span> su {r["tentativi"]} tentativo/i</div>',
-                unsafe_allow_html=True,
+    if righe_dom:
+        st.markdown("**Domande più sbagliate (% errori)**")
+        domande_html = '<div style="max-height:140px;overflow-y:auto;padding-right:6px;">'
+        for r in righe_dom:
+            testo = (r["testo"] or "")[:80] + ("…" if len(r["testo"] or "") > 80 else "")
+            pct = int(r["pct_errore"] or 0)
+            color = "#C8102E" if pct >= 70 else ("#C5A028" if pct >= 40 else "#1A7F4B")
+            domande_html += (
+                f'<div style="border-left:3px solid {color};padding:6px 10px;margin-bottom:6px;'
+                f'background:#fafafa;border-radius:4px;font-size:0.82rem;">'
+                f'<span style="color:{color};font-weight:700">{pct}% errori</span> &mdash; {testo}</div>'
             )
+        domande_html += '</div>'
+        st.markdown(domande_html, unsafe_allow_html=True)
+    else:
+        st.info("Nessuna domanda con errori registrata.")
 
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
+
+@st.dialog("Nuovo corso", width="large")
 def _dialog_crea_corso(docente_id: int):
-    header_col, close_col = st.columns([10, 1])
-    with header_col:
-        st.markdown("#### Nuovo corso")
-    with close_col:
-        if st.button("X", key="close_create_course", help="Chiudi"):
-            st.session_state["_doc_show_create"] = False
-            st.rerun()
-
     tutti_cdl = _get_tutti_cdl()
     cdl_nomi = [c["nome"] for c in tutti_cdl]
 
@@ -505,9 +635,9 @@ def _dialog_crea_corso(docente_id: int):
         )
         cdl_sel_ids = [c["id"] for c in tutti_cdl if c["nome"] in cdl_sel]
         _salva_cdl_corso(corso_id, cdl_sel_ids)
-        st.session_state["_doc_show_create"] = False
         st.session_state["_doc_create_feedback"] = "Corso salvato in bozza."
         st.session_state["_doc_refresh"] = True
+        st.rerun()
 
 
 def _elimina_corso_completo(corso_id: int) -> None:
@@ -571,20 +701,18 @@ def _elimina_corso_completo(corso_id: int) -> None:
     db.elimina("corsi_universitari", {"id": corso_id})
 
 
+@st.dialog("Elimina corso", width="small")
 def _dialog_elimina_corso(corso_id: int):
-    st.warning("Eliminerai definitivamente il corso e i relativi materiali.")
+    st.warning("Eliminerai definitivamente il corso e i relativi materiali. L'operazione non è reversibile.")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Annulla"):
-            st.session_state["_doc_delete_confirm"] = None
+        if st.button("Annulla", use_container_width=True):
+            st.rerun()
     with c2:
-        if st.button("Elimina", type="primary"):
+        if st.button("Elimina", type="primary", use_container_width=True):
             try:
                 _elimina_corso_completo(corso_id)
                 st.session_state["_doc_refresh"] = True
-                st.session_state["_corso_doc_sel"] = None
-                st.session_state["_doc_delete_confirm"] = None
-                st.success("Corso eliminato.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Impossibile eliminare: {e}")
@@ -592,12 +720,13 @@ def _dialog_elimina_corso(corso_id: int):
 
 def _elimina_materiale(materiale_id: int, s3_key: str | None) -> None:
     """Elimina un materiale didattico, i suoi chunk e il file fisico dal disco."""
-    # 1. Elimina i chunk associati
-    try:
-        db.elimina("materiali_chunks", {"materiale_id": materiale_id})
-    except Exception:
-        pass
-    # 2. Elimina il record dal DB
+    # 1. Rimuovi riferimenti in piano_materiali_utilizzati (ON DELETE RESTRICT sui chunk)
+    chunks = db.esegui("SELECT id FROM materiali_chunks WHERE materiale_id = ?", [materiale_id])
+    chunk_ids = [c["id"] for c in chunks]
+    if chunk_ids:
+        ph = ",".join("?" * len(chunk_ids))
+        db.esegui(f"DELETE FROM piano_materiali_utilizzati WHERE chunk_id IN ({ph})", chunk_ids)
+    # 2. Elimina il record dal DB (CASCADE elimina automaticamente i chunk)
     db.elimina("materiali_didattici", {"id": materiale_id})
     # 3. Elimina il file fisico (se presente)
     if s3_key:
@@ -879,10 +1008,18 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str,
 
     # — Fase 1: Teoria —
     _fasi = "Fase 1/2" if not _senza_quiz else "Fase 1/1"
-    _label = f"{_fasi} — Generazione contenuti teorici"
-    if forza_keyword:
-        _label += " (ricerca per parole chiave)"
-    _label += "…"
+    _label = f"{_fasi} — Generazione contenuti teorici…"
+    # Per la generazione docente non serve RAG semantico: carichiamo direttamente
+    # tutti i chunk del corso da SQLite (fonte di verità), bypassando ChromaDB.
+    chunks_corso = db.trova_tutti(
+        "materiali_chunks",
+        {"corso_universitario_id": corso["id"]},
+        ordine="indice_chunk ASC",
+    )
+    if not chunks_corso:
+        st.error("Nessun materiale didattico trovato per questo corso. Carica prima un documento nella tab 'Materiali'.")
+        return
+
     with st.spinner(_label):
         agente = crea_agente_content_gen()
         stato_t = esegui_generazione(
@@ -892,7 +1029,7 @@ def _genera_contenuto_corso(corso: dict, docente_id: int, prompt: str, key: str,
             docente_id=docente_id,
             is_corso_docente=True,
             istruzioni_utente=prompt or "",
-            forza_keyword=forza_keyword,
+            chunks_precaricati=chunks_corso,
         )
 
     if stato_t.get("errore"):
@@ -1266,20 +1403,15 @@ def _render_contenuti_ai(corso: dict):
 
 
 
+@st.dialog("Dettaglio Corso", width="large")
 def _render_dettaglio_corso(corso: dict, docente_id: int):
     stato_lbl, stato_class = _stato_corso(corso)
-    title_col, close_col = st.columns([10, 1])
-    with title_col:
-        st.markdown(
-            f"<div style='font-family:Playfair Display,serif; font-size:1.2rem; font-weight:700; color:#001A4D; "
-            f"margin:12px 0 4px 0;'>✏️ {corso['nome']} "
-            f"<span class='status-pill {stato_class}' style='font-size:0.72rem; vertical-align:middle;'>{stato_lbl}</span></div>",
-            unsafe_allow_html=True,
-        )
-    with close_col:
-        if st.button("X", key=f"close_course_detail_{corso['id']}", help="Chiudi"):
-            st.session_state["_corso_doc_sel"] = None
-            st.rerun()
+    st.markdown(
+        f"<div style='font-family:Playfair Display,serif; font-size:1.2rem; font-weight:700; color:#001A4D; "
+        f"margin:0 0 8px 0;'>{_esc(corso['nome'])} "
+        f"<span class='status-pill {stato_class}' style='font-size:0.72rem; vertical-align:middle;'>{stato_lbl}</span></div>",
+        unsafe_allow_html=True,
+    )
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso", "Contenuto Lezione", "Modifica Panoramica"])
 
@@ -1362,9 +1494,12 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
                 st.success("Panoramica aggiornata con successo.")
                 st.session_state["_doc_refresh"] = True
 
+    st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:16px 0 8px;'>", unsafe_allow_html=True)
+    if st.button("Chiudi", key=f"close_detail_{corso['id']}", use_container_width=True):
+        st.rerun()
+
 
 def _render_corsi(docente_id: int):
-    st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown('<div class="section-title">I tuoi corsi</div>', unsafe_allow_html=True)
     st.markdown('<div class="section-sub">Gestisci bozze, pubblicazioni e materiali.</div>', unsafe_allow_html=True)
 
@@ -1373,14 +1508,11 @@ def _render_corsi(docente_id: int):
         st.success(feedback)
 
     if st.button("Crea nuovo corso", type="primary"):
-        st.session_state["_doc_show_create"] = True
-    if st.session_state.get("_doc_show_create"):
         _dialog_crea_corso(docente_id)
 
     corsi = _get_corsi_docente(docente_id)
     if not corsi:
         st.info("Nessun corso presente. Crea il primo corso per iniziare.")
-        st.markdown("</div>", unsafe_allow_html=True)
         return
 
     for corso in corsi:
@@ -1406,6 +1538,7 @@ def _render_corsi(docente_id: int):
             with c_a:
                 if st.button("Apri", key=f"apri_{corso['id']}"):
                     st.session_state["_corso_doc_sel"] = corso["id"]
+                    _render_dettaglio_corso(corso, docente_id)
             with c_b:
                 if corso.get("attivo"):
                     if st.button("Disattiva", key=f"dis_{corso['id']}"):
@@ -1419,21 +1552,8 @@ def _render_corsi(docente_id: int):
                         st.rerun()
             with c_c:
                 if st.button("Elimina", key=f"del_{corso['id']}"):
-                    st.session_state["_doc_delete_confirm"] = corso["id"]
+                    _dialog_elimina_corso(corso["id"])
         st.markdown("<hr style='border:none;border-top:1px solid #E8EEF6;margin:6px 0'>", unsafe_allow_html=True)
-
-    if st.session_state.get("_doc_delete_confirm"):
-        _dialog_elimina_corso(st.session_state["_doc_delete_confirm"])
-
-    sel_id = st.session_state.get("_corso_doc_sel")
-    if sel_id:
-        corso_sel = next((c for c in corsi if c["id"] == sel_id), None)
-        if corso_sel:
-            _render_dettaglio_corso(corso_sel, docente_id)
-    else:
-        st.caption("Seleziona un corso per caricare materiale didattico o generare contenuti.")
-
-    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str | None):
@@ -1487,20 +1607,10 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
     chat_placeholder = st.empty()
     chat_placeholder.markdown(get_chat_html(), unsafe_allow_html=True)
 
-    # Suggerimenti rapidi
-    suggerimenti = [("📄", "Genera una lezione"), ("✅", "Crea un quiz approvato"), ("🧠", "Crea flashcard")]
-    messaggio_da_suggerimento = None
-    cols = st.columns(len(suggerimenti))
-    for idx, (icona, testo) in enumerate(suggerimenti):
-        with cols[idx]:
-            if st.button(f"{icona} {testo}", key=f"sug_doc_{idx}"):
-                target = corso_nome or "il tuo corso"
-                messaggio_da_suggerimento = f"{testo} per {target}"
-
     # Input chat nativo
     user_input = st.chat_input("Chiedi a Lea (docente)...", key="lea_doc_chat_input")
 
-    messaggio_finale = user_input or messaggio_da_suggerimento
+    messaggio_finale = user_input
     if messaggio_finale:
         st.session_state["chat_history_doc"].append({"role": "user", "content": messaggio_finale})
         
@@ -1551,16 +1661,90 @@ def _render_chatbot_docente(utente: dict, corso_id: int | None, corso_nome: str 
         st.rerun()
 
 
+@st.dialog("Federico360 — LearnAI Platform", width="small",dismissible=False)
+def _popup_accettazione():
+    """Popup di accettazione termini AI mostrato al primo accesso dopo il login."""
+    st.markdown("""
+    <style>
+    /* Hide ALL possible close button selectors */
+    button[data-testid="stBaseButton-headerNoPadding"],
+    div[data-testid="stModal"] button[aria-label="Close"],
+    div[data-testid="stModal"] [data-testid="stModalCloseButton"],
+    div[data-testid="stModal"] header button,
+    div[data-testid="stModal"] [data-testid="stHeader"] button,
+    div[data-testid="stModal"] > div > div > div > button {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        overflow: hidden !important;
+        position: absolute !important;
+        pointer-events: none !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style="text-align:center; padding: 8px 0 4px;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:20px;">
+            <span style="font-family:'Playfair Display','Source Sans 3',serif; font-size:1.3rem;
+                         font-weight:700; color:#001A4D;">
+                Federico<span style="color:#C5A028;">360</span>
+            </span>
+            <span style="color:#C8D5E3; font-size:1.4rem; font-weight:300;">|</span>
+            <span style="font-family:'Source Sans 3',sans-serif; font-size:1.05rem; font-weight:600; color:#5A6A7E;">
+                LearnAI Platform
+            </span>
+        </div>
+        <h3 style="color:#001A4D; font-size:1.12rem; font-weight:700; margin:0 0 18px 0;
+                    font-family:'Source Sans 3',sans-serif;">
+            Benvenuto nella piattaforma LearnAI
+        </h3>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto 12px; font-family:'Source Sans 3',sans-serif;">
+            Stai interagendo con un sistema basato sull'<strong style="color:#001A4D;">Intelligenza
+            Artificiale</strong>, pertanto ricorda che qualsiasi contenuto generato o analizzato
+            sar&agrave; prodotto dall'AI.
+        </p>
+        <p style="color:#5A6A7E; font-size:0.88rem; line-height:1.75; max-width:440px;
+                  margin:0 auto; font-family:'Source Sans 3',sans-serif;">
+            Ti ricordiamo che la piattaforma Federico360 deve essere utilizzata nel rispetto dei
+            <strong style="color:#001A4D;">&ldquo;Termini e Condizioni&rdquo;</strong>. Il trattamento
+            dei dati personali sar&agrave; effettuato in conformit&agrave; con la nostra
+            <strong style="color:#001A4D;">Privacy Policy</strong>.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+    if st.button("Accetta", type="primary", use_container_width=True, key="btn_accetta_popup"):
+        st.session_state["_accettazione_accettata"] = True
+        st.rerun()
+
+
 def mostra_homepage_docente():
     utente = st.session_state.user
     docente_id = st.session_state.current_user_id
-    if _render_topbar(utente):
-        return
-    col_main, col_chat = st.columns([4, 2.5], gap="medium")
+    if not st.session_state.get("_accettazione_accettata"):
+        _popup_accettazione()
+
+    st.markdown(_CSS, unsafe_allow_html=True)
+    _render_header(utente)
+
+    col_side, col_main, col_chat = st.columns([1, 5, 2.5], gap="medium")
     corsi = _get_corsi_docente(docente_id)
+
+    with col_side:
+        _render_sidebar_nav(utente)
+
     with col_main:
-        _render_analytics(docente_id, corsi)
-        _render_corsi(docente_id)
+        sezione = st.session_state.get("_doc_sezione", "analytics")
+        if sezione == "analytics":
+            _render_analytics(docente_id, corsi)
+        else:
+            _render_corsi(docente_id)
+
     with col_chat:
         corso_nome = None
         sel_id = st.session_state.get("_corso_doc_sel")
@@ -1573,6 +1757,9 @@ def mostra_homepage_docente():
             sel_id = st.session_state.get("_analytics_corso_id")
             corso_nome = st.session_state.get("_analytics_corso_nome")
         _render_chatbot_docente(utente, sel_id, corso_nome)
+
+    _render_footer()
+
     if st.session_state.get("_doc_refresh"):
         st.session_state["_doc_refresh"] = False
         st.rerun()
