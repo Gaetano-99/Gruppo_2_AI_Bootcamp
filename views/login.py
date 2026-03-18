@@ -32,7 +32,7 @@ ACCESSIBILITY_OPTIONS = [
 ]
 
 
-@st.dialog("Impostazioni di accessibilità")
+@st.dialog( title = "Impostazioni di accessibilità",width = "medium")
 def _dialog_accessibilita():
     """Dialog per scegliere la modalità di visualizzazione."""
     corrente = st.session_state.get("accessibilita", "Default")
@@ -181,15 +181,20 @@ _CSS = """
 .demo-box code   { color: #2e7d32; background: #e8f5e9; border-radius: 4px; padding: 1px 5px; }
 
 /* Bottone accessibilità */
+.btn-accessibilita .stButton {
+    display: flex !important;
+    justify-content: flex-end !important;
+}
 .btn-accessibilita button {
     background: transparent !important;
     color: var(--muted) !important;
     border: none !important;
     border-radius: 0 !important;
-    padding: 4px 0 !important;
+    padding: 4px 8px !important;
     font-size: .85rem !important;
     font-weight: 400 !important;
-    width: 100% !important;
+    width: auto !important;
+    min-width: 0 !important;
     box-shadow: none !important;
     transition: color .2s !important;
 }
@@ -343,7 +348,15 @@ def mostra_login():
         col1,col2,col3 = st.columns([1,4,1])
         with col2:
             st.image("views\logo\LOGO_FEDERICO.png",width=1200)            #png da qui
-        
+
+        # Bottone accessibilità sotto il logo (allineato a destra)
+        _acc_spacer, _acc_col = st.columns([4, 1])
+        with _acc_col:
+            if st.button(icon="♿", label="Accessibilità", key="btn_accessibilita", help="Impostazioni di accessibilità"):
+                _dialog_accessibilita()
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
         # Errore login
         if st.session_state.get("_login_errore"):
             st.markdown(
@@ -358,6 +371,9 @@ def mostra_login():
             placeholder="Inserisci la mail",
             key="login_email",
         )
+
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
         password = st.text_input(
             "Password",
             type="password",
@@ -365,10 +381,14 @@ def mostra_login():
             key="login_password",
         )
 
+        st.markdown("<div style='height:20px'></div>", unsafe_allow_html=True)
+
         accetta_termini = st.checkbox(
             "Accetto i [Termini e Condizioni](http://localhost:8502/pages/termini_e_condizioni.html) e la [Privacy Policy](http://localhost:8502/pages/privacy_policy.html)",
             key="accetta_termini",
         )
+
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
         if st.button("Accedi", use_container_width=True):
             if not accetta_termini:
@@ -396,11 +416,6 @@ def mostra_login():
                 }
                 st.session_state.pop("_login_errore", None)
                 st.rerun()
-
-        st.markdown('<div class="btn-accessibilita" style="margin-top:10px;">', unsafe_allow_html=True)
-        if st.button("Accessibilità", key="btn_accessibilita", help="Impostazioni di accessibilità", use_container_width=True):
-            _dialog_accessibilita()
-        st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("""
 <div style="text-align:center;margin-top:14px;">
