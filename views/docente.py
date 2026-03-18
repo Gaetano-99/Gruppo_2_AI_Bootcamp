@@ -1414,44 +1414,18 @@ def _render_dettaglio_corso(corso: dict, docente_id: int):
         unsafe_allow_html=True,
     )
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["Panoramica", "Materiali", "Contenuti AI", "Analytics corso", "Contenuto Lezione", "Modifica Panoramica"])
+    tab_mat, tab_ai, tab_lezione, tab_mod = st.tabs(["Materiali", "Contenuti AI", "Contenuto Lezione", "Modifica Panoramica"])
 
-    with tab1:
-        tutti_cdl = _get_tutti_cdl()
-        cdl_correnti_ids = _get_cdl_corso(corso["id"])
-        cdl_correnti_nomi = [c["nome"] for c in tutti_cdl if c["id"] in cdl_correnti_ids]
-        cdl_label = ", ".join(cdl_correnti_nomi) if cdl_correnti_nomi else "—"
-
-        st.markdown(
-            f"""
-            <div class='tab-note'>
-            <strong>Descrizione:</strong> {corso.get('descrizione') or '—'}<br>
-            <strong>CFU:</strong> {corso.get('cfu') or '—'}<br>
-            <strong>Anno:</strong> {corso.get('anno_di_corso') or '—'} · Livello: {corso.get('livello') or '—'} · Semestre: {corso.get('semestre') or '—'}<br>
-            <strong>Corsi di Laurea:</strong> {cdl_label}<br>
-            <strong>Studenti iscritti:</strong> {_conta_studenti_corso(corso['id'])}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with tab2:
+    with tab_mat:
         _render_materiali(corso, docente_id)
 
-    with tab3:
+    with tab_ai:
         _render_contenuti_ai(corso)
 
-    with tab4:
-        dati = _metrics(docente_id, corso["id"])
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Studenti unici", dati["studenti"])
-        col2.metric("Quiz pubblicati", dati["quiz"])
-        col3.metric("Tentativi quiz", dati["tentativi"])
-        st.caption("Drill-down per capitolo/argomento verrà aggiunto dopo la raccolta dati.")
-
-    with tab5:
+    with tab_lezione:
         _render_anteprima_lezione(corso["id"])
 
-    with tab6:
+    with tab_mod:
         is_pubblicato = bool(corso.get("attivo"))
         if is_pubblicato:
             st.info("Il corso è pubblicato. Le modifiche saranno visibili immediatamente agli studenti iscritti.")

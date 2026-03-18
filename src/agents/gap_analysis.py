@@ -172,17 +172,40 @@ Ha sbagliato {n_errate} domanda/e:
 Argomenti chiave delle sezioni con errori: {', '.join(argomenti) if argomenti else 'Non specificati'}
 Sezioni del materiale da rivedere: {', '.join(sezioni) if sezioni else 'Non disponibili'}"""
 
+    # Recupera i titoli delle sezioni disponibili nel corso per vincolare i suggerimenti
+    sezioni_corso: list[str] = []
+    if tentativo:
+        quiz_row = db.trova_uno("quiz", {"id": tentativo.get("quiz_id")})
+        if quiz_row and quiz_row.get("corso_id"):
+            rows_sez = db.esegui(
+                "SELECT DISTINCT titolo_sezione FROM materiali_chunks "
+                "WHERE corso_id = ? AND titolo_sezione IS NOT NULL",
+                [quiz_row["corso_id"]],
+            )
+            sezioni_corso = [r["titolo_sezione"] for r in rows_sez if r.get("titolo_sezione")]
+
+    sezioni_disponibili_str = (
+        "Sezioni disponibili nel materiale del corso: " + ", ".join(sezioni_corso)
+        if sezioni_corso
+        else "Non sono disponibili dettagli sulle sezioni del corso."
+    )
+
     istruzioni = (
         "Sei Lea, il tutor di LearnAI. Analizza i risultati del quiz dello studente.\n"
         "IMPORTANTE: Lo studente NON può rispondere direttamente a questa analisi, "
         "quindi NON fare domande e NON chiedere conferme.\n"
+        f"{sezioni_disponibili_str}\n"
         "Struttura la risposta così:\n"
         "1. Elenca in modo chiaro le aree di miglioramento (argomenti non padroneggiati).\n"
         "2. Per ogni area, spiega brevemente cosa rivedere e perché è importante.\n"
         "3. Se ci sono sezioni specifiche del materiale, citale.\n"
         "4. Suggerisci 2-3 domande concrete che lo studente può fare a Lea in chat "
-        "per approfondire le lacune (es. 'Puoi spiegarmi meglio...', "
-        "'Fammi un riassunto di...', 'Generami un nuovo quiz su...').\n"
+        "per approfondire le lacune. IMPORTANTE: le domande devono essere basate SOLO "
+        "sugli argomenti e le sezioni effettivamente presenti nel materiale del corso. "
+        "NON suggerire domande su dati, statistiche o fonti specifiche che non sono "
+        "nel materiale. Usa formule come 'Puoi spiegarmi meglio [argomento dalla sezione X]...', "
+        "'Fammi un riassunto di [sezione del materiale]...', "
+        "'Generami un nuovo quiz su [argomento del corso]...'.\n"
         "5. Concludi con un breve incoraggiamento.\n"
         "Usa un tono empatico e motivante. Usa elenchi puntati. Massimo 250 parole."
     )
