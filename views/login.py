@@ -20,30 +20,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
-
-
-# ---------------------------------------------------------------------------
-# Accessibilità
-# ---------------------------------------------------------------------------
-ACCESSIBILITY_OPTIONS = [
-    "Default",
-    "Contrasto elevato (ipovedenti)",
-    "Modalità daltonici",
-]
-
-
-@st.dialog( title = "Impostazioni di accessibilità",width = "medium")
-def _dialog_accessibilita():
-    """Dialog per scegliere la modalità di visualizzazione."""
-    corrente = st.session_state.get("accessibilita", "Default")
-    scelta = st.selectbox(
-        "Modalità di visualizzazione",
-        ACCESSIBILITY_OPTIONS,
-        index=ACCESSIBILITY_OPTIONS.index(corrente),
-    )
-    if st.button("Conferma", use_container_width=True):
-        st.session_state["accessibilita"] = scelta
-        st.rerun()
+from views.accessibilita import dialog_accessibilita, get_css_accessibilita
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +233,10 @@ def _esegui_login(email: str, password: str) -> tuple:
 # ---------------------------------------------------------------------------
 def mostra_login():
     st.markdown(_CSS, unsafe_allow_html=True)
+    # Inietta override accessibilita (se selezionata)
+    _css_acc = get_css_accessibilita()
+    if _css_acc:
+        st.markdown(_css_acc, unsafe_allow_html=True)
 
     logo_b64    = _img_to_b64(LOGO_PATH,    _LOGO_B64_EMBEDDED)
     sigillo_b64 = _img_to_b64(SIGILLO_PATH, _SIGILLO_B64_EMBEDDED)
@@ -353,7 +334,7 @@ def mostra_login():
         _acc_spacer, _acc_col = st.columns([4, 1])
         with _acc_col:
             if st.button(icon="♿", label="Accessibilità", key="btn_accessibilita", help="Impostazioni di accessibilità"):
-                _dialog_accessibilita()
+                dialog_accessibilita()
 
         st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
 

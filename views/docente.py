@@ -14,6 +14,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+from views.accessibilita import get_css_accessibilita
 
 
 def _import_orchestratore():
@@ -1730,6 +1731,9 @@ def mostra_homepage_docente():
         _popup_accettazione()
 
     st.markdown(_CSS, unsafe_allow_html=True)
+    _css_acc = get_css_accessibilita()
+    if _css_acc:
+        st.markdown(_css_acc, unsafe_allow_html=True)
     _render_header(utente)
 
     col_side, col_main, col_chat = st.columns([1, 5, 2.5], gap="medium")

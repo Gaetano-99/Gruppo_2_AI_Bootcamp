@@ -30,6 +30,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from platform_sdk.database import db
+from views.accessibilita import get_css_accessibilita
 
 
 def _get_logo_base64() -> str:
@@ -3231,6 +3232,9 @@ def _popup_accettazione():
 def mostra_homepage_studente():
     """Renderizza l'intera homepage studente."""
     st.markdown(_CSS, unsafe_allow_html=True)
+    _css_acc = get_css_accessibilita()
+    if _css_acc:
+        st.markdown(_css_acc, unsafe_allow_html=True)
 
     if not st.session_state.get("_accettazione_accettata"):
         _popup_accettazione()
