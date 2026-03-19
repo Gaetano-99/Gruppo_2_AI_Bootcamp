@@ -3368,12 +3368,6 @@ def mostra_homepage_studente():
             <div class="section-sub">{sub_label}</div>
             """, unsafe_allow_html=True)
 
-            if corso_sel_id:
-                if st.button("← Torna al corso", key="btn_back_corso"):
-                    st.session_state["_view_mode"] = "corso"
-                    st.session_state["_piano_sel"] = None
-                    st.rerun()
-
             col_mat_piano, col_del_piano = st.columns(2)
             with col_mat_piano:
                 if corso_sel_id:
