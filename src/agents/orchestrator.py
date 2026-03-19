@@ -579,16 +579,16 @@ def tool_leggi_contesto() -> str:
             try:
                 piani_studente = db.esegui(
                     "SELECT id, titolo, stato FROM piani_personalizzati "
-                    "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                    "WHERE studente_id = ? AND is_corso_docente = 0 ORDER BY id DESC",
                     [studente_id],
                 )
                 if piani_studente:
                     elenco_piani = "\n".join(
-                        f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                        f"  - Piano ID {p['id']}: '{p['titolo']}' (stato: {p['stato']})"
                         for p in piani_studente
                     )
                     parti.append(
-                        f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                        f"Piani personalizzati dello studente ({len(piani_studente)}):\n{elenco_piani}"
                     )
                 else:
                     parti.append(
@@ -807,16 +807,16 @@ def tool_leggi_contesto() -> str:
         try:
             piani_studente = db.esegui(
                 "SELECT id, titolo, stato FROM piani_personalizzati "
-                "WHERE studente_id = ? AND stato = 'attivo' ORDER BY id DESC",
+                "WHERE studente_id = ? AND is_corso_docente = 0 ORDER BY id DESC",
                 [studente_id],
             )
             if piani_studente:
                 elenco_piani = "\n".join(
-                    f"  - Piano ID {p['id']}: '{p['titolo']}'"
+                    f"  - Piano ID {p['id']}: '{p['titolo']}' (stato: {p['stato']})"
                     for p in piani_studente
                 )
                 parti.append(
-                    f"Piani personalizzati dello studente ({len(piani_studente)} attivi):\n{elenco_piani}"
+                    f"Piani personalizzati dello studente ({len(piani_studente)}):\n{elenco_piani}"
                 )
             else:
                 parti.append(
@@ -2726,7 +2726,25 @@ def chat_con_orchestratore(
         # Se siamo nella Home (nessun corso/piano selezionato), segnalalo
         # esplicitamente per evitare che l'agente usi contesto stantio.
         if not _ctx_parts and contesto.get("tipo_vista") == "home":
-            _ctx_parts.append("Home — nessun corso o piano selezionato")
+            _ctx_parts.append("Home — nessun corso o piano selezionato al momento")
+        # Se il messaggio riguarda piani/piano di studio, inietta l'elenco
+        # nel prefisso così l'agente li conosce senza dover chiamare tool.
+        _msg_lower = messaggio_utente.lower()
+        if any(kw in _msg_lower for kw in ("piano", "piani", "piano di studi")):
+            try:
+                _piani_ctx = db.esegui(
+                    "SELECT id, titolo FROM piani_personalizzati "
+                    "WHERE studente_id = ? AND is_corso_docente = 0 "
+                    "ORDER BY id DESC",
+                    [_STUDENTE_ID_CORRENTE],
+                )
+                if _piani_ctx:
+                    _nomi = ", ".join(f"'{p['titolo']}'" for p in _piani_ctx)
+                    _ctx_parts.append(
+                        f"Piani personalizzati dello studente ({len(_piani_ctx)}): {_nomi}"
+                    )
+            except Exception:
+                pass
         if _ctx_parts:
             messaggio_utente = f"[CONTESTO NAVIGAZIONE: {', '.join(_ctx_parts)}]\n{messaggio_utente}"
 

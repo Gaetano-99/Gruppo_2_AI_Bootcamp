@@ -143,20 +143,6 @@ _CSS = """
     transform: translateY(-1px) !important;
 }
 
-/* Demo box */
-.demo-box {
-    background: #f8fafc;
-    border: 1px dashed var(--border);
-    border-radius: 10px;
-    padding: 13px 16px;
-    font-size: .82rem;
-    color: var(--muted);
-    margin-top: 18px;
-    line-height: 1.75;
-}
-.demo-box strong { color: var(--navy); }
-.demo-box code   { color: #2e7d32; background: #e8f5e9; border-radius: 4px; padding: 1px 5px; }
-
 /* Bottone accessibilità */
 .btn-accessibilita .stButton {
     display: flex !important;
@@ -369,7 +355,7 @@ def mostra_login():
             key="accetta_termini",
         )
 
-        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
 
         if st.button("Accedi", use_container_width=True):
             if not accetta_termini:
@@ -401,13 +387,6 @@ def mostra_login():
         st.markdown("""
 <div style="text-align:center;margin-top:14px;">
   <a href="http://localhost:8502/index.html" target="_top" style="font-size:.85rem;color:#7a849a;text-decoration:none;">← Torna indietro</a>
-</div>
-<div class="demo-box">
-  <strong>Account demo disponibili:</strong><br>
-  👩‍🎓 Studente: <code>studente@studenti.unina.it</code><br>
-  👩‍🎓 Studente: <code>g.bianchi@studenti.unina.it</code><br>
-  👨‍🏫 Docente: &nbsp;<code>docente@unina.it</code><br>
-  🔑 Password: <code>test1234</code>
 </div>
 """, unsafe_allow_html=True)
 

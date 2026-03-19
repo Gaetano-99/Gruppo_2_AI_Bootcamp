@@ -201,3 +201,13 @@
 | Nome | Email | Password |
 |------|-------|----------|
 | Anna Verdi | `a.verdi@unina.it` | admin123 |
+
+---
+
+## ACCOUNT DEMO (già presenti nella pagina di login)
+
+| Ruolo | Email | Password |
+|-------|-------|----------|
+| Studente | `studente@studenti.unina.it` | test1234 |
+| Studente | `g.bianchi@studenti.unina.it` | test1234 |
+| Docente | `docente@unina.it` | test1234 |
